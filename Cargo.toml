@@ -1,0 +1,14 @@
+[package]
+name = "postflop_solver"
+version = "0.1.0"
+authors = ["Wataru Inariba"]
+edition = "2021"
+license = "AGPL-3.0-or-later"
+
+[dependencies]
+ndarray = { version = "0.15.4", features = ["rayon"] }
+rayon = "1.5.1"
+
+[profile.release]
+lto = "thin"
+panic = "abort"
