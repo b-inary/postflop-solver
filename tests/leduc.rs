@@ -318,7 +318,7 @@ impl GameNode for LeducNode {
 }
 
 #[test]
-fn test_leduc() {
+fn leduc() {
     rayon::ThreadPoolBuilder::new()
         .num_threads(1)
         .build_global()

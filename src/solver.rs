@@ -67,7 +67,7 @@ pub fn solve<T: Game>(
                 print!("\riteration: {} / {}", t + 1, num_iterations);
             }
             stdout().flush().unwrap();
-        } else if (t % 10) == 0 {
+        } else if (t + 1) % 10 == 0 {
             let exploitability = compute_exploitability(game, false);
             if exploitability <= target_exploitability {
                 break;

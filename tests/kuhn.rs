@@ -208,7 +208,7 @@ impl GameNode for KuhnNode {
 }
 
 #[test]
-fn test_kuhn() {
+fn kuhn() {
     rayon::ThreadPoolBuilder::new()
         .num_threads(1)
         .build_global()

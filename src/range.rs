@@ -1,0 +1,451 @@
+use once_cell::sync::Lazy;
+use regex::Regex;
+use std::str::FromStr;
+
+#[derive(Debug, PartialEq)]
+pub struct Range {
+    data: [[f32; 13]; 13],
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Suitedness {
+    Suited,
+    Offsuit,
+    Both,
+}
+
+const COMBO_STR: &str = r"(?:[AKQJT2-9]{2}[os]?)";
+const PROB_STR: &str = r"(?:(?:[01](\.\d*)?)|(?:\.\d+))";
+
+static RANGE_REGEX: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(&format!(
+        r"^(?P<range>{COMBO_STR}(?:\+|(?:-{COMBO_STR}))?)(?::(?P<prob>{PROB_STR}))?$"
+    ))
+    .unwrap()
+});
+
+static TRIM_REGEX: Lazy<Regex> = Lazy::new(|| Regex::new(r"\s*([-:,])\s*").unwrap());
+
+fn char_to_rank(c: char) -> usize {
+    match c {
+        'A' => 12,
+        'K' => 11,
+        'Q' => 10,
+        'J' => 9,
+        'T' => 8,
+        '2'..='9' => c as usize - '2' as usize,
+        _ => panic!("char_to_rank: invalid input: {c}"),
+    }
+}
+
+fn rank_to_char(rank: usize) -> char {
+    match rank {
+        12 => 'A',
+        11 => 'K',
+        10 => 'Q',
+        9 => 'J',
+        8 => 'T',
+        0..=7 => (rank as u8 + '2' as u8) as char,
+        _ => panic!("rank_to_char: invalid input: {rank}"),
+    }
+}
+
+fn parse_singleton(combo: &str) -> Result<(usize, usize, Suitedness), String> {
+    let mut chars = combo.chars();
+    let rank1 = char_to_rank(chars.next().unwrap());
+    let rank2 = char_to_rank(chars.next().unwrap());
+    let suit = chars.next().map_or(Suitedness::Both, |c| match c {
+        's' => Suitedness::Suited,
+        'o' => Suitedness::Offsuit,
+        _ => panic!("parse_singleton: invalid suitedness: {combo}"),
+    });
+    if rank1 < rank2 {
+        return Err(format!(
+            "First rank must be equal or higher than second rank: {combo}"
+        ));
+    }
+    if rank1 == rank2 && suit != Suitedness::Both {
+        return Err(format!("Pair with suitedness is not allowed: {combo}"));
+    }
+    Ok((rank1, rank2, suit))
+}
+
+impl Range {
+    pub fn get_data(&self) -> &[[f32; 13]; 13] {
+        &self.data
+    }
+
+    fn update_with_singleton(&mut self, combo: &str, prob: f32) -> Result<(), String> {
+        let (rank1, rank2, suit) = parse_singleton(combo)?;
+        self.update(rank1, rank2, suit, prob);
+        Ok(())
+    }
+
+    fn update_with_plus_range(&mut self, range: &str, prob: f32) -> Result<(), String> {
+        debug_assert!(range.ends_with('+'));
+        let lowest_combo = &range[..range.len() - 1];
+        let (rank1, rank2, suit) = parse_singleton(lowest_combo)?;
+        let gap = rank1 - rank2;
+        if gap <= 1 {
+            // pair and connector (e.g.,  88+, T9s+)
+            for i in rank1..13 {
+                self.update(i, i - gap, suit, prob);
+            }
+        } else {
+            // otherwise (e.g., ATo+)
+            for i in rank2..rank1 {
+                self.update(rank1, i, suit, prob);
+            }
+        }
+        Ok(())
+    }
+
+    fn update_with_dash_range(&mut self, range: &str, prob: f32) -> Result<(), String> {
+        let combo_pair = range.split('-').collect::<Vec<_>>();
+        debug_assert!(combo_pair.len() == 2);
+        let (rank11, rank12, suit1) = parse_singleton(&combo_pair[0])?;
+        let (rank21, rank22, suit2) = parse_singleton(&combo_pair[1])?;
+        let gap1 = rank11 - rank12;
+        let gap2 = rank21 - rank22;
+        if suit1 != suit2 {
+            Err(format!("Suitedness does not match: {range}"))
+        } else if gap1 == gap2 && rank11 > rank21 {
+            // same gap (e.g., 88-55, KQo-JTo)
+            for i in rank21..=rank11 {
+                self.update(i, i - gap1, suit1, prob);
+            }
+            Ok(())
+        } else if rank11 == rank21 && rank12 > rank22 {
+            // same first rank (e.g., A5s-A2s)
+            for i in rank22..=rank12 {
+                self.update(rank11, i, suit1, prob);
+            }
+            Ok(())
+        } else {
+            Err(format!("Invalid range: {range}"))
+        }
+    }
+
+    fn update(&mut self, rank1: usize, rank2: usize, suit: Suitedness, prob: f32) {
+        if suit != Suitedness::Offsuit {
+            self.data[rank1][rank2] = prob;
+        }
+        if rank1 != rank2 && suit != Suitedness::Suited {
+            self.data[rank2][rank1] = prob;
+        }
+    }
+
+    fn to_string_pair(&self) -> Vec<String> {
+        let mut result = Vec::new();
+        let mut start: Option<(usize, f32)> = None;
+
+        for i in (-1..13).rev() {
+            let rank = i as usize;
+            let prev_rank = (i + 1) as usize;
+
+            if start.is_some() && (i == -1 || start.unwrap().1 != self.data[rank][rank]) {
+                let (start_rank, prob) = start.unwrap();
+                let s = rank_to_char(start_rank);
+                let e = rank_to_char(prev_rank);
+                let mut tmp = if start_rank == prev_rank {
+                    format!("{s}{s}")
+                } else if start_rank == 12 {
+                    format!("{e}{e}+")
+                } else {
+                    format!("{s}{s}-{e}{e}")
+                };
+                if prob != 1.0 {
+                    tmp += &format!(":{prob}");
+                }
+                result.push(tmp);
+                start = None;
+            }
+
+            if i >= 0 && self.data[rank][rank] > 0.0 && start.is_none() {
+                start = Some((rank, self.data[rank][rank]));
+            }
+        }
+
+        result
+    }
+
+    fn to_string_nonpair(&self) -> Vec<String> {
+        let mut result = Vec::new();
+
+        for rank1 in (1..13).rev() {
+            let mut unsuit = true;
+            for rank2 in 0..rank1 {
+                if self.data[rank1][rank2] != self.data[rank2][rank1] {
+                    unsuit = false;
+                    break;
+                }
+            }
+
+            if unsuit {
+                Self::to_string_high_card(&mut result, rank1, &self.data[rank1][..rank1], "");
+            } else {
+                let offsuit = self.data[..rank1]
+                    .iter()
+                    .map(|row| row[rank1])
+                    .collect::<Vec<_>>();
+                Self::to_string_high_card(&mut result, rank1, &self.data[rank1][..rank1], "s");
+                Self::to_string_high_card(&mut result, rank1, &offsuit, "o");
+            }
+        }
+
+        result
+    }
+
+    fn to_string_high_card(result: &mut Vec<String>, rank1: usize, data: &[f32], suit: &str) {
+        let rank1_char = rank_to_char(rank1);
+        let mut start: Option<(usize, f32)> = None;
+
+        for i in (-1..rank1 as i32).rev() {
+            let rank2 = i as usize;
+            let prev_rank2 = (i + 1) as usize;
+
+            if start.is_some() && (i == -1 || start.unwrap().1 != data[rank2]) {
+                let (start_rank2, prob) = start.unwrap();
+                let s = rank_to_char(start_rank2);
+                let e = rank_to_char(prev_rank2);
+                let mut tmp = if start_rank2 == prev_rank2 {
+                    format!("{rank1_char}{s}{suit}")
+                } else if start_rank2 == rank1 - 1 {
+                    format!("{rank1_char}{e}{suit}+")
+                } else {
+                    format!("{rank1_char}{s}{suit}-{rank1_char}{e}{suit}")
+                };
+                if prob != 1.0 {
+                    tmp += &format!(":{prob}");
+                }
+                result.push(tmp);
+                start = None;
+            }
+
+            if i >= 0 && data[rank2] > 0.0 && start.is_none() {
+                start = Some((rank2, data[rank2]));
+            }
+        }
+    }
+}
+
+impl FromStr for Range {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let s = TRIM_REGEX.replace_all(s, "$1").trim().to_owned();
+        let mut ranges = s.split(',').collect::<Vec<_>>();
+
+        // remove last empty element if any
+        if ranges.last().unwrap().is_empty() {
+            ranges.pop();
+        }
+
+        let mut result = Self {
+            data: [[0.0; 13]; 13],
+        };
+
+        for range in ranges.into_iter().rev() {
+            let caps = RANGE_REGEX
+                .captures(range)
+                .ok_or_else(|| format!("Failed to parse range: {range}"))?;
+
+            let range_str = caps.name("range").unwrap().as_str();
+            let prob_str = caps.name("prob").map_or("1", |s| s.as_str());
+
+            let prob = prob_str.parse().unwrap();
+            if prob < 0.0 || 1.0 < prob {
+                return Err(format!("Invalid probability: {range}"));
+            }
+
+            if range_str.contains('-') {
+                result.update_with_dash_range(range_str, prob)?;
+            } else if range_str.contains('+') {
+                result.update_with_plus_range(range_str, prob)?;
+            } else {
+                result.update_with_singleton(range_str, prob)?;
+            }
+        }
+
+        Ok(result)
+    }
+}
+
+impl ToString for Range {
+    fn to_string(&self) -> String {
+        let mut pairs = self.to_string_pair();
+        let mut nonpairs = self.to_string_nonpair();
+        pairs.append(&mut nonpairs);
+        pairs.join(",")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn range_regex() {
+        let tests = [
+            ("AK", Some(("AK", None))),
+            ("K9s:.67", Some(("K9s", Some(".67")))),
+            ("88+:1.", Some(("88+", Some("1.")))),
+            ("98s-65s:0.25", Some(("98s-65s", Some("0.25")))),
+            ("ak", None),
+            ("AKQ", None),
+            ("AK+-AJ", None),
+            ("K9s.67", None),
+            ("88+:2.0", None),
+            ("98s-21s", None),
+        ];
+
+        for (s, expected) in tests {
+            if let Some((range, prob)) = expected {
+                let caps = RANGE_REGEX.captures(s).unwrap();
+                assert_eq!(caps.name("range").unwrap().as_str(), range);
+                if let Some(prob) = prob {
+                    assert_eq!(caps.name("prob").unwrap().as_str(), prob);
+                } else {
+                    assert!(caps.name("prob").is_none());
+                }
+            } else {
+                assert!(!RANGE_REGEX.is_match(s));
+            }
+        }
+    }
+
+    #[test]
+    fn trim_regex() {
+        let tests = [
+            ("  AK  ", "AK"),
+            ("K9s: .67", "K9s:.67"),
+            ("88+, AQ+", "88+,AQ+"),
+            ("98s - 65s: 0.25", "98s-65s:0.25"),
+        ];
+
+        for (s, expected) in tests {
+            assert_eq!(TRIM_REGEX.replace_all(s, "$1").trim(), expected);
+        }
+    }
+
+    #[test]
+    fn range_from_str() {
+        let pair_plus = "88+".parse::<Range>();
+        let pair_plus_equiv = "AA,KK,QQ,JJ,TT,99,88".parse::<Range>();
+        assert!(pair_plus.is_ok());
+        assert_eq!(pair_plus, pair_plus_equiv);
+
+        let connector_plus = "98s+".parse::<Range>();
+        let connector_plus_equiv = "AKs,KQs,QJs,JTs,T9s,98s".parse::<Range>();
+        assert!(connector_plus.is_ok());
+        assert_eq!(connector_plus, connector_plus_equiv);
+
+        let other_plus = "A8o+".parse::<Range>();
+        let other_plus_equiv = "AKo,AQo,AJo,ATo,A9o,A8o".parse::<Range>();
+        assert!(other_plus.is_ok());
+        assert_eq!(other_plus, other_plus_equiv);
+
+        let pair_dash = "88-55".parse::<Range>();
+        let pair_dash_equiv = "88,77,66,55".parse::<Range>();
+        assert!(pair_dash.is_ok());
+        assert_eq!(pair_dash, pair_dash_equiv);
+
+        let connector_dash = "98s-65s".parse::<Range>();
+        let connector_dash_equiv = "98s,87s,76s,65s".parse::<Range>();
+        assert!(connector_dash.is_ok());
+        assert_eq!(connector_dash, connector_dash_equiv);
+
+        let gapper_dash = "AQo-86o".parse::<Range>();
+        let gapper_dash_equiv = "AQo,KJo,QTo,J9o,T8o,97o,86o".parse::<Range>();
+        assert!(gapper_dash.is_ok());
+        assert_eq!(gapper_dash, gapper_dash_equiv);
+
+        let other_dash = "K5-K2".parse::<Range>();
+        let other_dash_equiv = "K5,K4,K3,K2".parse::<Range>();
+        assert!(other_dash.is_ok());
+        assert_eq!(other_dash, other_dash_equiv);
+
+        let allow_empty = "".parse::<Range>();
+        assert!(allow_empty.is_ok());
+
+        let allow_trailing_comma = "AK,".parse::<Range>();
+        assert!(allow_trailing_comma.is_ok());
+
+        let comma_error = "AK,,".parse::<Range>();
+        assert!(comma_error.is_err());
+
+        let rank_error = "89".parse::<Range>();
+        assert!(rank_error.is_err());
+
+        let pair_error = "AAo".parse::<Range>();
+        assert!(pair_error.is_err());
+
+        let prob_error = "AQo:1.1".parse::<Range>();
+        assert!(prob_error.is_err());
+
+        let dash_error_1 = "AQo-AQo".parse::<Range>();
+        assert!(dash_error_1.is_err());
+
+        let dash_error_2 = "AQo-86s".parse::<Range>();
+        assert!(dash_error_2.is_err());
+
+        let dash_error_3 = "AQo-KQo".parse::<Range>();
+        assert!(dash_error_3.is_err());
+
+        let dash_error_4 = "K2-K5".parse::<Range>();
+        assert!(dash_error_4.is_err());
+
+        let data = "85s:0.5".parse::<Range>();
+        assert!(data.is_ok());
+
+        let data = data.unwrap();
+        assert_eq!(data.get_data()[6][3], 0.5);
+        assert_eq!(data.get_data()[3][6], 0.0);
+    }
+
+    #[test]
+    fn range_to_string() {
+        let tests = [
+            ("AA,KK", "KK+"),
+            ("KK,QQ", "KK-QQ"),
+            ("66-22,TT+", "TT+,66-22"),
+            ("AA:0.5, KK:1.0, QQ:1.0, JJ:0.5", "AA:0.5,KK-QQ,JJ:0.5"),
+            ("AA,AK,AQ", "AA,AQ+"),
+            ("AK,AQ,AJs", "AJs+,AQo+"),
+            ("KQ,KT,K9,K8,K6,K5", "KQ,KT-K8,K6-K5"),
+        ];
+
+        for (input, expected) in tests {
+            let range = input.parse::<Range>();
+            assert!(range.is_ok());
+            assert_eq!(range.unwrap().to_string(), expected);
+        }
+
+        let mut data = [
+            [1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1.],
+            [1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1.],
+            [1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1.],
+            [1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 0.],
+            [1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 0., 0.],
+            [1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 0., 0., 0.],
+            [1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 0., 0.],
+            [1., 1., 1., 0., 0., 1., 1., 1., 1., 1., 1., 0., 0.],
+            [1., 1., 0., 0., 0., 0., 0., 1., 1., 1., 1., 0., 0.],
+            [1., 1., 0., 0., 0., 0., 0., 0., 0., 1., 1., 1., 0.],
+            [1., 1., 0., 0., 0., 0., 0., 0., 0., 0., 1., 0.5, 0.],
+            [1., 1., 0., 0., 0., 0., 0., 0., 0., 0., 0., 1., 0.],
+            [1., 1., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 1.],
+        ];
+
+        data.reverse();
+        for row in &mut data {
+            row.reverse();
+        }
+
+        let range = Range { data };
+        assert_eq!(
+            range.to_string(),
+            "22+,A2+,K2+,Q2s+,Q7o+,J3s+,J8o+,T4s+,T8o+,95s+,97o+,84s+,87o,74s+,76o,64s+,53s+,43s:0.5"
+        );
+    }
+}
