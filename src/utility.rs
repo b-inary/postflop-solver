@@ -3,11 +3,13 @@ use ndarray::prelude::*;
 use rayon::prelude::*;
 
 /// Normalizes the cumulative strategy.
+#[inline]
 pub fn normalize_strategy<T: Game>(game: &T) {
     normalize_strategy_recursive::<T>(&mut game.root());
 }
 
 /// Computes the expected value of `player`'s payoff.
+#[inline]
 pub fn compute_ev<T: Game>(game: &T, player: usize) -> f32 {
     let reach = [game.initial_reach(0), game.initial_reach(1)];
     compute_ev_recursive(
@@ -15,12 +17,13 @@ pub fn compute_ev<T: Game>(game: &T, player: usize) -> f32 {
         &game.root(),
         player,
         &reach[player].view(),
-        &reach[1 - player].view(),
+        &reach[player ^ 1].view(),
     )
 }
 
 /// Computes the exploitability of the strategy.
-pub fn compute_exploitability<T: Game>(game: &T, is_normalized: bool) -> f32 {
+#[inline]
+pub fn compute_exploitability<T: Game>(game: &T, bias: f32, is_normalized: bool) -> f32 {
     let mut cfv = [
         Array1::zeros(game.num_private_hands(0)),
         Array1::zeros(game.num_private_hands(1)),
@@ -32,11 +35,11 @@ pub fn compute_exploitability<T: Game>(game: &T, is_normalized: bool) -> f32 {
             game,
             &game.root(),
             player,
-            &reach[1 - player].view(),
+            &reach[player ^ 1].view(),
             is_normalized,
         );
     }
-    (cfv[0].sum() + cfv[1].sum()) / 2.0
+    (cfv[0].sum() + cfv[1].sum()) / 2.0 - bias
 }
 
 /// The recursive helper function for normalizing the strategy.
@@ -75,18 +78,17 @@ fn compute_ev_recursive<T: Game>(
     // chance node
     else if node.is_chance() {
         let cfreach = cfreach * node.chance_factor();
-        let evs = node
-            .actions()
+        let mut weights = vec![1.0; node.num_actions()];
+        for iso_chance in node.isomorphic_chances() {
+            weights[iso_chance.index] += 1.0;
+        }
+        node.actions()
             .into_par_iter()
             .map(|action| {
                 compute_ev_recursive(game, &node.play(action), player, reach, &cfreach.view())
+                    * weights[action]
             })
-            .collect::<Vec<_>>();
-        let mut ev = evs.iter().sum();
-        for iso_chance in node.isomorphic_chances() {
-            ev += evs[iso_chance.index];
-        }
-        ev
+            .sum()
     }
     // player node
     else if node.player() == player {

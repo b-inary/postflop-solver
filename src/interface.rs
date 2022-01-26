@@ -68,6 +68,7 @@ pub trait GameNode: Sync {
 }
 
 /// The struct representing an isomorphic chance branch.
+#[derive(Debug, Clone)]
 pub struct IsomorphicChance {
     /// The index of isomorphic chance.
     pub index: usize,

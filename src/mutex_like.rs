@@ -7,11 +7,13 @@ use std::{
 /// overheads). Use this wrapper when:
 ///   1. Sync and the interior mutability is needed, and
 ///   2. it is (manually) guaranteed that data races will not occur.
+#[derive(Debug)]
 pub struct MutexLike<T: ?Sized> {
     data: UnsafeCell<T>,
 }
 
 /// Smart pointer like wrapper that is returned when `MutexLike` is "locked".
+#[derive(Debug)]
 pub struct MutexGuardLike<'a, T: ?Sized + 'a> {
     mutex: &'a MutexLike<T>,
 }

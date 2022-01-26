@@ -40,14 +40,17 @@ const PLAYER_FOLD_FLAG: usize = 0x300;
 impl Game for KuhnGame {
     type Node = KuhnNode;
 
+    #[inline]
     fn root(&self) -> MutexGuardLike<Self::Node> {
         self.root.lock()
     }
 
+    #[inline]
     fn num_private_hands(&self, _player: usize) -> usize {
         NUM_PRIVATE_HANDS
     }
 
+    #[inline]
     fn initial_reach(&self, _player: usize) -> &Array1<f32> {
         &self.initial_reach
     }
@@ -63,7 +66,7 @@ impl Game for KuhnGame {
         let num_hands_inv = 1.0 / num_hands as f32;
 
         if node.player & PLAYER_FOLD_FLAG == PLAYER_FOLD_FLAG {
-            let folded_player = node.player();
+            let folded_player = node.player & PLAYER_MASK;
             let payoff = node.amount * [1, -1][(player == folded_player) as usize];
             let payoff_normalized = payoff as f32 * num_hands_inv;
             for my_card in 0..NUM_PRIVATE_HANDS {
@@ -88,6 +91,7 @@ impl Game for KuhnGame {
 }
 
 impl KuhnGame {
+    #[inline]
     pub fn new() -> Self {
         Self {
             root: Self::build_tree(),
@@ -127,7 +131,7 @@ impl KuhnGame {
                 (Action::Check, Action::Check) => PLAYER_TERMINAL_FLAG,
                 (Action::Fold, _) => PLAYER_FOLD_FLAG | node.player,
                 (Action::Call, _) => PLAYER_TERMINAL_FLAG,
-                _ => 1 - node.player,
+                _ => node.player ^ 1,
             };
             node.children.push((
                 *action,
@@ -162,46 +166,57 @@ impl KuhnGame {
 }
 
 impl GameNode for KuhnNode {
+    #[inline]
     fn is_terminal(&self) -> bool {
         self.player & PLAYER_TERMINAL_FLAG != 0
     }
 
+    #[inline]
     fn is_chance(&self) -> bool {
         false
     }
 
+    #[inline]
     fn player(&self) -> usize {
-        self.player & PLAYER_MASK
+        self.player
     }
 
+    #[inline]
     fn num_actions(&self) -> usize {
         self.children.len()
     }
 
+    #[inline]
     fn chance_factor(&self) -> f32 {
         unreachable!()
     }
 
+    #[inline]
     fn isomorphic_chances(&self) -> &Vec<IsomorphicChance> {
         unreachable!()
     }
 
+    #[inline]
     fn play(&self, action: usize) -> MutexGuardLike<Self> {
         self.children[action].1.lock()
     }
 
+    #[inline]
     fn cum_regret(&self) -> &Array2<f32> {
         &self.cum_regret
     }
 
+    #[inline]
     fn cum_regret_mut(&mut self) -> &mut Array2<f32> {
         &mut self.cum_regret
     }
 
+    #[inline]
     fn strategy(&self) -> &Array2<f32> {
         &self.strategy
     }
 
+    #[inline]
     fn strategy_mut(&mut self) -> &mut Array2<f32> {
         &mut self.strategy
     }
@@ -216,7 +231,7 @@ fn kuhn() {
 
     let game = KuhnGame::new();
     let target = 1e-4;
-    solve(&game, 10000, target, false);
+    solve(&game, 10000, target, 0.0, false);
 
     let ev = compute_ev(&game, 0);
     let expected_ev = -1.0 / 18.0;

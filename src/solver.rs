@@ -14,13 +14,15 @@ struct DiscountParams {
     gamma_t: f32,
 }
 
-/// Performs CFR until the given number of iterations or exploitability is satisfied.
+/// Performs CFR until the given number of iterations or exploitability is satisfied, and returns
+/// the exploitability.
 pub fn solve<T: Game>(
     game: &T,
     num_iterations: i32,
     target_exploitability: f32,
+    bias: f32,
     show_progress: bool,
-) {
+) -> f32 {
     let mut root = game.root();
     let reach = [game.initial_reach(0), game.initial_reach(1)];
 
@@ -28,6 +30,8 @@ pub fn solve<T: Game>(
         print!("iteration: 0 / {}", num_iterations);
         stdout().flush().unwrap();
     }
+
+    let mut exploitability = f32::INFINITY;
 
     for t in 0..num_iterations {
         let mut cfv = [
@@ -50,35 +54,38 @@ pub fn solve<T: Game>(
                 &mut root,
                 player,
                 &reach[player].view(),
-                &reach[1 - player].view(),
+                &reach[player ^ 1].view(),
                 &params,
             );
         }
 
-        if show_progress {
-            if (t + 1) % 10 == 0 || t + 1 == num_iterations {
-                let exploitability = compute_exploitability(game, false);
+        if (t + 1) % 10 == 0 || t + 1 == num_iterations {
+            exploitability = compute_exploitability(game, bias, false);
+            if show_progress {
                 print!("\riteration: {} / {} ", t + 1, num_iterations);
                 print!("(exploitability = {:.4e}[bb])", exploitability);
-                if exploitability <= target_exploitability {
-                    break;
-                }
-            } else {
-                print!("\riteration: {} / {}", t + 1, num_iterations);
+                stdout().flush().unwrap();
             }
-            stdout().flush().unwrap();
-        } else if (t + 1) % 10 == 0 {
-            let exploitability = compute_exploitability(game, false);
             if exploitability <= target_exploitability {
                 break;
             }
+        } else if show_progress {
+            print!("\riteration: {} / {}", t + 1, num_iterations);
+            stdout().flush().unwrap();
         }
+    }
+
+    if show_progress {
+        println!();
+        stdout().flush().unwrap();
     }
 
     normalize_strategy(game);
 
-    if show_progress {
-        println!();
+    if num_iterations > 0 {
+        exploitability
+    } else {
+        compute_exploitability(game, bias, true)
     }
 }
 

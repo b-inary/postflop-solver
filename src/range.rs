@@ -2,55 +2,55 @@ use once_cell::sync::Lazy;
 use regex::Regex;
 use std::str::FromStr;
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct Range {
     data: [[f32; 13]; 13],
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Suitedness {
     Suited,
     Offsuit,
     Both,
 }
 
-const COMBO_STR: &str = r"(?:[AKQJT2-9]{2}[os]?)";
-const PROB_STR: &str = r"(?:(?:[01](\.\d*)?)|(?:\.\d+))";
+const COMBO_PAT: &str = r"(?:[AKQJT2-9]{2}[os]?)";
+const PROB_PAT: &str = r"(?:(?:[01](\.\d*)?)|(?:\.\d+))";
 
 static RANGE_REGEX: Lazy<Regex> = Lazy::new(|| {
     Regex::new(&format!(
-        r"^(?P<range>{COMBO_STR}(?:\+|(?:-{COMBO_STR}))?)(?::(?P<prob>{PROB_STR}))?$"
+        r"^(?P<range>{COMBO_PAT}(?:\+|(?:-{COMBO_PAT}))?)(?::(?P<prob>{PROB_PAT}))?$"
     ))
     .unwrap()
 });
 
 static TRIM_REGEX: Lazy<Regex> = Lazy::new(|| Regex::new(r"\s*([-:,])\s*").unwrap());
 
-fn char_to_rank(c: char) -> usize {
+fn char_to_rank(c: char) -> u8 {
     match c {
         'A' => 12,
         'K' => 11,
         'Q' => 10,
         'J' => 9,
         'T' => 8,
-        '2'..='9' => c as usize - '2' as usize,
+        '2'..='9' => c as u8 - b'2',
         _ => panic!("char_to_rank: invalid input: {c}"),
     }
 }
 
-fn rank_to_char(rank: usize) -> char {
+fn rank_to_char(rank: u8) -> char {
     match rank {
         12 => 'A',
         11 => 'K',
         10 => 'Q',
         9 => 'J',
         8 => 'T',
-        0..=7 => (rank as u8 + '2' as u8) as char,
+        0..=7 => (rank + b'2') as char,
         _ => panic!("rank_to_char: invalid input: {rank}"),
     }
 }
 
-fn parse_singleton(combo: &str) -> Result<(usize, usize, Suitedness), String> {
+fn parse_singleton(combo: &str) -> Result<(u8, u8, Suitedness), String> {
     let mut chars = combo.chars();
     let rank1 = char_to_rank(chars.next().unwrap());
     let rank2 = char_to_rank(chars.next().unwrap());
@@ -71,8 +71,50 @@ fn parse_singleton(combo: &str) -> Result<(usize, usize, Suitedness), String> {
 }
 
 impl Range {
-    pub fn get_data(&self) -> &[[f32; 13]; 13] {
-        &self.data
+    pub fn get_data(&self, card1: u8, card2: u8) -> f32 {
+        let (rank1, suit1) = (card1 >> 2, card1 & 3);
+        let (rank2, suit2) = (card2 >> 2, card2 & 3);
+        if rank1 == rank2 {
+            self.get_data_pair(rank1)
+        } else if suit1 == suit2 {
+            self.get_data_suited(rank1, rank2)
+        } else {
+            self.get_data_offsuit(rank1, rank2)
+        }
+    }
+
+    pub fn get_data_pair(&self, rank: u8) -> f32 {
+        self.data[rank as usize][rank as usize]
+    }
+
+    pub fn get_data_suited(&self, rank1: u8, rank2: u8) -> f32 {
+        if rank1 > rank2 {
+            self.data[rank1 as usize][rank2 as usize]
+        } else {
+            self.data[rank2 as usize][rank1 as usize]
+        }
+    }
+
+    pub fn get_data_offsuit(&self, rank1: u8, rank2: u8) -> f32 {
+        if rank1 < rank2 {
+            self.data[rank1 as usize][rank2 as usize]
+        } else {
+            self.data[rank2 as usize][rank1 as usize]
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.data.iter().all(|row| row.iter().all(|&x| x == 0.0))
+    }
+
+    fn update(&mut self, rank1: u8, rank2: u8, suit: Suitedness, prob: f32) {
+        debug_assert!(rank1 >= rank2);
+        if suit != Suitedness::Offsuit {
+            self.data[rank1 as usize][rank2 as usize] = prob;
+        }
+        if rank1 != rank2 && suit != Suitedness::Suited {
+            self.data[rank2 as usize][rank1 as usize] = prob;
+        }
     }
 
     fn update_with_singleton(&mut self, combo: &str, prob: f32) -> Result<(), String> {
@@ -103,8 +145,8 @@ impl Range {
     fn update_with_dash_range(&mut self, range: &str, prob: f32) -> Result<(), String> {
         let combo_pair = range.split('-').collect::<Vec<_>>();
         debug_assert!(combo_pair.len() == 2);
-        let (rank11, rank12, suit1) = parse_singleton(&combo_pair[0])?;
-        let (rank21, rank22, suit2) = parse_singleton(&combo_pair[1])?;
+        let (rank11, rank12, suit1) = parse_singleton(combo_pair[0])?;
+        let (rank21, rank22, suit2) = parse_singleton(combo_pair[1])?;
         let gap1 = rank11 - rank12;
         let gap2 = rank21 - rank22;
         if suit1 != suit2 {
@@ -126,24 +168,15 @@ impl Range {
         }
     }
 
-    fn update(&mut self, rank1: usize, rank2: usize, suit: Suitedness, prob: f32) {
-        if suit != Suitedness::Offsuit {
-            self.data[rank1][rank2] = prob;
-        }
-        if rank1 != rank2 && suit != Suitedness::Suited {
-            self.data[rank2][rank1] = prob;
-        }
-    }
-
-    fn to_string_pair(&self) -> Vec<String> {
+    fn pairs_strings(&self) -> Vec<String> {
         let mut result = Vec::new();
-        let mut start: Option<(usize, f32)> = None;
+        let mut start: Option<(u8, f32)> = None;
 
         for i in (-1..13).rev() {
-            let rank = i as usize;
-            let prev_rank = (i + 1) as usize;
+            let rank = i as u8;
+            let prev_rank = (i + 1) as u8;
 
-            if start.is_some() && (i == -1 || start.unwrap().1 != self.data[rank][rank]) {
+            if start.is_some() && (i == -1 || start.unwrap().1 != self.get_data_pair(rank)) {
                 let (start_rank, prob) = start.unwrap();
                 let s = rank_to_char(start_rank);
                 let e = rank_to_char(prev_rank);
@@ -161,50 +194,61 @@ impl Range {
                 start = None;
             }
 
-            if i >= 0 && self.data[rank][rank] > 0.0 && start.is_none() {
-                start = Some((rank, self.data[rank][rank]));
+            if i >= 0 && self.get_data_pair(rank) > 0.0 && start.is_none() {
+                start = Some((rank, self.get_data_pair(rank)));
             }
         }
 
         result
     }
 
-    fn to_string_nonpair(&self) -> Vec<String> {
+    fn nonpairs_strings(&self) -> Vec<String> {
         let mut result = Vec::new();
 
         for rank1 in (1..13).rev() {
+            let rank1_usize = rank1 as usize;
             let mut unsuit = true;
             for rank2 in 0..rank1 {
-                if self.data[rank1][rank2] != self.data[rank2][rank1] {
+                if self.get_data_suited(rank1, rank2) != self.get_data_offsuit(rank1, rank2) {
                     unsuit = false;
                     break;
                 }
             }
 
             if unsuit {
-                Self::to_string_high_card(&mut result, rank1, &self.data[rank1][..rank1], "");
+                Self::high_cards_strings(
+                    &mut result,
+                    rank1,
+                    &self.data[rank1_usize][..rank1_usize],
+                    "",
+                );
             } else {
-                let offsuit = self.data[..rank1]
+                let offsuit = self.data[..rank1_usize]
                     .iter()
-                    .map(|row| row[rank1])
+                    .map(|row| row[rank1_usize])
                     .collect::<Vec<_>>();
-                Self::to_string_high_card(&mut result, rank1, &self.data[rank1][..rank1], "s");
-                Self::to_string_high_card(&mut result, rank1, &offsuit, "o");
+                Self::high_cards_strings(
+                    &mut result,
+                    rank1,
+                    &self.data[rank1_usize][..rank1_usize],
+                    "s",
+                );
+                Self::high_cards_strings(&mut result, rank1, &offsuit, "o");
             }
         }
 
         result
     }
 
-    fn to_string_high_card(result: &mut Vec<String>, rank1: usize, data: &[f32], suit: &str) {
+    fn high_cards_strings(result: &mut Vec<String>, rank1: u8, data: &[f32], suit: &str) {
         let rank1_char = rank_to_char(rank1);
-        let mut start: Option<(usize, f32)> = None;
+        let mut start: Option<(u8, f32)> = None;
 
         for i in (-1..rank1 as i32).rev() {
-            let rank2 = i as usize;
-            let prev_rank2 = (i + 1) as usize;
+            let rank2 = i as u8;
+            let prev_rank2 = (i + 1) as u8;
 
-            if start.is_some() && (i == -1 || start.unwrap().1 != data[rank2]) {
+            if start.is_some() && (i == -1 || start.unwrap().1 != data[rank2 as usize]) {
                 let (start_rank2, prob) = start.unwrap();
                 let s = rank_to_char(start_rank2);
                 let e = rank_to_char(prev_rank2);
@@ -222,8 +266,8 @@ impl Range {
                 start = None;
             }
 
-            if i >= 0 && data[rank2] > 0.0 && start.is_none() {
-                start = Some((rank2, data[rank2]));
+            if i >= 0 && data[rank2 as usize] > 0.0 && start.is_none() {
+                start = Some((rank2, data[rank2 as usize]));
             }
         }
     }
@@ -233,7 +277,7 @@ impl FromStr for Range {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let s = TRIM_REGEX.replace_all(s, "$1").trim().to_owned();
+        let s = TRIM_REGEX.replace_all(s, "$1").trim().to_string();
         let mut ranges = s.split(',').collect::<Vec<_>>();
 
         // remove last empty element if any
@@ -254,7 +298,7 @@ impl FromStr for Range {
             let prob_str = caps.name("prob").map_or("1", |s| s.as_str());
 
             let prob = prob_str.parse().unwrap();
-            if prob < 0.0 || 1.0 < prob {
+            if !(0.0..=1.0).contains(&prob) {
                 return Err(format!("Invalid probability: {range}"));
             }
 
@@ -273,8 +317,8 @@ impl FromStr for Range {
 
 impl ToString for Range {
     fn to_string(&self) -> String {
-        let mut pairs = self.to_string_pair();
-        let mut nonpairs = self.to_string_nonpair();
+        let mut pairs = self.pairs_strings();
+        let mut nonpairs = self.nonpairs_strings();
         pairs.append(&mut nonpairs);
         pairs.join(",")
     }
@@ -399,8 +443,10 @@ mod tests {
         assert!(data.is_ok());
 
         let data = data.unwrap();
-        assert_eq!(data.get_data()[6][3], 0.5);
-        assert_eq!(data.get_data()[3][6], 0.0);
+        assert_eq!(data.get_data_suited(3, 6), 0.5);
+        assert_eq!(data.get_data_suited(6, 3), 0.5);
+        assert_eq!(data.get_data_offsuit(3, 6), 0.0);
+        assert_eq!(data.get_data_offsuit(6, 3), 0.0);
     }
 
     #[test]
