@@ -1,19 +1,18 @@
 extern crate postflop_solver;
-use ndarray::prelude::*;
 use postflop_solver::*;
 use rayon::prelude::*;
 
 struct KuhnGame {
     root: MutexLike<KuhnNode>,
-    initial_reach: Array1<f32>,
+    initial_reach: Vec<f32>,
 }
 
 struct KuhnNode {
     player: usize,
     amount: i32,
     children: Vec<(Action, MutexLike<KuhnNode>)>,
-    cum_regret: Array2<f32>,
-    strategy: Array2<f32>,
+    cum_regret: Vec<f32>,
+    strategy: Vec<f32>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -51,17 +50,11 @@ impl Game for KuhnGame {
     }
 
     #[inline]
-    fn initial_reach(&self, _player: usize) -> &Array1<f32> {
+    fn initial_reach(&self, _player: usize) -> &[f32] {
         &self.initial_reach
     }
 
-    fn evaluate(
-        &self,
-        result: &mut ArrayViewMut1<f32>,
-        node: &Self::Node,
-        player: usize,
-        cfreach: &ArrayView1<f32>,
-    ) {
+    fn evaluate(&self, result: &mut [f32], node: &Self::Node, player: usize, cfreach: &[f32]) {
         let num_hands = NUM_PRIVATE_HANDS * (NUM_PRIVATE_HANDS - 1);
         let num_hands_inv = 1.0 / num_hands as f32;
 
@@ -95,7 +88,7 @@ impl KuhnGame {
     pub fn new() -> Self {
         Self {
             root: Self::build_tree(),
-            initial_reach: Array1::ones(NUM_PRIVATE_HANDS),
+            initial_reach: vec![1.0; NUM_PRIVATE_HANDS],
         }
     }
 
@@ -156,8 +149,8 @@ impl KuhnGame {
         }
 
         let num_actions = node.num_actions();
-        node.cum_regret = Array2::zeros((num_actions, NUM_PRIVATE_HANDS));
-        node.strategy = Array2::zeros((num_actions, NUM_PRIVATE_HANDS));
+        node.cum_regret = vec![0.0; num_actions * NUM_PRIVATE_HANDS];
+        node.strategy = vec![0.0; num_actions * NUM_PRIVATE_HANDS];
 
         node.actions().into_par_iter().for_each(|action| {
             Self::allocate_memory_recursive(&mut node.play(action));
@@ -202,22 +195,22 @@ impl GameNode for KuhnNode {
     }
 
     #[inline]
-    fn cum_regret(&self) -> &Array2<f32> {
+    fn cum_regret(&self) -> &[f32] {
         &self.cum_regret
     }
 
     #[inline]
-    fn cum_regret_mut(&mut self) -> &mut Array2<f32> {
+    fn cum_regret_mut(&mut self) -> &mut [f32] {
         &mut self.cum_regret
     }
 
     #[inline]
-    fn strategy(&self) -> &Array2<f32> {
+    fn strategy(&self) -> &[f32] {
         &self.strategy
     }
 
     #[inline]
-    fn strategy_mut(&mut self) -> &mut Array2<f32> {
+    fn strategy_mut(&mut self) -> &mut [f32] {
         &mut self.strategy
     }
 }

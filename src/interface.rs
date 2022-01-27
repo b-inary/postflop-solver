@@ -1,5 +1,4 @@
 use crate::mutex_like::*;
-use ndarray::prelude::*;
 use std::ops::Range;
 
 /// The trait representing a game.
@@ -14,16 +13,10 @@ pub trait Game: Sync {
     fn num_private_hands(&self, player: usize) -> usize;
 
     /// Returns the initial reach probabilities of given player.
-    fn initial_reach(&self, player: usize) -> &Array1<f32>;
+    fn initial_reach(&self, player: usize) -> &[f32];
 
     /// Computes the counterfactual values of given node.
-    fn evaluate(
-        &self,
-        result: &mut ArrayViewMut1<f32>,
-        node: &Self::Node,
-        player: usize,
-        cfreach: &ArrayView1<f32>,
-    );
+    fn evaluate(&self, result: &mut [f32], node: &Self::Node, player: usize, cfreach: &[f32]);
 }
 
 /// The trait representing a node in game tree.
@@ -55,16 +48,16 @@ pub trait GameNode: Sync {
     fn play(&self, action: usize) -> MutexGuardLike<Self>;
 
     /// Returns the cumulative regrets.
-    fn cum_regret(&self) -> &Array2<f32>;
+    fn cum_regret(&self) -> &[f32];
 
     /// Returns the mutable reference of the cumulative regrets.
-    fn cum_regret_mut(&mut self) -> &mut Array2<f32>;
+    fn cum_regret_mut(&mut self) -> &mut [f32];
 
     /// Returns the cumulative strategy.
-    fn strategy(&self) -> &Array2<f32>;
+    fn strategy(&self) -> &[f32];
 
     /// Returns the mutable reference of the cumulative strategy.
-    fn strategy_mut(&mut self) -> &mut Array2<f32>;
+    fn strategy_mut(&mut self) -> &mut [f32];
 }
 
 /// The struct representing an isomorphic chance branch.

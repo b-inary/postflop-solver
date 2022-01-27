@@ -1,6 +1,7 @@
 use crate::interface::*;
+use crate::mutex_like::*;
+use crate::sliceop::*;
 use crate::utility::*;
-use ndarray::prelude::*;
 use rayon::prelude::*;
 use std::io::{stdout, Write};
 
@@ -35,8 +36,8 @@ pub fn solve<T: Game>(
 
     for t in 0..num_iterations {
         let mut cfv = [
-            Array1::zeros(game.num_private_hands(0)),
-            Array1::zeros(game.num_private_hands(1)),
+            vec![0.0; game.num_private_hands(0)],
+            vec![0.0; game.num_private_hands(1)],
         ];
 
         let t_f32 = t as f32;
@@ -49,12 +50,12 @@ pub fn solve<T: Game>(
         // alternating updates
         for player in 0..2 {
             solve_recursive(
-                &mut cfv[player].view_mut(),
+                &mut cfv[player],
                 game,
                 &mut root,
                 player,
-                &reach[player].view(),
-                &reach[player ^ 1].view(),
+                reach[player],
+                reach[player ^ 1],
                 &params,
             );
         }
@@ -91,12 +92,12 @@ pub fn solve<T: Game>(
 
 /// Recursively solves the counterfactual values.
 fn solve_recursive<T: Game>(
-    result: &mut ArrayViewMut1<f32>,
+    result: &mut [f32],
     game: &T,
     node: &mut T::Node,
     player: usize,
-    reach: &ArrayView1<f32>,
-    cfreach: &ArrayView1<f32>,
+    reach: &[f32],
+    cfreach: &[f32],
     params: &DiscountParams,
 ) {
     // returns the counterfactual values when the `node` is terminal
@@ -109,140 +110,151 @@ fn solve_recursive<T: Game>(
     let num_private_hands = game.num_private_hands(player);
 
     // allocates memory for storing the counterfactual values
-    let mut cfv_actions = Array2::zeros((num_actions, num_private_hands));
+    let cfv_actions = MutexLike::new(vec![0.0; num_actions * num_private_hands]);
 
     // if the `node` is chance
     if node.is_chance() {
         // updates the reach probabilities
-        let cfreach = cfreach * node.chance_factor();
+        let mut cfreach = cfreach.to_vec();
+        mul_slice_scalar(&mut cfreach, node.chance_factor());
 
         // computes the counterfactual values of each action
-        cfv_actions
-            .outer_iter_mut()
-            .into_par_iter()
-            .enumerate()
-            .for_each(|(action, mut cfv)| {
-                solve_recursive(
-                    &mut cfv,
-                    game,
-                    &mut node.play(action),
-                    player,
-                    reach,
-                    &cfreach.view(),
-                    params,
-                );
-            });
+        node.actions().into_par_iter().for_each(|action| {
+            solve_recursive(
+                row_mut(&mut cfv_actions.lock(), action, num_private_hands),
+                game,
+                &mut node.play(action),
+                player,
+                reach,
+                &cfreach,
+                params,
+            );
+        });
 
         // sums up the counterfactual values
-        cfv_actions.outer_iter().for_each(|cfv| {
-            *result += &cfv;
+        let mut cfv_actions = cfv_actions.lock();
+        cfv_actions.chunks(num_private_hands).for_each(|row| {
+            add_slice(result, row);
         });
 
         // get information about isomorphic chances
         let iso_chances = node.isomorphic_chances();
 
         // processes isomorphic chances
-        let mut tmp = Array1::zeros(num_private_hands);
         for iso_chance in iso_chances {
-            tmp.assign(&cfv_actions.row(iso_chance.index));
-            for (i, j) in &iso_chance.swap_list[player] {
-                tmp.swap(*i, *j);
+            let tmp = row_mut(&mut cfv_actions, iso_chance.index, num_private_hands);
+            for &(i, j) in &iso_chance.swap_list[player] {
+                tmp.swap(i, j);
             }
-            *result += &tmp;
+            add_slice(result, tmp);
+            for &(i, j) in &iso_chance.swap_list[player] {
+                tmp.swap(i, j);
+            }
         }
     }
     // if the current player is `player`
     else if node.player() == player {
         // computes the strategy by regret-maching algorithm
-        let strategy = regret_matching(node.cum_regret());
+        let strategy = regret_matching(node.cum_regret(), num_actions);
 
         // updates the reach probabilities
-        let reach_actions = reach * &strategy;
+        let mut reach_actions = strategy.clone();
+        reach_actions.chunks_mut(num_private_hands).for_each(|row| {
+            mul_slice(row, reach);
+        });
 
         // computes the counterfactual values of each action
-        cfv_actions
-            .outer_iter_mut()
-            .into_par_iter()
-            .enumerate()
-            .for_each(|(action, mut cfv)| {
-                solve_recursive(
-                    &mut cfv,
-                    game,
-                    &mut node.play(action),
-                    player,
-                    &reach_actions.row(action),
-                    cfreach,
-                    params,
-                );
-            });
+        node.actions().into_par_iter().for_each(|action| {
+            solve_recursive(
+                row_mut(&mut cfv_actions.lock(), action, num_private_hands),
+                game,
+                &mut node.play(action),
+                player,
+                row(&reach_actions, action, num_private_hands),
+                cfreach,
+                params,
+            );
+        });
 
         // sums up the counterfactual values
-        let cfv_strategy = &cfv_actions * strategy;
-        cfv_strategy.outer_iter().for_each(|cfv| {
-            *result += &cfv;
+        let cfv_actions = cfv_actions.lock();
+        let mut cfv_strategy = strategy;
+        mul_slice(&mut cfv_strategy, &cfv_actions);
+        cfv_strategy.chunks(num_private_hands).for_each(|row| {
+            add_slice(result, row);
         });
 
         // updates the cumulative regret
         let cum_regret = node.cum_regret_mut();
-        cum_regret.mapv_inplace(|el| {
-            if el >= 0.0 {
-                el * params.alpha_t
+        cum_regret.iter_mut().for_each(|el| {
+            *el *= if *el >= 0.0 {
+                params.alpha_t
             } else {
-                el * params.beta_t
-            }
+                params.beta_t
+            };
         });
-        *cum_regret += &cfv_actions;
-        *cum_regret -= &*result;
+        add_slice(cum_regret, &cfv_actions);
+        cum_regret.chunks_mut(num_private_hands).for_each(|row| {
+            sub_slice(row, result);
+        });
 
         // updates the cumulative strategy
         let cum_strategy = node.strategy_mut();
-        let weighted_strategy = reach_actions * params.gamma_t;
-        *cum_strategy += &weighted_strategy;
+        mul_slice_scalar(&mut reach_actions, params.gamma_t);
+        add_slice(cum_strategy, &reach_actions);
     }
     // if the current player is not `player`
     else {
         // computes the strategy by regret-matching algorithm
-        let strategy = regret_matching(node.cum_regret());
+        let mut cfreach_actions = regret_matching(node.cum_regret(), num_actions);
+        let row_size = cfreach_actions.len() / num_actions;
 
         // updates the reach probabilities
-        let cfreach_actions = cfreach * strategy;
+        cfreach_actions.chunks_mut(row_size).for_each(|row| {
+            mul_slice(row, cfreach);
+        });
 
         // computes the counterfactual values of each action
-        cfv_actions
-            .outer_iter_mut()
-            .into_par_iter()
-            .enumerate()
-            .for_each(|(action, mut cfv)| {
-                if cfreach_actions.row(action).sum() > 0.0 {
-                    solve_recursive(
-                        &mut cfv,
-                        game,
-                        &mut node.play(action),
-                        player,
-                        reach,
-                        &cfreach_actions.row(action),
-                        params,
-                    );
-                }
-            });
+        node.actions().into_par_iter().for_each(|action| {
+            let cfreach = row(&cfreach_actions, action, row_size);
+            if cfreach.iter().sum::<f32>() > 0.0 {
+                solve_recursive(
+                    row_mut(&mut cfv_actions.lock(), action, num_private_hands),
+                    game,
+                    &mut node.play(action),
+                    player,
+                    reach,
+                    cfreach,
+                    params,
+                );
+            }
+        });
 
         // sums up the counterfactual values
-        cfv_actions.outer_iter().for_each(|cfv| {
-            *result += &cfv;
-        })
+        let cfv_actions = cfv_actions.lock();
+        cfv_actions.chunks(num_private_hands).for_each(|row| {
+            add_slice(result, row);
+        });
     }
 }
 
 /// Computes the strategy by regret-mathcing algorithm.
 #[inline]
-fn regret_matching(regret: &Array2<f32>) -> Array2<f32> {
-    let mut strategy = regret.clone();
+fn regret_matching(regret: &[f32], num_actions: usize) -> Vec<f32> {
+    let mut strategy = regret.to_vec();
+    let row_size = strategy.len() / num_actions;
 
-    strategy.mapv_inplace(|el| el.max(0.0));
-    strategy /= &strategy.sum_axis(Axis(0));
+    strategy.iter_mut().for_each(|el| *el = el.max(0.0));
 
-    let default = 1.0 / strategy.nrows() as f32;
-    strategy.mapv_inplace(|el| if el.is_nan() { default } else { el });
+    let mut denom = vec![0.0; row_size];
+    strategy.chunks(row_size).for_each(|row| {
+        add_slice(&mut denom, row);
+    });
+
+    let default = 1.0 / num_actions as f32;
+    strategy.chunks_mut(row_size).for_each(|row| {
+        div_slice(row, &denom, default);
+    });
 
     strategy
 }

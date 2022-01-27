@@ -3,7 +3,6 @@ use crate::interface::*;
 use crate::mutex_like::*;
 use crate::range::*;
 use holdem_hand_evaluator::Hand;
-use ndarray::prelude::*;
 use rayon::prelude::*;
 use std::mem::{size_of, swap};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -17,7 +16,7 @@ pub struct PostFlopGame {
     // computed from `config`
     root: MutexLike<PostFlopNode>,
     num_combinations_inv: f64,
-    initial_reach: [Array1<f32>; 2],
+    initial_reach: [Vec<f32>; 2],
     private_hand_cards: [Vec<(u8, u8)>; 2],
     same_hand_index: [Vec<Option<usize>>; 2],
     hand_strength: Vec<[HandStrength; 2]>,
@@ -31,8 +30,8 @@ pub struct PostFlopNode {
     amount: i32,
     children: Vec<(Action, MutexLike<PostFlopNode>)>,
     iso_chances: Vec<IsomorphicChance>,
-    cum_regret: Array2<f32>,
-    strategy: Array2<f32>,
+    cum_regret: Vec<f32>,
+    strategy: Vec<f32>,
 }
 
 /// A struct for post-flop game configuration.
@@ -108,17 +107,11 @@ impl Game for PostFlopGame {
     }
 
     #[inline]
-    fn initial_reach(&self, player: usize) -> &Array1<f32> {
+    fn initial_reach(&self, player: usize) -> &[f32] {
         &self.initial_reach[player]
     }
 
-    fn evaluate(
-        &self,
-        result: &mut ArrayViewMut1<f32>,
-        node: &Self::Node,
-        player: usize,
-        cfreach: &ArrayView1<f32>,
-    ) {
+    fn evaluate(&self, result: &mut [f32], node: &Self::Node, player: usize, cfreach: &[f32]) {
         let board_mask: u64 = (1 << self.config.flop[0])
             | (1 << self.config.flop[1])
             | (1 << self.config.flop[2])
@@ -159,7 +152,7 @@ impl Game for PostFlopGame {
                     let cfreach = cfreach_sum
                         - (cfreach_minus[c1 as usize] + cfreach_minus[c2 as usize])
                         + same_hand_index[i].map_or(0.0, |j| cfreach[j] as f64);
-                    *result.get_mut(i).unwrap() = (payoff_normalized * cfreach) as f32;
+                    result[i] = (payoff_normalized * cfreach) as f32;
                 }
             }
         }
@@ -217,11 +210,10 @@ impl Game for PostFlopGame {
                         + same_hand_index[i].map_or(0.0, |j| cfreach[j] as f64);
                     let lose_cfreach = lose_cum_cfreach - tie_cum_cfreach;
 
-                    *result.get_mut(i).unwrap() = ((win_payoff * win_cfreach
+                    result[i] = ((win_payoff * win_cfreach
                         + tie_payoff * tie_cfreach
                         + lose_payoff * lose_cfreach)
-                        * self.num_combinations_inv)
-                        as f32;
+                        * self.num_combinations_inv) as f32;
                 }
             }
         }
@@ -325,17 +317,11 @@ impl PostFlopGame {
 
     /// Initializes fields `initial_reach`, `private_hand_cards` and `same_hand_index`.
     fn init_range(&mut self) {
-        let mut initial_reach_0 = Vec::new();
-        let mut initial_reach_1 = Vec::new();
-
         for player in 0..2 {
             let range = &self.config.range[player];
-            let initial_reach = if player == 0 {
-                &mut initial_reach_0
-            } else {
-                &mut initial_reach_1
-            };
+            let initial_reach = &mut self.initial_reach[player];
             let private_hand_cards = &mut self.private_hand_cards[player];
+            initial_reach.clear();
             private_hand_cards.clear();
 
             for card1 in 0..52 {
@@ -348,11 +334,6 @@ impl PostFlopGame {
                 }
             }
         }
-
-        self.initial_reach = [
-            Array1::from_vec(initial_reach_0),
-            Array1::from_vec(initial_reach_1),
-        ];
 
         for player in 0..2 {
             let same_hand_index = &mut self.same_hand_index[player];
@@ -859,8 +840,8 @@ impl PostFlopGame {
         if !node.is_chance() {
             let num_actions = node.num_actions();
             let num_private_hands = self.num_private_hands(node.player());
-            node.cum_regret = Array2::zeros((num_actions, num_private_hands));
-            node.strategy = Array2::zeros((num_actions, num_private_hands));
+            node.cum_regret = vec![0.0; num_actions * num_private_hands];
+            node.strategy = vec![0.0; num_actions * num_private_hands];
         }
 
         node.actions().into_par_iter().for_each(|action| {
@@ -906,22 +887,22 @@ impl GameNode for PostFlopNode {
     }
 
     #[inline]
-    fn cum_regret(&self) -> &Array2<f32> {
+    fn cum_regret(&self) -> &[f32] {
         &self.cum_regret
     }
 
     #[inline]
-    fn cum_regret_mut(&mut self) -> &mut Array2<f32> {
+    fn cum_regret_mut(&mut self) -> &mut [f32] {
         &mut self.cum_regret
     }
 
     #[inline]
-    fn strategy(&self) -> &Array2<f32> {
+    fn strategy(&self) -> &[f32] {
         &self.strategy
     }
 
     #[inline]
-    fn strategy_mut(&mut self) -> &mut Array2<f32> {
+    fn strategy_mut(&mut self) -> &mut [f32] {
         &mut self.strategy
     }
 }
@@ -954,6 +935,19 @@ impl Default for GameConfig {
             max_num_bet: 0,
         }
     }
+}
+
+#[inline]
+fn vec_memory_usage<T>(vec: &Vec<T>) -> u64 {
+    vec.capacity() as u64 * size_of::<T>() as u64
+}
+
+#[inline]
+fn board_index(mut turn: u8, mut river: u8) -> usize {
+    if turn > river {
+        swap(&mut turn, &mut river);
+    }
+    turn as usize * (101 - turn as usize) / 2 + river as usize - 1
 }
 
 /// Attempts to convert an optionally space-separated string into a sorted flop array.
@@ -1005,17 +999,6 @@ fn card_from_str<T: Iterator<Item = char>>(chars: &mut T) -> Result<u8, String> 
     Ok((rank << 2) | suit)
 }
 
-fn vec_memory_usage<T>(vec: &Vec<T>) -> u64 {
-    vec.capacity() as u64 * size_of::<T>() as u64
-}
-
-fn board_index(mut turn: u8, mut river: u8) -> usize {
-    if turn > river {
-        swap(&mut turn, &mut river);
-    }
-    turn as usize * (101 - turn as usize) / 2 + river as usize - 1
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1044,8 +1027,8 @@ mod tests {
         normalize_strategy(&game);
         let ev0 = compute_ev(&game, 0);
         let ev1 = compute_ev(&game, 1);
-        assert!((ev0 - 40.0).abs() < 1e-5);
-        assert!((ev1 - 40.0).abs() < 1e-5);
+        assert!((ev0 - 40.0).abs() < 1e-4);
+        assert!((ev1 - 40.0).abs() < 1e-4);
     }
 
     #[test]
@@ -1064,8 +1047,8 @@ mod tests {
         normalize_strategy(&game);
         let ev0 = compute_ev(&game, 0);
         let ev1 = compute_ev(&game, 1);
-        assert!((ev0 - 50.0).abs() < 1e-5);
-        assert!((ev1 - 30.0).abs() < 1e-5);
+        assert!((ev0 - 50.0).abs() < 1e-4);
+        assert!((ev1 - 30.0).abs() < 1e-4);
     }
 
     #[test]
@@ -1083,8 +1066,8 @@ mod tests {
         normalize_strategy(&game);
         let ev0 = compute_ev(&game, 0);
         let ev1 = compute_ev(&game, 1);
-        assert!((ev0 - 80.0).abs() < 1e-5);
-        assert!((ev1 - 0.0).abs() < 1e-5);
+        assert!((ev0 - 80.0).abs() < 1e-4);
+        assert!((ev1 - 0.0).abs() < 1e-4);
     }
 
     #[test]
