@@ -137,7 +137,9 @@ impl Game for PostFlopGame {
 
             let mut cfreach_sum = 0.0;
             let mut cfreach_minus = [0.0; 52];
-            for (i, &(c1, c2)) in self.private_hand_cards[player ^ 1].iter().enumerate() {
+            let opponent_cards = &self.private_hand_cards[player ^ 1];
+            for i in 0..cfreach.len() {
+                let (c1, c2) = opponent_cards[i];
                 let hand_mask: u64 = (1 << c1) | (1 << c2);
                 if hand_mask & board_mask == 0 {
                     cfreach_sum += cfreach[i] as f64;
@@ -149,7 +151,7 @@ impl Game for PostFlopGame {
             let player_cards = &self.private_hand_cards[player];
             let same_hand_index = &self.same_hand_index[player];
 
-            result.iter_mut().enumerate().for_each(|(i, cfv)| {
+            for i in 0..result.len() {
                 let (c1, c2) = player_cards[i];
                 let hand_mask: u64 = (1 << c1) | (1 << c2);
                 if hand_mask & board_mask == 0 {
@@ -157,9 +159,9 @@ impl Game for PostFlopGame {
                     let cfreach = cfreach_sum
                         - (cfreach_minus[c1 as usize] + cfreach_minus[c2 as usize])
                         + same_hand_index[i].map_or(0.0, |j| cfreach[j] as f64);
-                    *cfv = (payoff_normalized * cfreach) as f32;
+                    *result.get_mut(i).unwrap() = (payoff_normalized * cfreach) as f32;
                 }
-            });
+            }
         }
         // showdown
         else {
@@ -189,10 +191,10 @@ impl Game for PostFlopGame {
             let player_cards = &self.private_hand_cards[player];
             let same_hand_index = &self.same_hand_index[player];
 
-            let exclude_threshold = hand_strength.exclude_threshold;
+            let ex_threshold = hand_strength.exclude_threshold;
             let lose_threshold = cfreach.len();
 
-            result.iter_mut().enumerate().for_each(|(i, cfv)| {
+            for i in 0..result.len() {
                 let (c1, c2) = player_cards[i];
                 let (c1, c2) = (c1 as usize, c2 as usize);
                 let hand_mask: u64 = (1 << c1) | (1 << c2);
@@ -201,23 +203,27 @@ impl Game for PostFlopGame {
                     let win_threshold = hand_strength.win_threshold[i];
                     let tie_threshold = hand_strength.tie_threshold[i];
 
-                    let win_cfreach = (cfreach_sum[win_threshold] - cfreach_sum[exclude_threshold])
-                        - (cfreach_minus[win_threshold][c1] - cfreach_minus[exclude_threshold][c1])
-                        - (cfreach_minus[win_threshold][c2] - cfreach_minus[exclude_threshold][c2]);
-                    let tie_cfreach = (cfreach_sum[tie_threshold] - cfreach_sum[win_threshold])
-                        - (cfreach_minus[tie_threshold][c1] - cfreach_minus[win_threshold][c1])
-                        - (cfreach_minus[tie_threshold][c2] - cfreach_minus[win_threshold][c2])
-                        + same_hand_index[i].map_or(0.0, |j| cfreach[j] as f64);
-                    let lose_cfreach = (cfreach_sum[lose_threshold] - cfreach_sum[tie_threshold])
-                        - (cfreach_minus[lose_threshold][c1] - cfreach_minus[tie_threshold][c1])
-                        - (cfreach_minus[lose_threshold][c2] - cfreach_minus[tie_threshold][c2]);
+                    let ex_cfreach = cfreach_sum[ex_threshold]
+                        - (cfreach_minus[ex_threshold][c1] + cfreach_minus[ex_threshold][c2]);
+                    let win_cum_cfreach = cfreach_sum[win_threshold]
+                        - (cfreach_minus[win_threshold][c1] + cfreach_minus[win_threshold][c2]);
+                    let tie_cum_cfreach = cfreach_sum[tie_threshold]
+                        - (cfreach_minus[tie_threshold][c1] + cfreach_minus[tie_threshold][c2]);
+                    let lose_cum_cfreach = cfreach_sum[lose_threshold]
+                        - (cfreach_minus[lose_threshold][c1] + cfreach_minus[lose_threshold][c2]);
 
-                    *cfv = ((win_payoff * win_cfreach
+                    let win_cfreach = win_cum_cfreach - ex_cfreach;
+                    let tie_cfreach = tie_cum_cfreach - win_cum_cfreach
+                        + same_hand_index[i].map_or(0.0, |j| cfreach[j] as f64);
+                    let lose_cfreach = lose_cum_cfreach - tie_cum_cfreach;
+
+                    *result.get_mut(i).unwrap() = ((win_payoff * win_cfreach
                         + tie_payoff * tie_cfreach
                         + lose_payoff * lose_cfreach)
-                        * self.num_combinations_inv) as f32;
+                        * self.num_combinations_inv)
+                        as f32;
                 }
-            });
+            }
         }
     }
 }

@@ -6,7 +6,7 @@ use std::io::{stdout, Write};
 
 const ALPHA: f32 = 1.5;
 const BETA: f32 = 0.0;
-const GAMMA: f32 = 2.0;
+const GAMMA: f32 = 4.0;
 
 struct DiscountParams {
     alpha_t: f32,
@@ -177,7 +177,7 @@ fn solve_recursive<T: Game>(
             });
 
         // sums up the counterfactual values
-        let cfv_strategy = &cfv_actions * &strategy;
+        let cfv_strategy = &cfv_actions * strategy;
         cfv_strategy.outer_iter().for_each(|cfv| {
             *result += &cfv;
         });
