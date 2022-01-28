@@ -2,7 +2,6 @@ use crate::interface::*;
 use crate::mutex_like::*;
 use crate::sliceop::*;
 use crate::utility::*;
-use rayon::prelude::*;
 use std::io::{stdout, Write};
 
 const ALPHA: f32 = 1.5;
@@ -119,7 +118,7 @@ fn solve_recursive<T: Game>(
         mul_slice_scalar(&mut cfreach, node.chance_factor());
 
         // computes the counterfactual values of each action
-        node.actions().into_par_iter().for_each(|action| {
+        for_each_child(node, |action| {
             solve_recursive(
                 row_mut(&mut cfv_actions.lock(), action, num_private_hands),
                 game,
@@ -164,7 +163,7 @@ fn solve_recursive<T: Game>(
         });
 
         // computes the counterfactual values of each action
-        node.actions().into_par_iter().for_each(|action| {
+        for_each_child(node, |action| {
             solve_recursive(
                 row_mut(&mut cfv_actions.lock(), action, num_private_hands),
                 game,
@@ -215,7 +214,7 @@ fn solve_recursive<T: Game>(
         });
 
         // computes the counterfactual values of each action
-        node.actions().into_par_iter().for_each(|action| {
+        for_each_child(node, |action| {
             let cfreach = row(&cfreach_actions, action, row_size);
             if cfreach.iter().any(|&x| x > 0.0) {
                 solve_recursive(

@@ -2,6 +2,7 @@ use crate::bet_size::*;
 use crate::interface::*;
 use crate::mutex_like::*;
 use crate::range::*;
+use crate::utility::*;
 use holdem_hand_evaluator::Hand;
 use rayon::prelude::*;
 use std::mem::{size_of, swap};
@@ -464,7 +465,8 @@ impl PostFlopGame {
         if node.is_chance() {
             self.push_chances(node, info);
 
-            node.children.par_iter().for_each(|(last_action, child)| {
+            for_each_child(node, |index| {
+                let (last_action, child) = &node.children[index];
                 self.build_tree_recursive(
                     &mut child.lock(),
                     &BuildTreeInfo {
@@ -480,7 +482,8 @@ impl PostFlopGame {
         else {
             self.push_actions(node, info);
 
-            node.children.par_iter().for_each(|(action, child)| {
+            for_each_child(node, |index| {
+                let (action, child) = &node.children[index];
                 let mut last_bet = info.last_bet;
                 let mut num_bet = info.num_bet;
                 let mut allin_flag = info.allin_flag;
@@ -845,7 +848,7 @@ impl PostFlopGame {
             node.strategy = vec![0.0; num_actions * num_private_hands];
         }
 
-        node.actions().into_par_iter().for_each(|action| {
+        for_each_child(node, |action| {
             self.allocate_memory_recursive(&mut node.play(action));
         });
     }
@@ -905,6 +908,11 @@ impl GameNode for PostFlopNode {
     #[inline]
     fn strategy_mut(&mut self) -> &mut [f32] {
         &mut self.strategy
+    }
+
+    #[inline]
+    fn enable_parallelization(&self) -> bool {
+        self.river == NOT_DEALT
     }
 }
 
@@ -1004,7 +1012,6 @@ fn card_from_str<T: Iterator<Item = char>>(chars: &mut T) -> Result<u8, String> 
 mod tests {
     use super::*;
     use crate::solver::*;
-    use crate::utility::*;
 
     #[test]
     fn test_flop_from_str() {

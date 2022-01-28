@@ -58,6 +58,11 @@ pub trait GameNode: Sync {
 
     /// Returns the mutable reference of the cumulative strategy.
     fn strategy_mut(&mut self) -> &mut [f32];
+
+    /// Hint for parallelization.
+    fn enable_parallelization(&self) -> bool {
+        false
+    }
 }
 
 /// The struct representing an isomorphic chance branch.

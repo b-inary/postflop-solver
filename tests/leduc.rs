@@ -1,6 +1,5 @@
 extern crate postflop_solver;
 use postflop_solver::*;
-use rayon::prelude::*;
 
 struct LeducGame {
     root: MutexLike<LeducNode>,
@@ -132,7 +131,7 @@ impl LeducGame {
 
         if node.is_chance() {
             Self::push_chance_actions(node);
-            node.actions().into_par_iter().for_each(|action| {
+            for_each_child(node, |action| {
                 Self::build_tree_recursive(&mut node.play(action), Action::Chance(action), [0, 0]);
             });
             return;
@@ -171,7 +170,7 @@ impl LeducGame {
             ));
         }
 
-        node.actions().into_par_iter().for_each(|action| {
+        for_each_child(node, |action| {
             Self::build_tree_recursive(
                 &mut node.play(action),
                 actions[action].0,
@@ -262,7 +261,7 @@ impl LeducGame {
             node.strategy = vec![0.0; num_actions * NUM_PRIVATE_HANDS];
         }
 
-        node.actions().into_par_iter().for_each(|action| {
+        for_each_child(node, |action| {
             Self::allocate_memory_recursive(&mut node.play(action));
         });
     }
@@ -327,11 +326,6 @@ impl GameNode for LeducNode {
 
 #[test]
 fn leduc() {
-    rayon::ThreadPoolBuilder::new()
-        .num_threads(1)
-        .build_global()
-        .unwrap();
-
     let target = 1e-4;
     let game = LeducGame::new();
     solve(&game, 10000, target, 0.0, false);

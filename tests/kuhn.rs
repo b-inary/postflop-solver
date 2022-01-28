@@ -1,6 +1,5 @@
 extern crate postflop_solver;
 use postflop_solver::*;
-use rayon::prelude::*;
 
 struct KuhnGame {
     root: MutexLike<KuhnNode>,
@@ -138,7 +137,7 @@ impl KuhnGame {
             ));
         }
 
-        node.actions().into_par_iter().for_each(|action| {
+        for_each_child(node, |action| {
             Self::build_tree_recursive(&mut node.play(action), actions[action]);
         });
     }
@@ -152,7 +151,7 @@ impl KuhnGame {
         node.cum_regret = vec![0.0; num_actions * NUM_PRIVATE_HANDS];
         node.strategy = vec![0.0; num_actions * NUM_PRIVATE_HANDS];
 
-        node.actions().into_par_iter().for_each(|action| {
+        for_each_child(node, |action| {
             Self::allocate_memory_recursive(&mut node.play(action));
         });
     }
@@ -217,11 +216,6 @@ impl GameNode for KuhnNode {
 
 #[test]
 fn kuhn() {
-    rayon::ThreadPoolBuilder::new()
-        .num_threads(1)
-        .build_global()
-        .unwrap();
-
     let game = KuhnGame::new();
     let target = 1e-4;
     solve(&game, 10000, target, 0.0, false);

@@ -3,10 +3,20 @@ use crate::mutex_like::*;
 use crate::sliceop::*;
 use rayon::prelude::*;
 
+/// Executes `op` for each child potentially in parallel.
+#[inline]
+pub fn for_each_child<T: GameNode, OP: Fn(usize) + Sync + Send>(node: &T, op: OP) {
+    if node.enable_parallelization() {
+        node.actions().into_par_iter().for_each(op);
+    } else {
+        node.actions().into_iter().for_each(op);
+    }
+}
+
 /// Normalizes the cumulative strategy.
 #[inline]
 pub fn normalize_strategy<T: Game>(game: &T) {
-    normalize_strategy_recursive::<T>(&mut game.root());
+    normalize_strategy_recursive::<T::Node>(&mut game.root());
 }
 
 /// Computes the expected value of `player`'s payoff.
@@ -40,7 +50,7 @@ pub fn compute_exploitability<T: Game>(game: &T, bias: f32, is_normalized: bool)
 }
 
 /// The recursive helper function for normalizing the strategy.
-fn normalize_strategy_recursive<T: Game>(node: &mut T::Node) {
+fn normalize_strategy_recursive<T: GameNode>(node: &mut T) {
     if node.is_terminal() {
         return;
     }
@@ -61,7 +71,7 @@ fn normalize_strategy_recursive<T: Game>(node: &mut T::Node) {
         });
     }
 
-    node.actions().into_par_iter().for_each(|action| {
+    for_each_child(node, |action| {
         normalize_strategy_recursive::<T>(&mut node.play(action));
     })
 }
@@ -83,21 +93,21 @@ fn compute_ev_recursive<T: Game>(
             .zip(reach)
             .fold(0.0, |acc, (v, r)| acc + *v as f64 * *r as f64) as f32;
     }
+
+    let ev = MutexLike::new(vec![0.0; node.num_actions()]);
+
     // chance node
-    else if node.is_chance() {
+    if node.is_chance() {
         let mut cfreach = cfreach.to_vec();
         mul_slice_scalar(&mut cfreach, node.chance_factor());
         let mut weights = vec![1.0; node.num_actions()];
         for iso_chance in node.isomorphic_chances() {
             weights[iso_chance.index] += 1.0;
         }
-        node.actions()
-            .into_par_iter()
-            .map(|action| {
-                compute_ev_recursive(game, &node.play(action), player, reach, &cfreach)
-                    * weights[action]
-            })
-            .sum()
+        for_each_child(node, |action| {
+            ev.lock()[action] = weights[action]
+                * compute_ev_recursive(game, &node.play(action), player, reach, &cfreach);
+        });
     }
     // player node
     else if node.player() == player {
@@ -107,18 +117,15 @@ fn compute_ev_recursive<T: Game>(
         reach_actions.chunks_mut(row_size).for_each(|mut row| {
             mul_slice(&mut row, reach);
         });
-        node.actions()
-            .into_par_iter()
-            .map(|action| {
-                compute_ev_recursive(
-                    game,
-                    &node.play(action),
-                    player,
-                    row(&reach_actions, action, row_size),
-                    cfreach,
-                )
-            })
-            .sum()
+        for_each_child(node, |action| {
+            ev.lock()[action] = compute_ev_recursive(
+                game,
+                &node.play(action),
+                player,
+                row(&reach_actions, action, row_size),
+                cfreach,
+            );
+        });
     }
     // opponent node
     else {
@@ -128,19 +135,18 @@ fn compute_ev_recursive<T: Game>(
         cfreach_actions.chunks_mut(row_size).for_each(|mut row| {
             mul_slice(&mut row, cfreach);
         });
-        node.actions()
-            .into_par_iter()
-            .map(|action| {
-                compute_ev_recursive(
-                    game,
-                    &node.play(action),
-                    player,
-                    reach,
-                    row(&cfreach_actions, action, row_size),
-                )
-            })
-            .sum()
+        for_each_child(node, |action| {
+            ev.lock()[action] = compute_ev_recursive(
+                game,
+                &node.play(action),
+                player,
+                reach,
+                row(&cfreach_actions, action, row_size),
+            );
+        });
     }
+
+    ev.lock().iter().sum::<f32>()
 }
 
 /// The recursive helper function for computing the counterfactual values of best response.
@@ -170,7 +176,7 @@ fn compute_best_cfv_recursive<T: Game>(
         mul_slice_scalar(&mut cfreach, node.chance_factor());
 
         // computes the counterfactual values of each action
-        node.actions().into_par_iter().for_each(|action| {
+        for_each_child(node, |action| {
             compute_best_cfv_recursive(
                 row_mut(&mut cfv_actions.lock(), action, num_private_hands),
                 game,
@@ -205,7 +211,7 @@ fn compute_best_cfv_recursive<T: Game>(
     // player node
     else if node.player() == player {
         // computes the counterfactual values of each action
-        node.actions().into_par_iter().for_each(|action| {
+        for_each_child(node, |action| {
             compute_best_cfv_recursive(
                 row_mut(&mut cfv_actions.lock(), action, num_private_hands),
                 game,
@@ -250,7 +256,7 @@ fn compute_best_cfv_recursive<T: Game>(
         });
 
         // computes the counterfactual values of each action
-        node.actions().into_par_iter().for_each(|action| {
+        for_each_child(node, |action| {
             let cfreach = row(&cfreach_actions, action, row_size);
             if cfreach.iter().any(|&x| x > 0.0) {
                 compute_best_cfv_recursive(
