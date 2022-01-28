@@ -70,8 +70,34 @@ fn parse_singleton(combo: &str) -> Result<(u8, u8, Suitedness), String> {
     Ok((rank1, rank2, suit))
 }
 
+fn check_rank(rank: u8) -> Result<(), String> {
+    if rank < 13 {
+        Ok(())
+    } else {
+        Err(format!("Invalid rank: {rank}"))
+    }
+}
+
+fn check_prob(prob: f32) -> Result<(), String> {
+    if (0.0..=1.0).contains(&prob) {
+        Ok(())
+    } else {
+        Err(format!("Invalid probability: {prob}"))
+    }
+}
+
 impl Range {
-    pub fn get_data(&self, card1: u8, card2: u8) -> f32 {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn ones() -> Self {
+        Self {
+            data: [[1.0; 13]; 13],
+        }
+    }
+
+    pub fn get_data_by_cards(&self, card1: u8, card2: u8) -> f32 {
         let (rank1, suit1) = (card1 >> 2, card1 & 3);
         let (rank2, suit2) = (card2 >> 2, card2 & 3);
         if rank1 == rank2 {
@@ -101,6 +127,47 @@ impl Range {
         } else {
             self.data[rank2 as usize][rank1 as usize]
         }
+    }
+
+    pub fn set_data_pair(&mut self, rank: u8, prob: f32) -> Result<(), String> {
+        check_rank(rank)?;
+        check_prob(prob)?;
+        self.data[rank as usize][rank as usize] = prob;
+        Ok(())
+    }
+
+    pub fn set_data_suited(&mut self, rank1: u8, rank2: u8, prob: f32) -> Result<(), String> {
+        check_rank(rank1)?;
+        check_rank(rank2)?;
+        check_prob(prob)?;
+        if rank1 == rank2 {
+            return Err(format!(
+                "set_data_suited() accepts non-pairs, but got rank1 = rank2 = {rank1}"
+            ));
+        }
+        if rank1 > rank2 {
+            self.data[rank1 as usize][rank2 as usize] = prob;
+        } else {
+            self.data[rank2 as usize][rank1 as usize] = prob;
+        }
+        Ok(())
+    }
+
+    pub fn set_data_offsuit(&mut self, rank1: u8, rank2: u8, prob: f32) -> Result<(), String> {
+        check_rank(rank1)?;
+        check_rank(rank2)?;
+        check_prob(prob)?;
+        if rank1 == rank2 {
+            return Err(format!(
+                "set_data_offsuit() accepts non-pairs, but got rank1 = rank2 = {rank1}"
+            ));
+        }
+        if rank1 < rank2 {
+            self.data[rank1 as usize][rank2 as usize] = prob;
+        } else {
+            self.data[rank2 as usize][rank1 as usize] = prob;
+        }
+        Ok(())
     }
 
     pub fn is_empty(&self) -> bool {
@@ -295,12 +362,10 @@ impl FromStr for Range {
                 .ok_or_else(|| format!("Failed to parse range: {range}"))?;
 
             let range_str = caps.name("range").unwrap().as_str();
-            let prob_str = caps.name("prob").map_or("1", |s| s.as_str());
-
-            let prob = prob_str.parse().unwrap();
-            if !(0.0..=1.0).contains(&prob) {
-                return Err(format!("Invalid probability: {range}"));
-            }
+            let prob = caps
+                .name("prob")
+                .map_or(1.0, |s| s.as_str().parse().unwrap());
+            check_prob(prob)?;
 
             if range_str.contains('-') {
                 result.update_with_dash_range(range_str, prob)?;

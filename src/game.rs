@@ -283,12 +283,13 @@ impl PostFlopGame {
         for c1 in 0..52 {
             for c2 in c1 + 1..52 {
                 let oop_mask: u64 = (1 << c1) | (1 << c2);
-                let oop_prob = self.config.range[PLAYER_OOP as usize].get_data(c1, c2);
+                let oop_prob = self.config.range[PLAYER_OOP as usize].get_data_by_cards(c1, c2);
                 if oop_mask & flop_mask == 0 && oop_prob > 0.0 {
                     for c3 in 0..52 {
                         for c4 in c3 + 1..52 {
                             let ip_mask: u64 = (1 << c3) | (1 << c4);
-                            let ip_prob = self.config.range[PLAYER_IP as usize].get_data(c3, c4);
+                            let ip_prob =
+                                self.config.range[PLAYER_IP as usize].get_data_by_cards(c3, c4);
                             if ip_mask & (flop_mask | oop_mask) == 0 {
                                 num_combinations += oop_prob as f64 * ip_prob as f64;
                             }
@@ -326,7 +327,7 @@ impl PostFlopGame {
 
             for card1 in 0..52 {
                 for card2 in card1 + 1..52 {
-                    let prob = range.get_data(card1, card2);
+                    let prob = range.get_data_by_cards(card1, card2);
                     if prob > 0.0 {
                         initial_reach.push(prob);
                         private_hand_cards.push((card1, card2));
@@ -1015,12 +1016,11 @@ mod tests {
 
     #[test]
     fn all_check_all_range() {
-        let all_range_str = "22+,A2+,K2+,Q2+,J2+,T2+,92+,82+,72+,62+,52+,42+,32";
         let config = GameConfig {
             flop: flop_from_str("Td9d6h").unwrap(),
             initial_pot: 80,
             initial_stack: 960,
-            range: [all_range_str.parse().unwrap(); 2],
+            range: [Range::ones(); 2],
             ..Default::default()
         };
         let game = PostFlopGame::new(&config, None).unwrap();
@@ -1033,12 +1033,11 @@ mod tests {
 
     #[test]
     fn one_raise_all_range() {
-        let all_range_str = "22+,A2+,K2+,Q2+,J2+,T2+,92+,82+,72+,62+,52+,42+,32";
         let config = GameConfig {
             flop: flop_from_str("Td9d6h").unwrap(),
             initial_pot: 80,
             initial_stack: 960,
-            range: [all_range_str.parse().unwrap(); 2],
+            range: [Range::ones(); 2],
             river_bet_sizes: [bet_sizes_from_str("50%", "").unwrap(), Default::default()],
             max_num_bet: 1,
             ..Default::default()
@@ -1092,9 +1091,11 @@ mod tests {
             initial_pot: 80,
             initial_stack: 960,
             range: [
+                // top-40% range
                 "22+,A2s+,A8o+,K7s+,K9o+,Q8s+,Q9o+,J8s+,J9o+,T8+,97+,86+,75+,64s+,65o,54,43s"
                     .parse()
                     .unwrap(),
+                // top-25% range
                 "22+,A4s+,A9o+,K9s+,KTo+,Q9s+,QTo+,J9+,T9,98s,87s,76s,65s"
                     .parse()
                     .unwrap(),
