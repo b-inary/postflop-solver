@@ -169,40 +169,43 @@ impl Game for PostFlopGame {
             let player_strength = &hand_strength[player];
             let opponent_strength = &hand_strength[player ^ 1];
 
-            let mut k = 0;
-            let len = opponent_strength.len();
+            let mut j = 0;
+            let player_len = player_strength.len();
+            let opponent_len = opponent_strength.len();
 
-            player_strength.iter().for_each(|&(val, index)| {
-                while k < len && opponent_strength[k].0 < val {
-                    let opponent_index = opponent_strength[k].1;
+            for i in 0..player_len {
+                let (val, index) = player_strength[i];
+                while j < opponent_len && opponent_strength[j].0 < val {
+                    let opponent_index = opponent_strength[j].1;
                     let (c1, c2) = opponent_cards[opponent_index];
                     cfreach_sum += cfreach[opponent_index] as f64;
                     cfreach_minus[c1 as usize] += cfreach[opponent_index] as f64;
                     cfreach_minus[c2 as usize] += cfreach[opponent_index] as f64;
-                    k += 1;
+                    j += 1;
                 }
                 let (c1, c2) = player_cards[index];
                 let cfreach = cfreach_sum - cfreach_minus[c1 as usize] - cfreach_minus[c2 as usize];
                 result[index] = (amount_normalized * cfreach) as f32;
-            });
+            }
 
             cfreach_sum = 0.0;
             cfreach_minus.fill(0.0);
-            k = len;
+            j = opponent_len;
 
-            player_strength.iter().rev().for_each(|&(val, index)| {
-                while k > 0 && opponent_strength[k - 1].0 > val {
-                    let opponent_index = opponent_strength[k - 1].1;
+            for i in (0..player_len).rev() {
+                let (val, index) = player_strength[i];
+                while j > 0 && opponent_strength[j - 1].0 > val {
+                    let opponent_index = opponent_strength[j - 1].1;
                     let (c1, c2) = opponent_cards[opponent_index];
                     cfreach_sum += cfreach[opponent_index] as f64;
                     cfreach_minus[c1 as usize] += cfreach[opponent_index] as f64;
                     cfreach_minus[c2 as usize] += cfreach[opponent_index] as f64;
-                    k -= 1;
+                    j -= 1;
                 }
                 let (c1, c2) = player_cards[index];
                 let cfreach = cfreach_sum - cfreach_minus[c1 as usize] - cfreach_minus[c2 as usize];
                 result[index] -= (amount_normalized * cfreach) as f32;
-            });
+            }
         }
     }
 }
