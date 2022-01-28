@@ -1,0 +1,13 @@
+name: Rust
+on: push
+env:
+  CARGO_TERM_COLOR: always
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+    - name: Build
+      run: cargo build --release
+    - name: Run tests
+      run: cargo test --release
