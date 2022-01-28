@@ -21,7 +21,7 @@ pub struct PostFlopGame {
     initial_reach: [Vec<f32>; 2],
     private_hand_cards: [Vec<(u8, u8)>; 2],
     same_hand_index: [Vec<Option<usize>>; 2],
-    hand_strength: Vec<[HandStrength; 2]>,
+    hand_strength: Vec<[Vec<(usize, usize)>; 2]>,
 
     // global storage
     storage: MutexLike<Vec<f32>>,
@@ -69,14 +69,6 @@ pub enum Action {
     Chance(u8),
 }
 
-#[derive(Debug, Clone, Default)]
-struct HandStrength {
-    opponent_increasing_index: Vec<usize>,
-    exclude_threshold: usize,
-    win_threshold: Vec<usize>,
-    tie_threshold: Vec<usize>,
-}
-
 #[derive(Debug, Clone)]
 struct BuildTreeInfo<'a> {
     last_action: Action,
@@ -121,25 +113,33 @@ impl Game for PostFlopGame {
     }
 
     fn evaluate(&self, result: &mut [f32], node: &Self::Node, player: usize, cfreach: &[f32]) {
-        let board_mask: u64 = (1 << self.config.flop[0])
-            | (1 << self.config.flop[1])
-            | (1 << self.config.flop[2])
-            | (1 << node.turn)
-            | (1 << node.river);
+        let amount = self.config.initial_pot as f64 * 0.5 + node.amount as f64;
+        let amount_normalized = amount * self.num_combinations_inv;
+
+        let player_cards = &self.private_hand_cards[player];
+        let opponent_cards = &self.private_hand_cards[player ^ 1];
+
+        let mut cfreach_sum = 0.0;
+        let mut cfreach_minus = [0.0; 52];
 
         // someone folded
         if node.player & PLAYER_FOLD_FLAG == PLAYER_FOLD_FLAG {
-            let folded_player = node.player & PLAYER_MASK;
-            let payoff = if folded_player as usize == player {
-                -node.amount
-            } else {
-                self.config.initial_pot + node.amount
-            };
-            let payoff_normalized = payoff as f64 * self.num_combinations_inv;
+            let flop = &self.config.flop;
+            let mut board_mask: u64 = (1 << flop[0]) | (1 << flop[1]) | (1 << flop[2]);
+            if node.turn != NOT_DEALT {
+                board_mask |= 1 << node.turn;
+            }
+            if node.river != NOT_DEALT {
+                board_mask |= 1 << node.river;
+            }
 
-            let mut cfreach_sum = 0.0;
-            let mut cfreach_minus = [0.0; 52];
-            let opponent_cards = &self.private_hand_cards[player ^ 1];
+            let folded_player = node.player & PLAYER_MASK;
+            let payoff_normalized = if folded_player as usize == player {
+                -amount_normalized
+            } else {
+                amount_normalized
+            };
+
             for i in 0..cfreach.len() {
                 let (c1, c2) = opponent_cards[i];
                 let hand_mask: u64 = (1 << c1) | (1 << c2);
@@ -150,9 +150,7 @@ impl Game for PostFlopGame {
                 }
             }
 
-            let player_cards = &self.private_hand_cards[player];
             let same_hand_index = &self.same_hand_index[player];
-
             for i in 0..result.len() {
                 let (c1, c2) = player_cards[i];
                 let hand_mask: u64 = (1 << c1) | (1 << c2);
@@ -167,64 +165,44 @@ impl Game for PostFlopGame {
         }
         // showdown
         else {
-            let hand_strength = &self.hand_strength[board_index(node.turn, node.river)][player];
-            let mut cfreach_sum: Vec<f64> = Vec::with_capacity(cfreach.len() + 1);
-            let mut cfreach_minus: Vec<[f64; 52]> = Vec::with_capacity(cfreach.len() + 1);
-            cfreach_sum.push(0.0);
-            cfreach_minus.push([0.0; 52]);
+            let hand_strength = &self.hand_strength[board_index(node.turn, node.river)];
+            let player_strength = &hand_strength[player];
+            let opponent_strength = &hand_strength[player ^ 1];
 
-            let opponent_cards = &self.private_hand_cards[player ^ 1];
-            hand_strength
-                .opponent_increasing_index
-                .iter()
-                .for_each(|&index| {
-                    cfreach_sum.push(*cfreach_sum.last().unwrap() + cfreach[index] as f64);
-                    cfreach_minus.extend_from_within(cfreach_minus.len() - 1..);
-                    let (c1, c2) = opponent_cards[index];
-                    let last = cfreach_minus.last_mut().unwrap();
-                    last[c1 as usize] += cfreach[index] as f64;
-                    last[c2 as usize] += cfreach[index] as f64;
-                });
+            let mut k = 0;
+            let len = opponent_strength.len();
 
-            let win_payoff = (self.config.initial_pot + node.amount) as f64;
-            let tie_payoff = self.config.initial_pot as f64 * 0.5;
-            let lose_payoff = -node.amount as f64;
-
-            let player_cards = &self.private_hand_cards[player];
-            let same_hand_index = &self.same_hand_index[player];
-
-            let ex_threshold = hand_strength.exclude_threshold;
-            let lose_threshold = cfreach.len();
-
-            for i in 0..result.len() {
-                let (c1, c2) = player_cards[i];
-                let (c1, c2) = (c1 as usize, c2 as usize);
-                let hand_mask: u64 = (1 << c1) | (1 << c2);
-
-                if hand_mask & board_mask == 0 {
-                    let win_threshold = hand_strength.win_threshold[i];
-                    let tie_threshold = hand_strength.tie_threshold[i];
-
-                    let ex_cfreach = cfreach_sum[ex_threshold]
-                        - (cfreach_minus[ex_threshold][c1] + cfreach_minus[ex_threshold][c2]);
-                    let win_cum_cfreach = cfreach_sum[win_threshold]
-                        - (cfreach_minus[win_threshold][c1] + cfreach_minus[win_threshold][c2]);
-                    let tie_cum_cfreach = cfreach_sum[tie_threshold]
-                        - (cfreach_minus[tie_threshold][c1] + cfreach_minus[tie_threshold][c2]);
-                    let lose_cum_cfreach = cfreach_sum[lose_threshold]
-                        - (cfreach_minus[lose_threshold][c1] + cfreach_minus[lose_threshold][c2]);
-
-                    let win_cfreach = win_cum_cfreach - ex_cfreach;
-                    let tie_cfreach = tie_cum_cfreach - win_cum_cfreach
-                        + same_hand_index[i].map_or(0.0, |j| cfreach[j] as f64);
-                    let lose_cfreach = lose_cum_cfreach - tie_cum_cfreach;
-
-                    result[i] = ((win_payoff * win_cfreach
-                        + tie_payoff * tie_cfreach
-                        + lose_payoff * lose_cfreach)
-                        * self.num_combinations_inv) as f32;
+            player_strength.iter().for_each(|&(val, index)| {
+                while k < len && opponent_strength[k].0 < val {
+                    let opponent_index = opponent_strength[k].1;
+                    let (c1, c2) = opponent_cards[opponent_index];
+                    cfreach_sum += cfreach[opponent_index] as f64;
+                    cfreach_minus[c1 as usize] += cfreach[opponent_index] as f64;
+                    cfreach_minus[c2 as usize] += cfreach[opponent_index] as f64;
+                    k += 1;
                 }
-            }
+                let (c1, c2) = player_cards[index];
+                let cfreach = cfreach_sum - cfreach_minus[c1 as usize] - cfreach_minus[c2 as usize];
+                result[index] = (amount_normalized * cfreach) as f32;
+            });
+
+            cfreach_sum = 0.0;
+            cfreach_minus.fill(0.0);
+            k = len;
+
+            player_strength.iter().rev().for_each(|&(val, index)| {
+                while k > 0 && opponent_strength[k - 1].0 > val {
+                    let opponent_index = opponent_strength[k - 1].1;
+                    let (c1, c2) = opponent_cards[opponent_index];
+                    cfreach_sum += cfreach[opponent_index] as f64;
+                    cfreach_minus[c1 as usize] += cfreach[opponent_index] as f64;
+                    cfreach_minus[c2 as usize] += cfreach[opponent_index] as f64;
+                    k -= 1;
+                }
+                let (c1, c2) = player_cards[index];
+                let cfreach = cfreach_sum - cfreach_minus[c1 as usize] - cfreach_minus[c2 as usize];
+                result[index] -= (amount_normalized * cfreach) as f32;
+            });
         }
     }
 }
@@ -373,53 +351,26 @@ impl PostFlopGame {
                     if !flop.contains(board1 as usize) && !flop.contains(board2 as usize) {
                         let board = flop.add_card(board1 as usize).add_card(board2 as usize);
                         let mut strength = [Vec::new(), Vec::new()];
-                        let mut strength_sorted = [Vec::new(), Vec::new()];
 
                         for player in 0..2 {
                             strength[player] = private_hand_cards[player]
                                 .iter()
-                                .map(|&(hand1, hand2)| {
+                                .enumerate()
+                                .filter_map(|(i, &(hand1, hand2))| {
                                     let (hand1, hand2) = (hand1 as usize, hand2 as usize);
                                     if board.contains(hand1) || board.contains(hand2) {
-                                        0
+                                        None
                                     } else {
-                                        board.add_card(hand1).add_card(hand2).evaluate()
+                                        let hand = board.add_card(hand1).add_card(hand2);
+                                        Some((hand.evaluate() as usize, i))
                                     }
                                 })
                                 .collect();
 
-                            strength_sorted[player] = strength[player]
-                                .iter()
-                                .enumerate()
-                                .map(|(i, &val)| (val, i))
-                                .collect();
-                            strength_sorted[player].sort_unstable();
+                            strength[player].sort_unstable();
                         }
 
-                        let mut hand_strength: [HandStrength; 2] = Default::default();
-                        for player in 0..2 {
-                            let sorted = &strength_sorted[player ^ 1];
-                            let opponent_increasing_index =
-                                sorted.iter().map(|&(_, i)| i).collect();
-                            let exclude_threshold =
-                                sorted.partition_point(|&(opp_val, _)| opp_val == 0);
-                            let win_threshold = strength[player]
-                                .iter()
-                                .map(|&val| sorted.partition_point(|&(opp_val, _)| opp_val < val))
-                                .collect();
-                            let tie_threshold = strength[player]
-                                .iter()
-                                .map(|&val| sorted.partition_point(|&(opp_val, _)| opp_val <= val))
-                                .collect();
-                            hand_strength[player] = HandStrength {
-                                opponent_increasing_index,
-                                exclude_threshold,
-                                win_threshold,
-                                tie_threshold,
-                            };
-                        }
-
-                        hand_strength
+                        strength
                     } else {
                         Default::default()
                     }
@@ -1051,8 +1002,8 @@ mod tests {
         };
         let game = PostFlopGame::new(&config, None).unwrap();
         normalize_strategy(&game);
-        let ev0 = compute_ev(&game, 0);
-        let ev1 = compute_ev(&game, 1);
+        let ev0 = compute_ev(&game, 0) + 40.0;
+        let ev1 = compute_ev(&game, 1) + 40.0;
         assert!((ev0 - 40.0).abs() < 1e-4);
         assert!((ev1 - 40.0).abs() < 1e-4);
     }
@@ -1070,8 +1021,8 @@ mod tests {
         };
         let game = PostFlopGame::new(&config, None).unwrap();
         normalize_strategy(&game);
-        let ev0 = compute_ev(&game, 0);
-        let ev1 = compute_ev(&game, 1);
+        let ev0 = compute_ev(&game, 0) + 40.0;
+        let ev1 = compute_ev(&game, 1) + 40.0;
         assert!((ev0 - 50.0).abs() < 1e-4);
         assert!((ev1 - 30.0).abs() < 1e-4);
     }
@@ -1089,8 +1040,8 @@ mod tests {
         };
         let game = PostFlopGame::new(&config, None).unwrap();
         normalize_strategy(&game);
-        let ev0 = compute_ev(&game, 0);
-        let ev1 = compute_ev(&game, 1);
+        let ev0 = compute_ev(&game, 0) + 40.0;
+        let ev1 = compute_ev(&game, 1) + 40.0;
         assert!((ev0 - 80.0).abs() < 1e-4);
         assert!((ev1 - 0.0).abs() < 1e-4);
     }
@@ -1133,9 +1084,9 @@ mod tests {
         };
 
         let game = PostFlopGame::new(&config, Some(3072)).unwrap();
-        solve(&game, 1000, 80.0 * 0.005, 40.0, true);
-        let ev0 = compute_ev(&game, 0);
-        let ev1 = compute_ev(&game, 1);
+        solve(&game, 1000, 80.0 * 0.005, true);
+        let ev0 = compute_ev(&game, 0) + 40.0;
+        let ev1 = compute_ev(&game, 1) + 40.0;
 
         // verified by GTO+
         assert!((ev0 - 35.0).abs() < 0.5);

@@ -28,7 +28,7 @@ pub fn compute_ev<T: Game>(game: &T, player: usize) -> f32 {
 
 /// Computes the exploitability of the strategy.
 #[inline]
-pub fn compute_exploitability<T: Game>(game: &T, bias: f32, is_normalized: bool) -> f32 {
+pub fn compute_exploitability<T: Game>(game: &T, is_normalized: bool) -> f32 {
     let mut cfv = [
         vec![0.0; game.num_private_hands(0)],
         vec![0.0; game.num_private_hands(1)],
@@ -46,7 +46,7 @@ pub fn compute_exploitability<T: Game>(game: &T, bias: f32, is_normalized: bool)
     }
     let cfv_sum0 = cfv[0].iter().fold(0.0, |acc, v| acc + *v as f64);
     let cfv_sum1 = cfv[1].iter().fold(0.0, |acc, v| acc + *v as f64);
-    (cfv_sum0 + cfv_sum1) as f32 / 2.0 - bias
+    (cfv_sum0 + cfv_sum1) as f32 / 2.0
 }
 
 /// The recursive helper function for normalizing the strategy.

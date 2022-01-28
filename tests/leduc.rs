@@ -328,7 +328,7 @@ impl GameNode for LeducNode {
 fn leduc() {
     let target = 1e-4;
     let game = LeducGame::new();
-    solve(&game, 10000, target, 0.0, false);
+    solve(&game, 10000, target, false);
 
     let ev = compute_ev(&game, 0);
     let expected_ev = -0.0856; // verified by OpenSpiel

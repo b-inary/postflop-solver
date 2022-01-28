@@ -36,7 +36,6 @@ pub fn solve<T: Game>(
     game: &T,
     num_iterations: i32,
     target_exploitability: f32,
-    bias: f32,
     show_progress: bool,
 ) -> f32 {
     let mut root = game.root();
@@ -67,7 +66,7 @@ pub fn solve<T: Game>(
         }
 
         if (t + 1) % 10 == 0 || t + 1 == num_iterations {
-            exploitability = compute_exploitability(game, bias, false);
+            exploitability = compute_exploitability(game, false);
             if show_progress {
                 print!("\riteration: {} / {} ", t + 1, num_iterations);
                 print!("(exploitability = {:.4e}[bb])", exploitability);
@@ -92,7 +91,7 @@ pub fn solve<T: Game>(
     if num_iterations > 0 {
         exploitability
     } else {
-        compute_exploitability(game, bias, true)
+        compute_exploitability(game, true)
     }
 }
 
