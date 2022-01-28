@@ -6,7 +6,8 @@ use crate::utility::*;
 use holdem_hand_evaluator::Hand;
 use rayon::prelude::*;
 use std::mem::{size_of, swap};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::slice::{from_raw_parts, from_raw_parts_mut};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
 /// A struct representing a post-flop game.
 #[derive(Default)]
@@ -21,6 +22,9 @@ pub struct PostFlopGame {
     private_hand_cards: [Vec<(u8, u8)>; 2],
     same_hand_index: [Vec<Option<usize>>; 2],
     hand_strength: Vec<[HandStrength; 2]>,
+
+    // global storage
+    storage: MutexLike<Vec<f32>>,
 }
 
 /// A struct representing a node in post-flop game tree.
@@ -31,9 +35,13 @@ pub struct PostFlopNode {
     amount: i32,
     children: Vec<(Action, MutexLike<PostFlopNode>)>,
     iso_chances: Vec<IsomorphicChance>,
-    cum_regret: Vec<f32>,
-    strategy: Vec<f32>,
+    cum_regret: *mut f32,
+    strategy: *mut f32,
+    num_elements: usize,
 }
+
+unsafe impl Send for PostFlopNode {}
+unsafe impl Sync for PostFlopNode {}
 
 /// A struct for post-flop game configuration.
 #[derive(Debug, Clone, PartialEq)]
@@ -76,7 +84,7 @@ struct BuildTreeInfo<'a> {
     num_bet: i32,
     allin_flag: bool,
     current_memory_usage: &'a AtomicU64,
-    additional_memory_usage: &'a AtomicU64,
+    num_storage_elements: &'a AtomicU64,
 }
 
 /// The index of player who is out of position.
@@ -272,11 +280,11 @@ impl PostFlopGame {
         }
 
         if self.config.range[PLAYER_OOP as usize].is_empty() {
-            return Err("OOP's range not initialized".to_string());
+            return Err("OOP's range is not initialized".to_string());
         }
 
         if self.config.range[PLAYER_IP as usize].is_empty() {
-            return Err("IP's range not initialized".to_string());
+            return Err("IP's range is not initialized".to_string());
         }
 
         let mut num_combinations = 0.0;
@@ -421,9 +429,9 @@ impl PostFlopGame {
     }
 
     /// Initializes the root node of game tree.
-    fn init_root(&self, max_memory_mb: Option<u32>) -> Result<(), String> {
+    fn init_root(&mut self, max_memory_mb: Option<u32>) -> Result<(), String> {
         let current_memory_usage = AtomicU64::new(size_of::<PostFlopNode>() as u64);
-        let additional_memory_usage = AtomicU64::new(0);
+        let num_storage_elements = AtomicU64::new(0);
 
         let info = BuildTreeInfo {
             last_action: Action::None,
@@ -431,26 +439,33 @@ impl PostFlopGame {
             num_bet: 0,
             allin_flag: false,
             current_memory_usage: &current_memory_usage,
-            additional_memory_usage: &additional_memory_usage,
+            num_storage_elements: &num_storage_elements,
         };
 
         self.root().children.clear();
         self.build_tree_recursive(&mut self.root(), &info);
 
         // memory usage check
-        let total_memory_usage = current_memory_usage.load(Ordering::Relaxed)
-            + additional_memory_usage.load(Ordering::Relaxed);
-        if max_memory_mb.is_some()
-            && total_memory_usage > max_memory_mb.unwrap() as u64 * 1024 * 1024
-        {
+        let num_storage_elements = num_storage_elements.load(Ordering::Relaxed);
+        let storage_size = 2 * size_of::<f32>() as u64 * num_storage_elements;
+        let total_memory_usage = current_memory_usage.load(Ordering::Relaxed) + storage_size;
+        let memory_limit = max_memory_mb
+            .map(|mb| (mb as u64) << 20)
+            .unwrap_or(usize::MAX as u64);
+        if total_memory_usage > memory_limit {
             return Err(format!(
-                "Memory usage {} MB exceeds the limit {} MB",
-                total_memory_usage / 1024 / 1024,
-                max_memory_mb.unwrap()
+                "Memory usage {:.2}GB exceeds the limit {:.2}GB",
+                total_memory_usage as f64 / (1 << 30) as f64,
+                memory_limit as f64 / (1 << 30) as f64
             ));
         }
 
-        self.allocate_memory_recursive(&mut self.root());
+        self.storage.lock().clear();
+        self.storage.lock().shrink_to_fit();
+        self.storage = MutexLike::new(vec![0.0; 2 * num_storage_elements as usize]);
+
+        let counter = AtomicUsize::new(0);
+        self.allocate_memory_recursive(&mut self.root(), &counter);
 
         Ok(())
     }
@@ -831,25 +846,28 @@ impl PostFlopGame {
             .fetch_add(vec_memory_usage(&node.children), Ordering::Relaxed);
 
         let num_elems = node.num_actions() * self.num_private_hands(player as usize);
-        info.additional_memory_usage
-            .fetch_add((2 * num_elems * size_of::<f32>()) as u64, Ordering::Relaxed);
+        node.num_elements = num_elems;
+        info.num_storage_elements
+            .fetch_add(num_elems as u64, Ordering::Relaxed);
     }
 
     /// Allocates memory recursively.
-    fn allocate_memory_recursive(&self, node: &mut PostFlopNode) {
+    fn allocate_memory_recursive(&self, node: &mut PostFlopNode, counter: &AtomicUsize) {
         if node.is_terminal() {
             return;
         }
 
         if !node.is_chance() {
-            let num_actions = node.num_actions();
-            let num_private_hands = self.num_private_hands(node.player());
-            node.cum_regret = vec![0.0; num_actions * num_private_hands];
-            node.strategy = vec![0.0; num_actions * num_private_hands];
+            let mut_ptr = self.storage.lock().as_mut_ptr();
+            let index = counter.fetch_add(node.num_elements, Ordering::SeqCst);
+            unsafe {
+                node.cum_regret = mut_ptr.add(2 * index);
+                node.strategy = mut_ptr.add(2 * index + node.num_elements);
+            }
         }
 
         for_each_child(node, |action| {
-            self.allocate_memory_recursive(&mut node.play(action));
+            self.allocate_memory_recursive(&mut node.play(action), counter);
         });
     }
 }
@@ -892,22 +910,22 @@ impl GameNode for PostFlopNode {
 
     #[inline]
     fn cum_regret(&self) -> &[f32] {
-        &self.cum_regret
+        unsafe { from_raw_parts(self.cum_regret, self.num_elements) }
     }
 
     #[inline]
     fn cum_regret_mut(&mut self) -> &mut [f32] {
-        &mut self.cum_regret
+        unsafe { from_raw_parts_mut(self.cum_regret, self.num_elements) }
     }
 
     #[inline]
     fn strategy(&self) -> &[f32] {
-        &self.strategy
+        unsafe { from_raw_parts(self.strategy, self.num_elements) }
     }
 
     #[inline]
     fn strategy_mut(&mut self) -> &mut [f32] {
-        &mut self.strategy
+        unsafe { from_raw_parts_mut(self.strategy, self.num_elements) }
     }
 
     #[inline]
@@ -925,8 +943,9 @@ impl Default for PostFlopNode {
             amount: 0,
             children: Vec::new(),
             iso_chances: Vec::new(),
-            cum_regret: Default::default(),
-            strategy: Default::default(),
+            cum_regret: std::ptr::null_mut(),
+            strategy: std::ptr::null_mut(),
+            num_elements: 0,
         }
     }
 }
