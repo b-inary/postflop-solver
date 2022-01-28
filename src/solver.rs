@@ -4,14 +4,30 @@ use crate::sliceop::*;
 use crate::utility::*;
 use std::io::{stdout, Write};
 
-const ALPHA: f32 = 1.5;
-const BETA: f32 = 0.0;
-const GAMMA: f32 = 4.0;
-
 struct DiscountParams {
     alpha_t: f32,
     beta_t: f32,
     gamma_t: f32,
+}
+
+impl DiscountParams {
+    const ALPHA: f64 = 1.5;
+    const BETA: f64 = 0.0;
+    const GAMMA: f64 = 4.0;
+
+    pub fn new(current_iteration: i32) -> Self {
+        let float = current_iteration as f64;
+
+        let pow_alpha = float.powf(Self::ALPHA);
+        let pow_beta = float.powf(Self::BETA);
+        let pow_gamma = float.powf(Self::GAMMA);
+
+        Self {
+            alpha_t: (pow_alpha / (pow_alpha + 1.0)) as f32,
+            beta_t: (pow_beta / (pow_beta + 1.0)) as f32,
+            gamma_t: pow_gamma as f32,
+        }
+    }
 }
 
 /// Performs CFR until the given number of iterations or exploitability is satisfied, and returns
@@ -34,22 +50,13 @@ pub fn solve<T: Game>(
     let mut exploitability = f32::INFINITY;
 
     for t in 0..num_iterations {
-        let mut cfv = [
-            vec![0.0; game.num_private_hands(0)],
-            vec![0.0; game.num_private_hands(1)],
-        ];
-
-        let t_f32 = t as f32;
-        let params = DiscountParams {
-            alpha_t: t_f32.powf(ALPHA) / (t_f32.powf(ALPHA) + 1.0),
-            beta_t: t_f32.powf(BETA) / (t_f32.powf(BETA) + 1.0),
-            gamma_t: t_f32.powf(GAMMA),
-        };
+        let params = DiscountParams::new(t);
 
         // alternating updates
         for player in 0..2 {
+            let mut result = vec![0.0; game.num_private_hands(player)];
             solve_recursive(
-                &mut cfv[player],
+                &mut result,
                 game,
                 &mut root,
                 player,
@@ -86,6 +93,28 @@ pub fn solve<T: Game>(
         exploitability
     } else {
         compute_exploitability(game, bias, true)
+    }
+}
+
+/// Proceeds CFR iteration for one step.
+#[inline]
+pub fn solve_step<T: Game>(game: &T, current_iteration: i32) {
+    let mut root = game.root();
+    let reach = [game.initial_reach(0), game.initial_reach(1)];
+    let params = DiscountParams::new(current_iteration);
+
+    // alternating updates
+    for player in 0..2 {
+        let mut result = vec![0.0; game.num_private_hands(player)];
+        solve_recursive(
+            &mut result,
+            game,
+            &mut root,
+            player,
+            reach[player],
+            reach[player ^ 1],
+            &params,
+        );
     }
 }
 
