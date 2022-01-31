@@ -2,6 +2,25 @@ use once_cell::sync::Lazy;
 use regex::Regex;
 use std::str::FromStr;
 
+/// A struct representing a player's 13x13 range.
+///
+/// ```
+/// use postflop_solver::*;
+///
+/// // construct a range from a string
+/// let range = "QQ+,AKs".parse::<Range>().unwrap();
+///
+/// // rank is defined as follows: A => 12, K => 11, ..., 2 => 0
+/// let ace_rank = 12;
+/// let king_rank = 11;
+/// let queen_rank = 10;
+///
+/// // check that the hand "QQ" is in the range
+/// assert_eq!(range.get_prob_pair(queen_rank), 1.0);
+///
+/// // check that the hand "AKo" is not in the range
+/// assert_eq!(range.get_prob_offsuit(ace_rank, king_rank), 0.0);
+/// ```
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct Range {
     data: [[f32; 13]; 13],
@@ -26,34 +45,38 @@ static RANGE_REGEX: Lazy<Regex> = Lazy::new(|| {
 
 static TRIM_REGEX: Lazy<Regex> = Lazy::new(|| Regex::new(r"\s*([-:,])\s*").unwrap());
 
-fn char_to_rank(c: char) -> u8 {
+/// Attempts to convert a rank character to a rank index.
+/// `'A'` => `12`, `'K'` => `11`, ..., `'2'` => `0`.
+pub fn char_to_rank(c: char) -> Result<u8, String> {
     match c {
-        'A' => 12,
-        'K' => 11,
-        'Q' => 10,
-        'J' => 9,
-        'T' => 8,
-        '2'..='9' => c as u8 - b'2',
-        _ => panic!("char_to_rank: invalid input: {c}"),
+        'A' => Ok(12),
+        'K' => Ok(11),
+        'Q' => Ok(10),
+        'J' => Ok(9),
+        'T' => Ok(8),
+        '2'..='9' => Ok(c as u8 - b'2'),
+        _ => Err(format!("invalid input: {c}")),
     }
 }
 
-fn rank_to_char(rank: u8) -> char {
+/// Attempts to convert a rank index to a rank character.
+/// `12` => `'A'`, `11` => `'K'`, ..., `0` => `'2'`.
+pub fn rank_to_char(rank: u8) -> Result<char, String> {
     match rank {
-        12 => 'A',
-        11 => 'K',
-        10 => 'Q',
-        9 => 'J',
-        8 => 'T',
-        0..=7 => (rank + b'2') as char,
-        _ => panic!("rank_to_char: invalid input: {rank}"),
+        12 => Ok('A'),
+        11 => Ok('K'),
+        10 => Ok('Q'),
+        9 => Ok('J'),
+        8 => Ok('T'),
+        0..=7 => Ok((rank + b'2') as char),
+        _ => Err(format!("invalid input: {rank}")),
     }
 }
 
 fn parse_singleton(combo: &str) -> Result<(u8, u8, Suitedness), String> {
     let mut chars = combo.chars();
-    let rank1 = char_to_rank(chars.next().unwrap());
-    let rank2 = char_to_rank(chars.next().unwrap());
+    let rank1 = char_to_rank(chars.next().unwrap())?;
+    let rank2 = char_to_rank(chars.next().unwrap())?;
     let suit = chars.next().map_or(Suitedness::Both, |c| match c {
         's' => Suitedness::Suited,
         'o' => Suitedness::Offsuit,
@@ -87,33 +110,41 @@ fn check_prob(prob: f32) -> Result<(), String> {
 }
 
 impl Range {
+    /// Creates an empty range.
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Creates a full range.
     pub fn ones() -> Self {
         Self {
             data: [[1.0; 13]; 13],
         }
     }
 
-    pub fn get_data_by_cards(&self, card1: u8, card2: u8) -> f32 {
+    /// Obtains the probability by card indices.
+    ///
+    /// The indices are defined as follows:
+    /// 2c2d2h2s => `0-3`, 3c3d3h3s => `4-7`, ..., AcAdAhAs => `48-51`.
+    pub fn get_prob_by_cards(&self, card1: u8, card2: u8) -> f32 {
         let (rank1, suit1) = (card1 >> 2, card1 & 3);
         let (rank2, suit2) = (card2 >> 2, card2 & 3);
         if rank1 == rank2 {
-            self.get_data_pair(rank1)
+            self.get_prob_pair(rank1)
         } else if suit1 == suit2 {
-            self.get_data_suited(rank1, rank2)
+            self.get_prob_suited(rank1, rank2)
         } else {
-            self.get_data_offsuit(rank1, rank2)
+            self.get_prob_offsuit(rank1, rank2)
         }
     }
 
-    pub fn get_data_pair(&self, rank: u8) -> f32 {
+    /// Obtains the probability of a pair.
+    pub fn get_prob_pair(&self, rank: u8) -> f32 {
         self.data[rank as usize][rank as usize]
     }
 
-    pub fn get_data_suited(&self, rank1: u8, rank2: u8) -> f32 {
+    /// Obtains the probability of a suited hand.
+    pub fn get_prob_suited(&self, rank1: u8, rank2: u8) -> f32 {
         if rank1 > rank2 {
             self.data[rank1 as usize][rank2 as usize]
         } else {
@@ -121,7 +152,8 @@ impl Range {
         }
     }
 
-    pub fn get_data_offsuit(&self, rank1: u8, rank2: u8) -> f32 {
+    /// Obtains the probability of an offsuit hand.
+    pub fn get_prob_offsuit(&self, rank1: u8, rank2: u8) -> f32 {
         if rank1 < rank2 {
             self.data[rank1 as usize][rank2 as usize]
         } else {
@@ -129,6 +161,7 @@ impl Range {
         }
     }
 
+    /// Sets the probability of a pair.
     pub fn set_data_pair(&mut self, rank: u8, prob: f32) -> Result<(), String> {
         check_rank(rank)?;
         check_prob(prob)?;
@@ -136,6 +169,7 @@ impl Range {
         Ok(())
     }
 
+    /// Sets the probability of a suited hand.
     pub fn set_data_suited(&mut self, rank1: u8, rank2: u8, prob: f32) -> Result<(), String> {
         check_rank(rank1)?;
         check_rank(rank2)?;
@@ -153,6 +187,7 @@ impl Range {
         Ok(())
     }
 
+    /// Sets the probability of an offsuit hand.
     pub fn set_data_offsuit(&mut self, rank1: u8, rank2: u8, prob: f32) -> Result<(), String> {
         check_rank(rank1)?;
         check_rank(rank2)?;
@@ -170,6 +205,7 @@ impl Range {
         Ok(())
     }
 
+    /// Returns whether the range is empty.
     pub fn is_empty(&self) -> bool {
         self.data.iter().all(|row| row.iter().all(|&x| x == 0.0))
     }
@@ -243,10 +279,10 @@ impl Range {
             let rank = i as u8;
             let prev_rank = (i + 1) as u8;
 
-            if start.is_some() && (i == -1 || start.unwrap().1 != self.get_data_pair(rank)) {
+            if start.is_some() && (i == -1 || start.unwrap().1 != self.get_prob_pair(rank)) {
                 let (start_rank, prob) = start.unwrap();
-                let s = rank_to_char(start_rank);
-                let e = rank_to_char(prev_rank);
+                let s = rank_to_char(start_rank).unwrap();
+                let e = rank_to_char(prev_rank).unwrap();
                 let mut tmp = if start_rank == prev_rank {
                     format!("{s}{s}")
                 } else if start_rank == 12 {
@@ -261,8 +297,8 @@ impl Range {
                 start = None;
             }
 
-            if i >= 0 && self.get_data_pair(rank) > 0.0 && start.is_none() {
-                start = Some((rank, self.get_data_pair(rank)));
+            if i >= 0 && self.get_prob_pair(rank) > 0.0 && start.is_none() {
+                start = Some((rank, self.get_prob_pair(rank)));
             }
         }
 
@@ -276,7 +312,7 @@ impl Range {
             let rank1_usize = rank1 as usize;
             let mut unsuit = true;
             for rank2 in 0..rank1 {
-                if self.get_data_suited(rank1, rank2) != self.get_data_offsuit(rank1, rank2) {
+                if self.get_prob_suited(rank1, rank2) != self.get_prob_offsuit(rank1, rank2) {
                     unsuit = false;
                     break;
                 }
@@ -308,7 +344,7 @@ impl Range {
     }
 
     fn high_cards_strings(result: &mut Vec<String>, rank1: u8, data: &[f32], suit: &str) {
-        let rank1_char = rank_to_char(rank1);
+        let rank1_char = rank_to_char(rank1).unwrap();
         let mut start: Option<(u8, f32)> = None;
 
         for i in (-1..rank1 as i32).rev() {
@@ -317,8 +353,8 @@ impl Range {
 
             if start.is_some() && (i == -1 || start.unwrap().1 != data[rank2 as usize]) {
                 let (start_rank2, prob) = start.unwrap();
-                let s = rank_to_char(start_rank2);
-                let e = rank_to_char(prev_rank2);
+                let s = rank_to_char(start_rank2).unwrap();
+                let e = rank_to_char(prev_rank2).unwrap();
                 let mut tmp = if start_rank2 == prev_rank2 {
                     format!("{rank1_char}{s}{suit}")
                 } else if start_rank2 == rank1 - 1 {
@@ -508,10 +544,10 @@ mod tests {
         assert!(data.is_ok());
 
         let data = data.unwrap();
-        assert_eq!(data.get_data_suited(3, 6), 0.5);
-        assert_eq!(data.get_data_suited(6, 3), 0.5);
-        assert_eq!(data.get_data_offsuit(3, 6), 0.0);
-        assert_eq!(data.get_data_offsuit(6, 3), 0.0);
+        assert_eq!(data.get_prob_suited(3, 6), 0.5);
+        assert_eq!(data.get_prob_suited(6, 3), 0.5);
+        assert_eq!(data.get_prob_offsuit(3, 6), 0.0);
+        assert_eq!(data.get_prob_offsuit(6, 3), 0.0);
     }
 
     #[test]

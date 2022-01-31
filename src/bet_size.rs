@@ -8,25 +8,46 @@ static SIZE_REGEX: Lazy<Regex> =
 static TRIM_REGEX: Lazy<Regex> = Lazy::new(|| Regex::new(r"\s*(,)\s*").unwrap());
 
 /// Bet size candidates for first bet and raise.
+///
+/// ```
+/// use postflop_solver::BetSize::{PotRelative, LastBetRelative};
+/// use postflop_solver::bet_sizes_from_str;
+///
+/// let bet_size = bet_sizes_from_str("0.5", "75%, 2.5x").unwrap();
+///
+/// assert_eq!(bet_size.bet, vec![PotRelative(0.5)]);
+/// assert_eq!(bet_size.raise, vec![PotRelative(0.75), LastBetRelative(2.5)]);
+/// ```
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct BetSizeCandidates {
+    /// Bet size candidates for first bet.
     pub bet: Vec<BetSize>,
+
+    /// Bet size candidates for raise.
     pub raise: Vec<BetSize>,
 }
 
 /// Bet size specification.
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
 pub enum BetSize {
+    /// Bet size is relative to the current pot size.
     PotRelative(f32),
+
+    /// Bet size is relative to the last bet size. This is only valid for raise actions.
     LastBetRelative(f32),
 }
 
 /// Attempts to convert comma-separated strings into bet sizes.
 ///
-/// Example:
-/// - `"0.4"` -> `BetSize::PotRelative(0.4)`
-/// - `"75%"` -> `BetSize::PotRelative(0.75)`
-/// - `"2.5x"` -> `BetSize::LastBetRelative(2.5)`
+/// ```
+/// use postflop_solver::BetSize::{PotRelative, LastBetRelative};
+/// use postflop_solver::bet_sizes_from_str;
+///
+/// let bet_size = bet_sizes_from_str("0.5", "75%, 2.5x").unwrap();
+///
+/// assert_eq!(bet_size.bet, vec![PotRelative(0.5)]);
+/// assert_eq!(bet_size.raise, vec![PotRelative(0.75), LastBetRelative(2.5)]);
+/// ```
 pub fn bet_sizes_from_str(bet: &str, raise: &str) -> Result<BetSizeCandidates, String> {
     let bet_string = TRIM_REGEX.replace_all(bet, "$1").trim().to_string();
     let mut bet_sizes = bet_string.split(',').collect::<Vec<_>>();

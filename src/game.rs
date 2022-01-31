@@ -44,15 +44,47 @@ unsafe impl Send for PostFlopNode {}
 unsafe impl Sync for PostFlopNode {}
 
 /// A struct for post-flop game configuration.
+///
+/// ```
+/// use postflop_solver::*;
+///
+/// let bet_sizes = bet_sizes_from_str("50%", "50%").unwrap();
+///
+/// let config = GameConfig {
+///     flop: flop_from_str("Td9d6h").unwrap(),
+///     initial_pot: 60,
+///     initial_stack: 970,
+///     range: [Range::ones(), Range::ones()],
+///     flop_bet_sizes: [bet_sizes.clone(), bet_sizes.clone()],
+///     turn_bet_sizes: [bet_sizes.clone(), bet_sizes.clone()],
+///     river_bet_sizes: [bet_sizes.clone(), bet_sizes.clone()],
+///     max_num_bet: 5,
+/// };
+/// ```
 #[derive(Debug, Clone, PartialEq)]
 pub struct GameConfig {
+    /// Flop cards: each card must be unique and in range [0, 51].
     pub flop: [u8; 3],
+
+    /// Initial pot size: must be greater than 0.
     pub initial_pot: i32,
+
+    /// Initial effective stack size: must be greater than 0.
     pub initial_stack: i32,
+
+    /// Initial range of each player.
     pub range: [Range; 2],
+
+    /// Bet size candidates of each player in flop.
     pub flop_bet_sizes: [BetSizeCandidates; 2],
+
+    /// Bet size candidates of each player in turn.
     pub turn_bet_sizes: [BetSizeCandidates; 2],
+
+    /// Bet size candidates of each player in river.
     pub river_bet_sizes: [BetSizeCandidates; 2],
+
+    /// Maximum number of bet in each betting round.
     pub max_num_bet: i32,
 }
 
@@ -208,7 +240,11 @@ impl Game for PostFlopGame {
 }
 
 impl PostFlopGame {
-    /// Constructs a new `PostFlopGame` instance with the given configuration.
+    /// Constructs a new [`PostFlopGame`] instance with the given configuration.
+    ///
+    /// # Arguments
+    /// - `config` - [`GameConfig`] instance.
+    /// - `max_memory_mb` - Maximum amount of memory in megabytes.
     pub fn new(config: &GameConfig, max_memory_mb: Option<u32>) -> Result<Self, String> {
         let mut game = Self::default();
         game.update_config(config, max_memory_mb)?;
@@ -225,6 +261,11 @@ impl PostFlopGame {
         self.check_config()?;
         self.init(max_memory_mb)?;
         Ok(())
+    }
+
+    /// Returns the card list of private hands of the given player.
+    pub fn private_hand_cards(&self, player: usize) -> &Vec<(u8, u8)> {
+        &self.private_hand_cards[player]
     }
 
     /// Checks the configuration for errors.
@@ -270,12 +311,12 @@ impl PostFlopGame {
         for c1 in 0..52 {
             for c2 in c1 + 1..52 {
                 let oop_mask: u64 = (1 << c1) | (1 << c2);
-                let oop_prob = self.config.range[0].get_data_by_cards(c1, c2);
+                let oop_prob = self.config.range[0].get_prob_by_cards(c1, c2);
                 if oop_mask & flop_mask == 0 && oop_prob > 0.0 {
                     for c3 in 0..52 {
                         for c4 in c3 + 1..52 {
                             let ip_mask: u64 = (1 << c3) | (1 << c4);
-                            let ip_prob = self.config.range[1].get_data_by_cards(c3, c4);
+                            let ip_prob = self.config.range[1].get_prob_by_cards(c3, c4);
                             if ip_mask & (flop_mask | oop_mask) == 0 {
                                 num_combinations += oop_prob as f64 * ip_prob as f64;
                             }
@@ -317,7 +358,7 @@ impl PostFlopGame {
             for card1 in 0..52 {
                 for card2 in card1 + 1..52 {
                     let hand_mask: u64 = (1 << card1) | (1 << card2);
-                    let prob = range.get_data_by_cards(card1, card2);
+                    let prob = range.get_prob_by_cards(card1, card2);
                     if prob > 0.0 && hand_mask & flop_mask == 0 {
                         initial_reach.push(prob);
                         private_hand_cards.push((card1, card2));
@@ -405,7 +446,7 @@ impl PostFlopGame {
         let total_memory_usage = current_memory_usage.load(Ordering::Relaxed) + storage_size;
         let memory_limit = max_memory_mb
             .map(|mb| (mb as u64) << 20)
-            .unwrap_or(usize::MAX as u64);
+            .unwrap_or(isize::MAX as u64);
         if total_memory_usage > memory_limit {
             return Err(format!(
                 "Memory usage {:.2}GB exceeds the limit {:.2}GB",
@@ -441,7 +482,6 @@ impl PostFlopGame {
                     &BuildTreeInfo {
                         last_action: *last_action,
                         last_bet: [0, 0],
-                        num_bet: 0,
                         ..*info
                     },
                 );
@@ -934,7 +974,13 @@ fn board_index(mut turn: u8, mut river: u8) -> usize {
 
 /// Attempts to convert an optionally space-separated string into a sorted flop array.
 ///
-/// Example: `"2c 3d 4h"` -> `Ok([0, 5, 10])`
+/// ```
+/// use postflop_solver::flop_from_str;
+///
+/// let flop = flop_from_str("2c 3d 4h");
+///
+/// assert_eq!(flop, Ok([0, 5, 10]));
+/// ```
 pub fn flop_from_str(s: &str) -> Result<[u8; 3], String> {
     let mut result = [0; 3];
     let mut chars = s.chars();
@@ -998,25 +1044,25 @@ mod tests {
     fn all_check_all_range() {
         let config = GameConfig {
             flop: flop_from_str("Td9d6h").unwrap(),
-            initial_pot: 80,
-            initial_stack: 960,
+            initial_pot: 60,
+            initial_stack: 970,
             range: [Range::ones(); 2],
             ..Default::default()
         };
         let game = PostFlopGame::new(&config, None).unwrap();
         normalize_strategy(&game);
-        let ev0 = compute_ev(&game, 0) + 40.0;
-        let ev1 = compute_ev(&game, 1) + 40.0;
-        assert!((ev0 - 40.0).abs() < 1e-4);
-        assert!((ev1 - 40.0).abs() < 1e-4);
+        let ev0 = compute_ev(&game, 0) + 30.0;
+        let ev1 = compute_ev(&game, 1) + 30.0;
+        assert!((ev0 - 30.0).abs() < 1e-4);
+        assert!((ev1 - 30.0).abs() < 1e-4);
     }
 
     #[test]
     fn one_raise_all_range() {
         let config = GameConfig {
             flop: flop_from_str("Td9d6h").unwrap(),
-            initial_pot: 80,
-            initial_stack: 960,
+            initial_pot: 60,
+            initial_stack: 970,
             range: [Range::ones(); 2],
             river_bet_sizes: [bet_sizes_from_str("50%", "").unwrap(), Default::default()],
             max_num_bet: 1,
@@ -1024,10 +1070,10 @@ mod tests {
         };
         let game = PostFlopGame::new(&config, None).unwrap();
         normalize_strategy(&game);
-        let ev0 = compute_ev(&game, 0) + 40.0;
-        let ev1 = compute_ev(&game, 1) + 40.0;
-        assert!((ev0 - 50.0).abs() < 1e-4);
-        assert!((ev1 - 30.0).abs() < 1e-4);
+        let ev0 = compute_ev(&game, 0) + 30.0;
+        let ev1 = compute_ev(&game, 1) + 30.0;
+        assert!((ev0 - 37.5).abs() < 1e-4);
+        assert!((ev1 - 22.5).abs() < 1e-4);
     }
 
     #[test]
@@ -1036,16 +1082,16 @@ mod tests {
         let lose_range_str = "22+,A2+,K9-K2,Q8-Q2,J8-J2,T8-T2,92+,82+,72+,62+";
         let config = GameConfig {
             flop: flop_from_str("AcAdKh").unwrap(),
-            initial_pot: 80,
-            initial_stack: 960,
+            initial_pot: 60,
+            initial_stack: 970,
             range: ["AA".parse().unwrap(), lose_range_str.parse().unwrap()],
             ..Default::default()
         };
         let game = PostFlopGame::new(&config, None).unwrap();
         normalize_strategy(&game);
-        let ev0 = compute_ev(&game, 0) + 40.0;
-        let ev1 = compute_ev(&game, 1) + 40.0;
-        assert!((ev0 - 80.0).abs() < 1e-4);
+        let ev0 = compute_ev(&game, 0) + 30.0;
+        let ev1 = compute_ev(&game, 1) + 30.0;
+        assert!((ev0 - 60.0).abs() < 1e-4);
         assert!((ev1 - 0.0).abs() < 1e-4);
     }
 
@@ -1053,8 +1099,8 @@ mod tests {
     fn no_assignment() {
         let config = GameConfig {
             flop: flop_from_str("Td9d6h").unwrap(),
-            initial_pot: 80,
-            initial_stack: 960,
+            initial_pot: 60,
+            initial_stack: 970,
             range: ["TT".parse().unwrap(), "TT".parse().unwrap()],
             ..Default::default()
         };
@@ -1065,21 +1111,20 @@ mod tests {
     #[test]
     #[ignore]
     fn cfr_solve() {
+        // top-40% range
+        let oop_range =
+            "22+,A2s+,A8o+,K7s+,K9o+,Q8s+,Q9o+,J8s+,J9o+,T8+,97+,86+,75+,64s+,65o,54,43s";
+
+        // top-25% range
+        let ip_range = "22+,A4s+,A9o+,K9s+,KTo+,Q9s+,QTo+,J9+,T9,98s,87s,76s,65s";
+
         let bet_sizes = bet_sizes_from_str("50%", "50%").unwrap();
+
         let config = GameConfig {
             flop: flop_from_str("Td9d6h").unwrap(),
-            initial_pot: 80,
-            initial_stack: 960,
-            range: [
-                // top-40% range
-                "22+,A2s+,A8o+,K7s+,K9o+,Q8s+,Q9o+,J8s+,J9o+,T8+,97+,86+,75+,64s+,65o,54,43s"
-                    .parse()
-                    .unwrap(),
-                // top-25% range
-                "22+,A4s+,A9o+,K9s+,KTo+,Q9s+,QTo+,J9+,T9,98s,87s,76s,65s"
-                    .parse()
-                    .unwrap(),
-            ],
+            initial_pot: 60,
+            initial_stack: 770,
+            range: [oop_range.parse().unwrap(), ip_range.parse().unwrap()],
             flop_bet_sizes: [bet_sizes.clone(), bet_sizes.clone()],
             turn_bet_sizes: [bet_sizes.clone(), bet_sizes.clone()],
             river_bet_sizes: [bet_sizes.clone(), bet_sizes.clone()],
@@ -1087,12 +1132,12 @@ mod tests {
         };
 
         let game = PostFlopGame::new(&config, Some(3072)).unwrap();
-        solve(&game, 1000, 80.0 * 0.005, true);
-        let ev0 = compute_ev(&game, 0) + 40.0;
-        let ev1 = compute_ev(&game, 1) + 40.0;
+        solve(&game, 1000, 60.0 * 0.005, true);
+        let ev0 = compute_ev(&game, 0) + 30.0;
+        let ev1 = compute_ev(&game, 1) + 30.0;
 
         // verified by GTO+
-        assert!((ev0 - 35.0).abs() < 0.5);
-        assert!((ev1 - 45.0).abs() < 0.5);
+        assert!((ev0 - 26.24).abs() < 0.5);
+        assert!((ev1 - 33.76).abs() < 0.5);
     }
 }

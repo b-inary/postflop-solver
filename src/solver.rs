@@ -71,17 +71,16 @@ pub fn solve<T: Game>(
 
         if (t + 1) % 10 == 0 || t + 1 == num_iterations {
             exploitability = compute_exploitability(game, false);
-            if print_progress {
-                print!("\riteration: {} / {} ", t + 1, num_iterations);
-                print!("(exploitability = {:.4e}[bb])", exploitability);
-                stdout().flush().unwrap();
-            }
-            if exploitability <= target_exploitability {
-                break;
-            }
-        } else if print_progress {
-            print!("\riteration: {} / {}", t + 1, num_iterations);
+        }
+
+        if print_progress {
+            print!("\riteration: {} / {} ", t + 1, num_iterations);
+            print!("(exploitability = {:.4e}[bb])", exploitability);
             stdout().flush().unwrap();
+        }
+
+        if exploitability <= target_exploitability {
+            break;
         }
     }
 

@@ -50,16 +50,16 @@ pub trait GameNode: Sync {
     /// Returns the cumulative regrets.
     fn cum_regret(&self) -> &[f32];
 
-    /// Returns the mutable reference of the cumulative regrets.
+    /// Returns the mutable reference to the cumulative regrets.
     fn cum_regret_mut(&mut self) -> &mut [f32];
 
     /// Returns the cumulative strategy.
     fn strategy(&self) -> &[f32];
 
-    /// Returns the mutable reference of the cumulative strategy.
+    /// Returns the mutable reference to the cumulative strategy.
     fn strategy_mut(&mut self) -> &mut [f32];
 
-    /// Hint for parallelization.
+    /// Hint for parallelization. By default, it is set to `false`.
     fn enable_parallelization(&self) -> bool {
         false
     }
