@@ -20,7 +20,11 @@ impl DiscountParams {
 
         let pow_alpha = float.powf(Self::ALPHA);
         let pow_beta = float.powf(Self::BETA);
-        let pow_gamma = float.powf(Self::GAMMA);
+        let pow_gamma = if float == 0.0 {
+            0.0
+        } else {
+            ((float - 1.0) / float).powf(Self::GAMMA)
+        };
 
         Self {
             alpha_t: (pow_alpha / (pow_alpha + 1.0)) as f32,
@@ -36,12 +40,12 @@ pub fn solve<T: Game>(
     game: &T,
     num_iterations: i32,
     target_exploitability: f32,
-    show_progress: bool,
+    print_progress: bool,
 ) -> f32 {
     let mut root = game.root();
     let reach = [game.initial_reach(0), game.initial_reach(1)];
 
-    if show_progress {
+    if print_progress {
         print!("iteration: 0 / {}", num_iterations);
         stdout().flush().unwrap();
     }
@@ -67,7 +71,7 @@ pub fn solve<T: Game>(
 
         if (t + 1) % 10 == 0 || t + 1 == num_iterations {
             exploitability = compute_exploitability(game, false);
-            if show_progress {
+            if print_progress {
                 print!("\riteration: {} / {} ", t + 1, num_iterations);
                 print!("(exploitability = {:.4e}[bb])", exploitability);
                 stdout().flush().unwrap();
@@ -75,13 +79,13 @@ pub fn solve<T: Game>(
             if exploitability <= target_exploitability {
                 break;
             }
-        } else if show_progress {
+        } else if print_progress {
             print!("\riteration: {} / {}", t + 1, num_iterations);
             stdout().flush().unwrap();
         }
     }
 
-    if show_progress {
+    if print_progress {
         println!();
         stdout().flush().unwrap();
     }
@@ -227,7 +231,7 @@ fn solve_recursive<T: Game>(
 
         // updates the cumulative strategy
         let cum_strategy = node.strategy_mut();
-        mul_slice_scalar(&mut reach_actions, params.gamma_t);
+        mul_slice_scalar(cum_strategy, params.gamma_t);
         add_slice(cum_strategy, &reach_actions);
     }
     // if the current player is not `player`
