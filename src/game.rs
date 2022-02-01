@@ -12,7 +12,7 @@ use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 /// A struct representing a post-flop game.
 #[derive(Default)]
 pub struct PostFlopGame {
-    /// Post-flop game configuration.
+    // Post-flop game configuration.
     config: GameConfig,
 
     // computed from `config`
@@ -171,25 +171,33 @@ impl Game for PostFlopGame {
             };
 
             for i in 0..cfreach.len() {
-                let (c1, c2) = opponent_cards[i];
-                let hand_mask: u64 = (1 << c1) | (1 << c2);
-                if hand_mask & board_mask == 0 {
-                    cfreach_sum += cfreach[i] as f64;
-                    cfreach_minus[c1 as usize] += cfreach[i] as f64;
-                    cfreach_minus[c2 as usize] += cfreach[i] as f64;
+                unsafe {
+                    let (c1, c2) = *opponent_cards.get_unchecked(i);
+                    let hand_mask: u64 = (1 << c1) | (1 << c2);
+                    if hand_mask & board_mask == 0 {
+                        let cfreach_i = *cfreach.get_unchecked(i) as f64;
+                        cfreach_sum += cfreach_i;
+                        *cfreach_minus.get_unchecked_mut(c1 as usize) += cfreach_i;
+                        *cfreach_minus.get_unchecked_mut(c2 as usize) += cfreach_i;
+                    }
                 }
             }
 
             let same_hand_index = &self.same_hand_index[player];
             for i in 0..result.len() {
-                let (c1, c2) = player_cards[i];
-                let hand_mask: u64 = (1 << c1) | (1 << c2);
-                if hand_mask & board_mask == 0 {
-                    // inclusion-exclusion principle
-                    let cfreach = cfreach_sum
-                        - (cfreach_minus[c1 as usize] + cfreach_minus[c2 as usize])
-                        + same_hand_index[i].map_or(0.0, |j| cfreach[j] as f64);
-                    result[i] = (payoff_normalized * cfreach) as f32;
+                unsafe {
+                    let (c1, c2) = *player_cards.get_unchecked(i);
+                    let hand_mask: u64 = (1 << c1) | (1 << c2);
+                    if hand_mask & board_mask == 0 {
+                        // inclusion-exclusion principle
+                        let cfreach = cfreach_sum
+                            - *cfreach_minus.get_unchecked(c1 as usize)
+                            - *cfreach_minus.get_unchecked(c2 as usize)
+                            + same_hand_index
+                                .get_unchecked(i)
+                                .map_or(0.0, |j| *cfreach.get_unchecked(j) as f64);
+                        *result.get_unchecked_mut(i) = (payoff_normalized * cfreach) as f32;
+                    }
                 }
             }
         }
@@ -204,18 +212,23 @@ impl Game for PostFlopGame {
             let opponent_len = opponent_strength.len();
 
             for i in 0..player_len {
-                let (val, index) = player_strength[i];
-                while j < opponent_len && opponent_strength[j].0 < val {
-                    let opponent_index = opponent_strength[j].1;
-                    let (c1, c2) = opponent_cards[opponent_index];
-                    cfreach_sum += cfreach[opponent_index] as f64;
-                    cfreach_minus[c1 as usize] += cfreach[opponent_index] as f64;
-                    cfreach_minus[c2 as usize] += cfreach[opponent_index] as f64;
-                    j += 1;
+                unsafe {
+                    let (val, index) = *player_strength.get_unchecked(i);
+                    while j < opponent_len && opponent_strength.get_unchecked(j).0 < val {
+                        let opponent_index = opponent_strength.get_unchecked(j).1;
+                        let (c1, c2) = *opponent_cards.get_unchecked(opponent_index);
+                        let cfreach_opp = *cfreach.get_unchecked(opponent_index) as f64;
+                        cfreach_sum += cfreach_opp;
+                        *cfreach_minus.get_unchecked_mut(c1 as usize) += cfreach_opp;
+                        *cfreach_minus.get_unchecked_mut(c2 as usize) += cfreach_opp;
+                        j += 1;
+                    }
+                    let (c1, c2) = *player_cards.get_unchecked(index);
+                    let cfreach = cfreach_sum
+                        - cfreach_minus.get_unchecked(c1 as usize)
+                        - cfreach_minus.get_unchecked(c2 as usize);
+                    *result.get_unchecked_mut(index) = (amount_normalized * cfreach) as f32;
                 }
-                let (c1, c2) = player_cards[index];
-                let cfreach = cfreach_sum - cfreach_minus[c1 as usize] - cfreach_minus[c2 as usize];
-                result[index] = (amount_normalized * cfreach) as f32;
             }
 
             cfreach_sum = 0.0;
@@ -223,18 +236,23 @@ impl Game for PostFlopGame {
             j = opponent_len;
 
             for i in (0..player_len).rev() {
-                let (val, index) = player_strength[i];
-                while j > 0 && opponent_strength[j - 1].0 > val {
-                    let opponent_index = opponent_strength[j - 1].1;
-                    let (c1, c2) = opponent_cards[opponent_index];
-                    cfreach_sum += cfreach[opponent_index] as f64;
-                    cfreach_minus[c1 as usize] += cfreach[opponent_index] as f64;
-                    cfreach_minus[c2 as usize] += cfreach[opponent_index] as f64;
-                    j -= 1;
+                unsafe {
+                    let (val, index) = *player_strength.get_unchecked(i);
+                    while j > 0 && opponent_strength.get_unchecked(j - 1).0 > val {
+                        let opponent_index = opponent_strength.get_unchecked(j - 1).1;
+                        let (c1, c2) = *opponent_cards.get_unchecked(opponent_index);
+                        let cfreach_opp = *cfreach.get_unchecked(opponent_index) as f64;
+                        cfreach_sum += cfreach_opp;
+                        *cfreach_minus.get_unchecked_mut(c1 as usize) += cfreach_opp;
+                        *cfreach_minus.get_unchecked_mut(c2 as usize) += cfreach_opp;
+                        j -= 1;
+                    }
+                    let (c1, c2) = *player_cards.get_unchecked(index);
+                    let cfreach = cfreach_sum
+                        - cfreach_minus.get_unchecked(c1 as usize)
+                        - cfreach_minus.get_unchecked(c2 as usize);
+                    *result.get_unchecked_mut(index) -= (amount_normalized * cfreach) as f32;
                 }
-                let (c1, c2) = player_cards[index];
-                let cfreach = cfreach_sum - cfreach_minus[c1 as usize] - cfreach_minus[c2 as usize];
-                result[index] -= (amount_normalized * cfreach) as f32;
             }
         }
     }
