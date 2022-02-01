@@ -24,7 +24,8 @@ pub struct PostFlopGame {
     hand_strength: Vec<[Vec<(usize, usize)>; 2]>,
 
     // global storage
-    storage: MutexLike<Vec<f32>>,
+    cum_regret: MutexLike<Vec<f32>>,
+    strategy: MutexLike<Vec<f32>>,
 }
 
 /// A struct representing a node in post-flop game tree.
@@ -446,7 +447,7 @@ impl PostFlopGame {
         let total_memory_usage = current_memory_usage.load(Ordering::Relaxed) + storage_size;
         let memory_limit = max_memory_mb
             .map(|mb| (mb as u64) << 20)
-            .unwrap_or(isize::MAX as u64);
+            .unwrap_or(usize::MAX as u64);
         if total_memory_usage > memory_limit {
             return Err(format!(
                 "Memory usage {:.2}GB exceeds the limit {:.2}GB",
@@ -455,9 +456,13 @@ impl PostFlopGame {
             ));
         }
 
-        self.storage.lock().clear();
-        self.storage.lock().shrink_to_fit();
-        self.storage = MutexLike::new(vec![0.0; 2 * num_storage_elements as usize]);
+        self.cum_regret.lock().clear();
+        self.cum_regret.lock().shrink_to_fit();
+        self.cum_regret = MutexLike::new(vec![0.0; num_storage_elements as usize]);
+
+        self.strategy.lock().clear();
+        self.strategy.lock().shrink_to_fit();
+        self.strategy = MutexLike::new(vec![0.0; num_storage_elements as usize]);
 
         let counter = AtomicUsize::new(0);
         self.allocate_memory_recursive(&mut self.root(), &counter);
@@ -852,11 +857,12 @@ impl PostFlopGame {
         }
 
         if !node.is_chance() {
-            let mut_ptr = self.storage.lock().as_mut_ptr();
+            let cum_regret_ptr = self.cum_regret.lock().as_mut_ptr();
+            let strategy_ptr = self.strategy.lock().as_mut_ptr();
             let index = counter.fetch_add(node.num_elements, Ordering::SeqCst);
             unsafe {
-                node.cum_regret = mut_ptr.add(2 * index);
-                node.strategy = mut_ptr.add(2 * index + node.num_elements);
+                node.cum_regret = cum_regret_ptr.add(index);
+                node.strategy = strategy_ptr.add(index);
             }
         }
 
