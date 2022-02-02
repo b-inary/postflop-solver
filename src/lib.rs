@@ -1,4 +1,4 @@
-//! Solver for post-flop game.
+//! Efficient open-source post-flop solver library.
 //!
 //! ```ignore
 //! use postflop_solver::*;
@@ -22,10 +22,13 @@
 //! let game = PostFlopGame::new(&config, None).unwrap();
 //!
 //! // solve game
-//! let exploitability = solve(&game, 1000, config.initial_pot as f32 * 0.005, true);
+//! let max_num_iterations = 1000;
+//! let target_exploitability = config.initial_pot as f32 * 0.005;
+//! let exploitability = solve(&game, max_num_iterations, target_exploitability, true);
 //!
 //! // compute OOP's EV
-//! let ev = compute_ev(&game, 0) + config.initial_pot as f32 / 2.0;
+//! let bias = config.initial_pot as f32 * 0.5;
+//! let ev = compute_ev(&game, 0) + bias;
 //! ```
 
 mod bet_size;
