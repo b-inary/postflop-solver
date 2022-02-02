@@ -114,8 +114,8 @@ fn compute_ev_recursive<T: Game>(
         let strategy = node.strategy();
         let row_size = strategy.len() / node.num_actions();
         let mut reach_actions = strategy.to_vec();
-        reach_actions.chunks_mut(row_size).for_each(|mut row| {
-            mul_slice(&mut row, reach);
+        reach_actions.chunks_mut(row_size).for_each(|row| {
+            mul_slice(row, reach);
         });
         for_each_child(node, |action| {
             ev.lock()[action] = compute_ev_recursive(
@@ -132,8 +132,8 @@ fn compute_ev_recursive<T: Game>(
         let strategy = node.strategy();
         let row_size = strategy.len() / node.num_actions();
         let mut cfreach_actions = strategy.to_vec();
-        cfreach_actions.chunks_mut(row_size).for_each(|mut row| {
-            mul_slice(&mut row, cfreach);
+        cfreach_actions.chunks_mut(row_size).for_each(|row| {
+            mul_slice(row, cfreach);
         });
         for_each_child(node, |action| {
             ev.lock()[action] = compute_ev_recursive(
@@ -251,8 +251,8 @@ fn compute_best_cfv_recursive<T: Game>(
             });
         }
 
-        cfreach_actions.chunks_mut(row_size).for_each(|mut row| {
-            mul_slice(&mut row, cfreach);
+        cfreach_actions.chunks_mut(row_size).for_each(|row| {
+            mul_slice(row, cfreach);
         });
 
         // computes the counterfactual values of each action
