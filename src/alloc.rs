@@ -12,39 +12,93 @@ pub fn align_up(size: usize) -> usize {
     (size + mask) & !mask
 }
 
-pub static STACK_SIZE: AtomicUsize = AtomicUsize::new(0);
+pub static STACK_UNIT_SIZE: AtomicUsize = AtomicUsize::new(0);
 
 pub struct StackAlloc;
 
 struct StackAllocData {
-    base: usize,
-    size: usize,
-    current: usize,
+    unit_capacity: usize,
+    index: usize,
+    base: Vec<usize>,
+    current: Vec<usize>,
 }
 
 thread_local! {
     static STACK_ALLOC_DATA: RefCell<StackAllocData> = RefCell::new(StackAllocData {
-        base: 0,
-        size: 0,
-        current: 0,
+        unit_capacity: 0,
+        index: 0,
+        base: Vec::new(),
+        current: Vec::new(),
     });
 }
 
 impl StackAllocData {
     #[inline]
-    fn reallocate(&mut self, size: usize) {
-        self.deallocate();
-        let layout = Layout::from_size_align(size, ALIGNMENT).unwrap();
-        self.base = unsafe { alloc::alloc(layout) } as usize;
-        self.size = size;
-        self.current = self.base;
+    fn init(&mut self) {
+        let size = STACK_UNIT_SIZE.load(Ordering::Relaxed);
+        if self.unit_capacity != size {
+            self.free();
+            let layout = Layout::from_size_align(size, ALIGNMENT).unwrap();
+            let ptr = unsafe { alloc::alloc(layout) } as usize;
+            self.unit_capacity = size;
+            self.index = 0;
+            self.base.push(ptr);
+            self.current.push(ptr);
+        }
     }
 
     #[inline]
-    fn deallocate(&mut self) {
-        if self.base != 0 {
-            let layout = Layout::from_size_align(self.size, ALIGNMENT).unwrap();
-            unsafe { alloc::dealloc(self.base as *mut u8, layout) };
+    fn free(&mut self) {
+        let layout = Layout::from_size_align(self.unit_capacity, ALIGNMENT).unwrap();
+        for b in &self.base {
+            unsafe { alloc::dealloc(*b as *mut u8, layout) };
+        }
+        self.unit_capacity = 0;
+        self.index = 0;
+        self.base.clear();
+        self.current.clear();
+    }
+
+    #[inline]
+    fn allocate(&mut self, size: usize) -> *mut [u8] {
+        self.init();
+        let size = align_up(size);
+        if self.current[self.index] + size > self.base[self.index] + self.unit_capacity {
+            self.increment_index();
+        }
+        let ptr = self.current[self.index] as *mut u8;
+        let slice = unsafe { slice::from_raw_parts_mut(ptr, size) };
+        self.current[self.index] += size;
+        slice as *mut [u8]
+    }
+
+    #[inline]
+    fn deallocate(&mut self, ptr: *mut u8, size: usize) {
+        let ptr = ptr as usize;
+        self.current[self.index] -= align_up(size);
+        if self.current[self.index] != ptr {
+            panic!("deallocation error");
+        }
+        if self.base[self.index] == ptr {
+            self.decrement_index();
+        }
+    }
+
+    #[inline]
+    fn increment_index(&mut self) {
+        self.index += 1;
+        if self.index == self.base.len() {
+            let layout = Layout::from_size_align(self.unit_capacity, ALIGNMENT).unwrap();
+            let ptr = unsafe { alloc::alloc(layout) } as usize;
+            self.base.push(ptr);
+            self.current.push(ptr);
+        }
+    }
+
+    #[inline]
+    fn decrement_index(&mut self) {
+        if self.index > 0 {
+            self.index -= 1;
         }
     }
 }
@@ -52,7 +106,7 @@ impl StackAllocData {
 impl Drop for StackAllocData {
     #[inline]
     fn drop(&mut self) {
-        self.deallocate();
+        self.free();
     }
 }
 
@@ -61,24 +115,9 @@ unsafe impl Allocator for StackAlloc {
     fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
         STACK_ALLOC_DATA.with(|data| {
             let mut data = data.borrow_mut();
-
-            // checks the stack size
-            if data.size != STACK_SIZE.load(Ordering::Relaxed) {
-                data.reallocate(STACK_SIZE.load(Ordering::Relaxed));
-            }
-
-            // perfoms the allocation
             if layout.align() <= ALIGNMENT {
-                let ptr = data.current as *mut u8;
-                let slice = unsafe { slice::from_raw_parts_mut(ptr, layout.size()) };
-                data.current += align_up(layout.size());
-
-                // checks if the allocation is within the stack
-                if data.current - data.base > data.size {
-                    return Err(AllocError);
-                }
-
-                Ok(NonNull::new(slice as *mut [u8]).unwrap())
+                // perfoms allocation
+                Ok(NonNull::new(data.allocate(layout.size())).unwrap())
             } else {
                 // unsupported alignment
                 Err(AllocError)
@@ -90,14 +129,7 @@ unsafe impl Allocator for StackAlloc {
     unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
         STACK_ALLOC_DATA.with(|data| {
             let mut data = data.borrow_mut();
-            let ptr = ptr.as_ptr() as usize;
-
-            // checks if the pointer indicates the last allocation
-            if ptr != data.current - align_up(layout.size()) {
-                panic!("deallocation error");
-            }
-
-            data.current = ptr;
+            data.deallocate(ptr.as_ptr(), layout.size());
         })
     }
 }
