@@ -5,9 +5,13 @@ use crate::range::*;
 use crate::utility::*;
 use holdem_hand_evaluator::Hand;
 use rayon::prelude::*;
+use std::cmp::max;
 use std::mem::{size_of, swap};
 use std::slice::{from_raw_parts, from_raw_parts_mut};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+
+#[cfg(feature = "custom_alloc")]
+use crate::alloc::*;
 
 /// A struct representing a post-flop game.
 #[derive(Default)]
@@ -46,6 +50,7 @@ unsafe impl Sync for PostFlopNode {}
 
 /// A struct for post-flop game configuration.
 ///
+/// # Examples
 /// ```
 /// use postflop_solver::*;
 ///
@@ -110,6 +115,8 @@ struct BuildTreeInfo<'a> {
     allin_flag: bool,
     current_memory_usage: &'a AtomicU64,
     num_storage_elements: &'a AtomicU64,
+    stack_size: [usize; 2],
+    max_stack_size: &'a [AtomicUsize; 2],
 }
 
 /// The index of player who is out of position.
@@ -124,6 +131,21 @@ const PLAYER_TERMINAL_FLAG: u16 = 0x100;
 const PLAYER_FOLD_FLAG: u16 = 0x300;
 
 const NOT_DEALT: u8 = 0xff;
+
+#[cfg(not(feature = "custom_alloc"))]
+fn align_up(size: usize) -> usize {
+    size
+}
+
+fn atomic_set_max(atomic: &AtomicUsize, value: usize) {
+    let mut v = atomic.load(Ordering::Relaxed);
+    while v < value {
+        match atomic.compare_exchange_weak(v, value, Ordering::AcqRel, Ordering::Relaxed) {
+            Ok(_) => return,
+            Err(new_v) => v = new_v,
+        }
+    }
+}
 
 impl Game for PostFlopGame {
     type Node = PostFlopNode;
@@ -446,6 +468,8 @@ impl PostFlopGame {
     fn init_root(&mut self, max_memory_mb: Option<u32>) -> Result<(), String> {
         let current_memory_usage = AtomicU64::new(size_of::<PostFlopNode>() as u64);
         let num_storage_elements = AtomicU64::new(0);
+        let max_stack_size = [AtomicUsize::new(0), AtomicUsize::new(0)];
+        let max_num_private_hands = max(self.num_private_hands(0), self.num_private_hands(1));
 
         let info = BuildTreeInfo {
             last_action: Action::None,
@@ -454,18 +478,34 @@ impl PostFlopGame {
             allin_flag: false,
             current_memory_usage: &current_memory_usage,
             num_storage_elements: &num_storage_elements,
+            stack_size: [size_of::<f32>() * max_num_private_hands; 2],
+            max_stack_size: &max_stack_size,
         };
 
         self.root().children.clear();
         self.build_tree_recursive(&mut self.root(), &info);
 
-        // memory usage check
+        let stack_size = max(
+            max_stack_size[0].load(Ordering::Relaxed),
+            max_stack_size[1].load(Ordering::Relaxed),
+        );
+
+        #[cfg(feature = "custom_alloc")]
+        // heuristically the stack size is multiplied by 5
+        // (there is no guarantee that the stack size is enough with rayon library)
+        STACK_SIZE.store(5 * stack_size, Ordering::Relaxed);
+
+        let current_memory_usage = current_memory_usage.load(Ordering::Relaxed);
         let num_storage_elements = num_storage_elements.load(Ordering::Relaxed);
         let storage_size = 2 * size_of::<f32>() as u64 * num_storage_elements;
-        let total_memory_usage = current_memory_usage.load(Ordering::Relaxed) + storage_size;
+        let stack_usage = (5 * stack_size * rayon::current_num_threads()) as u64;
+        let total_memory_usage = current_memory_usage + storage_size + stack_usage;
+
         let memory_limit = max_memory_mb
             .map(|mb| (mb as u64) << 20)
             .unwrap_or(usize::MAX as u64);
+
+        // memory usage check
         if total_memory_usage > memory_limit {
             return Err(format!(
                 "Memory usage {:.2}GB exceeds the limit {:.2}GB",
@@ -491,12 +531,23 @@ impl PostFlopGame {
     /// Builds the game tree recursively.
     fn build_tree_recursive(&self, node: &mut PostFlopNode, info: &BuildTreeInfo) {
         if node.is_terminal() {
+            for i in 0..2 {
+                atomic_set_max(&info.max_stack_size[i], info.stack_size[i]);
+            }
             return;
         }
 
         // chance node
         if node.is_chance() {
             self.push_chances(node, info);
+
+            let mut stack_size = info.stack_size;
+            let f32_size = size_of::<f32>();
+            let col_size = f32_size * node.num_actions();
+            for i in 0..2 {
+                stack_size[i] += align_up(col_size * self.num_private_hands(i));
+                stack_size[i] += align_up(f32_size * self.num_private_hands(i ^ 1));
+            }
 
             for_each_child(node, |index| {
                 let (last_action, child) = &node.children[index];
@@ -505,6 +556,7 @@ impl PostFlopGame {
                     &BuildTreeInfo {
                         last_action: *last_action,
                         last_bet: [0, 0],
+                        stack_size,
                         ..*info
                     },
                 );
@@ -513,6 +565,14 @@ impl PostFlopGame {
         // player node
         else {
             self.push_actions(node, info);
+
+            let mut stack_size = info.stack_size;
+            let col_size = size_of::<f32>() * node.num_actions();
+            for i in 0..2 {
+                let n = if i == node.player() { 2 } else { 1 };
+                stack_size[i] += align_up(col_size * self.num_private_hands(i));
+                stack_size[i] += n * align_up(col_size * self.num_private_hands(node.player()));
+            }
 
             for_each_child(node, |index| {
                 let (action, child) = &node.children[index];
@@ -543,6 +603,7 @@ impl PostFlopGame {
                         last_bet,
                         num_bet,
                         allin_flag,
+                        stack_size,
                         ..*info
                     },
                 )
@@ -998,6 +1059,7 @@ fn board_index(mut turn: u8, mut river: u8) -> usize {
 
 /// Attempts to convert an optionally space-separated string into a sorted flop array.
 ///
+/// # Examples
 /// ```
 /// use postflop_solver::flop_from_str;
 ///

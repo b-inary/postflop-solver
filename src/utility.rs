@@ -3,6 +3,11 @@ use crate::mutex_like::*;
 use crate::sliceop::*;
 use rayon::prelude::*;
 
+#[cfg(feature = "custom_alloc")]
+use crate::alloc::*;
+#[cfg(feature = "custom_alloc")]
+use std::vec::from_elem_in;
+
 /// Executes `op` for each child potentially in parallel.
 #[inline]
 pub fn for_each_child<T: GameNode, OP: Fn(usize) + Sync + Send>(node: &T, op: OP) {
@@ -60,6 +65,9 @@ fn normalize_strategy_recursive<T: GameNode>(node: &mut T) {
         let strategy = node.strategy_mut();
         let row_size = strategy.len() / num_actions;
 
+        #[cfg(feature = "custom_alloc")]
+        let mut denom = from_elem_in(0.0, row_size, StackAlloc);
+        #[cfg(not(feature = "custom_alloc"))]
         let mut denom = vec![0.0; row_size];
         strategy.chunks(row_size).for_each(|row| {
             add_slice(&mut denom, row);
@@ -86,6 +94,9 @@ fn compute_ev_recursive<T: Game>(
 ) -> f32 {
     // terminal node
     if node.is_terminal() {
+        #[cfg(feature = "custom_alloc")]
+        let mut cfv = from_elem_in(0.0, game.num_private_hands(player), StackAlloc);
+        #[cfg(not(feature = "custom_alloc"))]
         let mut cfv = vec![0.0; game.num_private_hands(player)];
         game.evaluate(&mut cfv, node, player, cfreach);
         return cfv
@@ -94,16 +105,27 @@ fn compute_ev_recursive<T: Game>(
             .fold(0.0, |acc, (v, r)| acc + *v as f64 * *r as f64) as f32;
     }
 
+    #[cfg(feature = "custom_alloc")]
+    let ev = MutexLike::new(from_elem_in(0.0, node.num_actions(), StackAlloc));
+    #[cfg(not(feature = "custom_alloc"))]
     let ev = MutexLike::new(vec![0.0; node.num_actions()]);
 
     // chance node
     if node.is_chance() {
+        #[cfg(feature = "custom_alloc")]
+        let mut cfreach = cfreach.to_vec_in(StackAlloc);
+        #[cfg(not(feature = "custom_alloc"))]
         let mut cfreach = cfreach.to_vec();
         mul_slice_scalar(&mut cfreach, node.chance_factor());
+
+        #[cfg(feature = "custom_alloc")]
+        let mut weights = from_elem_in(1.0, node.num_actions(), StackAlloc);
+        #[cfg(not(feature = "custom_alloc"))]
         let mut weights = vec![1.0; node.num_actions()];
         for iso_chance in node.isomorphic_chances() {
             weights[iso_chance.index] += 1.0;
         }
+
         for_each_child(node, |action| {
             ev.lock()[action] = weights[action]
                 * compute_ev_recursive(game, &node.play(action), player, reach, &cfreach);
@@ -113,10 +135,14 @@ fn compute_ev_recursive<T: Game>(
     else if node.player() == player {
         let strategy = node.strategy();
         let row_size = strategy.len() / node.num_actions();
+        #[cfg(feature = "custom_alloc")]
+        let mut reach_actions = strategy.to_vec_in(StackAlloc);
+        #[cfg(not(feature = "custom_alloc"))]
         let mut reach_actions = strategy.to_vec();
         reach_actions.chunks_mut(row_size).for_each(|row| {
             mul_slice(row, reach);
         });
+
         for_each_child(node, |action| {
             ev.lock()[action] = compute_ev_recursive(
                 game,
@@ -131,10 +157,15 @@ fn compute_ev_recursive<T: Game>(
     else {
         let strategy = node.strategy();
         let row_size = strategy.len() / node.num_actions();
+
+        #[cfg(feature = "custom_alloc")]
+        let mut cfreach_actions = strategy.to_vec_in(StackAlloc);
+        #[cfg(not(feature = "custom_alloc"))]
         let mut cfreach_actions = strategy.to_vec();
         cfreach_actions.chunks_mut(row_size).for_each(|row| {
             mul_slice(row, cfreach);
         });
+
         for_each_child(node, |action| {
             ev.lock()[action] = compute_ev_recursive(
                 game,
@@ -167,11 +198,21 @@ fn compute_best_cfv_recursive<T: Game>(
     // allocates memory for storing the counterfactual values
     let num_actions = node.num_actions();
     let num_private_hands = game.num_private_hands(player);
+    #[cfg(feature = "custom_alloc")]
+    let cfv_actions = MutexLike::new(from_elem_in(
+        0.0,
+        num_actions * num_private_hands,
+        StackAlloc,
+    ));
+    #[cfg(not(feature = "custom_alloc"))]
     let cfv_actions = MutexLike::new(vec![0.0; num_actions * num_private_hands]);
 
     // chance node
     if node.is_chance() {
         // updates the reach probabilities
+        #[cfg(feature = "custom_alloc")]
+        let mut cfreach = cfreach.to_vec_in(StackAlloc);
+        #[cfg(not(feature = "custom_alloc"))]
         let mut cfreach = cfreach.to_vec();
         mul_slice_scalar(&mut cfreach, node.chance_factor());
 
@@ -236,10 +277,16 @@ fn compute_best_cfv_recursive<T: Game>(
         // updates the reach probabilities
         let strategy = node.strategy();
         let row_size = strategy.len() / node.num_actions();
+        #[cfg(feature = "custom_alloc")]
+        let mut cfreach_actions = strategy.to_vec_in(StackAlloc);
+        #[cfg(not(feature = "custom_alloc"))]
         let mut cfreach_actions = strategy.to_vec();
 
         // if the strategy is not normalized, we need to normalize it
         if !is_normalized {
+            #[cfg(feature = "custom_alloc")]
+            let mut denom = from_elem_in(0.0, row_size, StackAlloc);
+            #[cfg(not(feature = "custom_alloc"))]
             let mut denom = vec![0.0; row_size];
             cfreach_actions.chunks(row_size).for_each(|row| {
                 add_slice(&mut denom, row);

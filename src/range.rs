@@ -4,6 +4,7 @@ use std::str::FromStr;
 
 /// A struct representing a player's 13x13 range.
 ///
+/// # Examples
 /// ```
 /// use postflop_solver::*;
 ///

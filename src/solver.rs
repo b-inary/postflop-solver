@@ -2,7 +2,12 @@ use crate::interface::*;
 use crate::mutex_like::*;
 use crate::sliceop::*;
 use crate::utility::*;
-use std::io::{stdout, Write};
+use std::io::{self, Write};
+
+#[cfg(feature = "custom_alloc")]
+use crate::alloc::*;
+#[cfg(feature = "custom_alloc")]
+use std::{mem, vec::from_elem_in};
 
 struct DiscountParams {
     alpha_t: f32,
@@ -47,7 +52,7 @@ pub fn solve<T: Game>(
 
     if print_progress {
         print!("iteration: 0 / {}", num_iterations);
-        stdout().flush().unwrap();
+        io::stdout().flush().unwrap();
     }
 
     let mut exploitability = f32::INFINITY;
@@ -76,7 +81,7 @@ pub fn solve<T: Game>(
         if print_progress {
             print!("\riteration: {} / {} ", t + 1, num_iterations);
             print!("(exploitability = {:.4e}[bb])", exploitability);
-            stdout().flush().unwrap();
+            io::stdout().flush().unwrap();
         }
 
         if exploitability <= target_exploitability {
@@ -86,7 +91,7 @@ pub fn solve<T: Game>(
 
     if print_progress {
         println!();
-        stdout().flush().unwrap();
+        io::stdout().flush().unwrap();
     }
 
     normalize_strategy(game);
@@ -140,11 +145,21 @@ fn solve_recursive<T: Game>(
     let num_private_hands = game.num_private_hands(player);
 
     // allocates memory for storing the counterfactual values
+    #[cfg(feature = "custom_alloc")]
+    let cfv_actions = MutexLike::new(from_elem_in(
+        0.0,
+        num_actions * num_private_hands,
+        StackAlloc,
+    ));
+    #[cfg(not(feature = "custom_alloc"))]
     let cfv_actions = MutexLike::new(vec![0.0; num_actions * num_private_hands]);
 
     // if the `node` is chance
     if node.is_chance() {
         // updates the reach probabilities
+        #[cfg(feature = "custom_alloc")]
+        let mut cfreach = cfreach.to_vec_in(StackAlloc);
+        #[cfg(not(feature = "custom_alloc"))]
         let mut cfreach = cfreach.to_vec();
         mul_slice_scalar(&mut cfreach, node.chance_factor());
 
@@ -188,6 +203,13 @@ fn solve_recursive<T: Game>(
         let strategy = regret_matching(node.cum_regret(), num_actions);
 
         // updates the reach probabilities
+        #[cfg(feature = "custom_alloc")]
+        let mut reach_actions = {
+            let mut tmp = Vec::with_capacity_in(strategy.len(), StackAlloc);
+            tmp.extend_from_slice(&strategy);
+            tmp
+        };
+        #[cfg(not(feature = "custom_alloc"))]
         let mut reach_actions = strategy.clone();
         reach_actions.chunks_mut(num_private_hands).for_each(|row| {
             mul_slice(row, reach);
@@ -232,6 +254,13 @@ fn solve_recursive<T: Game>(
         let cum_strategy = node.strategy_mut();
         mul_slice_scalar(cum_strategy, params.gamma_t);
         add_slice(cum_strategy, &reach_actions);
+
+        #[cfg(feature = "custom_alloc")]
+        {
+            // drop in reverse order
+            mem::drop(reach_actions);
+            mem::drop(cfv_strategy);
+        }
     }
     // if the current player is not `player`
     else {
@@ -269,6 +298,28 @@ fn solve_recursive<T: Game>(
 }
 
 /// Computes the strategy by regret-mathcing algorithm.
+#[cfg(feature = "custom_alloc")]
+#[inline]
+fn regret_matching(regret: &[f32], num_actions: usize) -> Vec<f32, StackAlloc> {
+    let mut strategy = regret.to_vec_in(StackAlloc);
+    let row_size = strategy.len() / num_actions;
+
+    strategy.iter_mut().for_each(|el| *el = el.max(0.0));
+
+    let mut denom = from_elem_in(0.0, row_size, StackAlloc);
+    strategy.chunks(row_size).for_each(|row| {
+        add_slice(&mut denom, row);
+    });
+
+    let default = 1.0 / num_actions as f32;
+    strategy.chunks_mut(row_size).for_each(|row| {
+        div_slice(row, &denom, default);
+    });
+
+    strategy
+}
+
+#[cfg(not(feature = "custom_alloc"))]
 #[inline]
 fn regret_matching(regret: &[f32], num_actions: usize) -> Vec<f32> {
     let mut strategy = regret.to_vec();

@@ -9,6 +9,7 @@ static TRIM_REGEX: Lazy<Regex> = Lazy::new(|| Regex::new(r"\s*(,)\s*").unwrap())
 
 /// Bet size candidates for first bet and raise.
 ///
+/// # Examples
 /// ```
 /// use postflop_solver::BetSize::{PotRelative, LastBetRelative};
 /// use postflop_solver::bet_sizes_from_str;
@@ -39,6 +40,7 @@ pub enum BetSize {
 
 /// Attempts to convert comma-separated strings into bet sizes.
 ///
+/// # Examples
 /// ```
 /// use postflop_solver::BetSize::{PotRelative, LastBetRelative};
 /// use postflop_solver::bet_sizes_from_str;

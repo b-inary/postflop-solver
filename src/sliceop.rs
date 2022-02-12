@@ -3,6 +3,7 @@ use std::ops::{AddAssign, Div, DivAssign, MulAssign, SubAssign};
 
 /// Element-wise addition of two slices.
 ///
+/// # Examples
 /// ```
 /// use postflop_solver::add_slice;
 ///
@@ -20,6 +21,7 @@ pub fn add_slice<T: Copy + AddAssign>(lhs: &mut [T], rhs: &[T]) {
 
 /// Element-wise subtraction of two slices.
 ///
+/// # Examples
 /// ```
 /// use postflop_solver::sub_slice;
 ///
@@ -37,6 +39,7 @@ pub fn sub_slice<T: Copy + SubAssign>(lhs: &mut [T], rhs: &[T]) {
 
 /// Element-wise multiplication of two slices.
 ///
+/// # Examples
 /// ```
 /// use postflop_solver::mul_slice;
 ///
@@ -56,6 +59,7 @@ pub fn mul_slice<T: Copy + MulAssign>(lhs: &mut [T], rhs: &[T]) {
 ///
 /// When the denominator is zero, the `default` value is assigned to the `lhs`.
 ///
+/// # Examples
 /// ```
 /// use postflop_solver::div_slice;
 ///
@@ -75,6 +79,7 @@ pub fn div_slice<T: Copy + Div<Output = T> + Zero>(lhs: &mut [T], rhs: &[T], def
 
 /// Add a scalar to a slice.
 ///
+/// # Examples
 /// ```
 /// use postflop_solver::add_slice_scalar;
 ///
@@ -91,6 +96,7 @@ pub fn add_slice_scalar<T: Copy + AddAssign>(slice: &mut [T], scalar: T) {
 
 /// Subtract a scalar from a slice.
 ///
+/// # Examples
 /// ```
 /// use postflop_solver::sub_slice_scalar;
 ///
@@ -107,6 +113,7 @@ pub fn sub_slice_scalar<T: Copy + SubAssign>(slice: &mut [T], scalar: T) {
 
 /// Multiply a scalar to a slice.
 ///
+/// # Examples
 /// ```
 /// use postflop_solver::mul_slice_scalar;
 ///
@@ -123,6 +130,7 @@ pub fn mul_slice_scalar<T: Copy + MulAssign>(slice: &mut [T], scalar: T) {
 
 /// Divide a slice by a scalar.
 ///
+/// # Examples
 /// ```
 /// use postflop_solver::div_slice_scalar;
 ///
@@ -139,6 +147,7 @@ pub fn div_slice_scalar<T: Copy + DivAssign>(slice: &mut [T], scalar: T) {
 
 /// Returns the "row" slice of a slice representing a two dimensional matrix.
 ///
+/// # Examples
 /// ```
 /// use postflop_solver::row;
 ///
@@ -157,6 +166,7 @@ pub fn row<T>(slice: &[T], index: usize, row_size: usize) -> &[T] {
 
 /// Returns the mutable "row" slice of a slice representing a two dimensional matrix.
 ///
+/// # Examples
 /// ```
 /// use postflop_solver::row_mut;
 ///

@@ -31,6 +31,8 @@
 //! let ev = compute_ev(&game, 0) + bias;
 //! ```
 
+#![cfg_attr(feature = "custom_alloc", feature(allocator_api))]
+
 mod bet_size;
 mod game;
 mod interface;
@@ -39,6 +41,9 @@ mod range;
 mod sliceop;
 mod solver;
 mod utility;
+
+#[cfg(feature = "custom_alloc")]
+mod alloc;
 
 pub use bet_size::*;
 pub use game::*;
