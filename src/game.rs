@@ -491,14 +491,15 @@ impl PostFlopGame {
         );
 
         #[cfg(feature = "custom_alloc")]
-        // heuristically the stack size is multiplied by 5
+        // heuristically the stack size is multiplied by 8
         // (there is no guarantee that the stack size is enough with rayon library)
-        STACK_SIZE.store(5 * stack_size, Ordering::Relaxed);
+        STACK_SIZE.store(8 * stack_size, Ordering::Relaxed);
 
         let current_memory_usage = current_memory_usage.load(Ordering::Relaxed);
         let num_storage_elements = num_storage_elements.load(Ordering::Relaxed);
         let storage_size = 2 * size_of::<f32>() as u64 * num_storage_elements;
-        let stack_usage = (5 * stack_size * rayon::current_num_threads()) as u64;
+        let stack_coef = if cfg!(feature = "custom_alloc") { 8 } else { 3 };
+        let stack_usage = (stack_coef * stack_size * rayon::current_num_threads()) as u64;
         let total_memory_usage = current_memory_usage + storage_size + stack_usage;
 
         let memory_limit = max_memory_mb
