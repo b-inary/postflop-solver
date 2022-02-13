@@ -21,15 +21,11 @@ impl DiscountParams {
     const GAMMA: f64 = 4.0;
 
     pub fn new(current_iteration: i32) -> Self {
-        let float = current_iteration as f64;
+        let float = (current_iteration - 1).max(0) as f64;
 
         let pow_alpha = float.powf(Self::ALPHA);
         let pow_beta = float.powf(Self::BETA);
-        let pow_gamma = if float == 0.0 {
-            0.0
-        } else {
-            ((float - 1.0) / float).powf(Self::GAMMA)
-        };
+        let pow_gamma = (float / (float + 1.0)).powf(Self::GAMMA);
 
         Self {
             alpha_t: (pow_alpha / (pow_alpha + 1.0)) as f32,
