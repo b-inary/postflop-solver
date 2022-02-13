@@ -80,7 +80,10 @@ pub fn decode_signed_slice(slice: &[i16], scale: f32) -> Vec<f32> {
 
 /// Normalizes the cumulative strategy.
 #[inline]
-pub fn normalize_strategy<T: Game>(game: &T) {
+pub fn normalize_strategy<T: Game>(game: &mut T) {
+    if !game.is_ready() {
+        panic!("the game is not ready");
+    }
     if game.is_compression_enabled() {
         normalize_strategy_compressed_recursive::<T::Node>(&mut game.root());
     } else {
@@ -91,6 +94,9 @@ pub fn normalize_strategy<T: Game>(game: &T) {
 /// Computes the expected value of `player`'s payoff.
 #[inline]
 pub fn compute_ev<T: Game>(game: &T, player: usize) -> f32 {
+    if !game.is_ready() {
+        panic!("the game is not ready");
+    }
     let reach = [game.initial_reach(0), game.initial_reach(1)];
     compute_ev_recursive(game, &game.root(), player, reach[player], reach[player ^ 1])
 }
@@ -98,6 +104,9 @@ pub fn compute_ev<T: Game>(game: &T, player: usize) -> f32 {
 /// Computes the exploitability of the strategy.
 #[inline]
 pub fn compute_exploitability<T: Game>(game: &T, is_normalized: bool) -> f32 {
+    if !game.is_ready() {
+        panic!("the game is not ready");
+    }
     let mut cfv = [
         vec![0.0; game.num_private_hands(0)],
         vec![0.0; game.num_private_hands(1)],

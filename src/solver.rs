@@ -42,11 +42,15 @@ impl DiscountParams {
 /// Performs CFR until the given number of iterations or exploitability is satisfied, and returns
 /// the exploitability.
 pub fn solve<T: Game>(
-    game: &T,
+    game: &mut T,
     num_iterations: i32,
     target_exploitability: f32,
     print_progress: bool,
 ) -> f32 {
+    if !game.is_ready() {
+        panic!("the game is not ready");
+    }
+
     let mut root = game.root();
     let reach = [game.initial_reach(0), game.initial_reach(1)];
 
@@ -105,7 +109,11 @@ pub fn solve<T: Game>(
 
 /// Proceeds CFR iteration for one step.
 #[inline]
-pub fn solve_step<T: Game>(game: &T, current_iteration: i32) {
+pub fn solve_step<T: Game>(game: &mut T, current_iteration: i32) {
+    if !game.is_ready() {
+        panic!("the game is not ready");
+    }
+
     let mut root = game.root();
     let reach = [game.initial_reach(0), game.initial_reach(1)];
     let params = DiscountParams::new(current_iteration);

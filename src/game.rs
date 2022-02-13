@@ -27,6 +27,9 @@ pub struct PostFlopGame {
     private_hand_cards: [Vec<(u8, u8)>; 2],
     same_hand_index: [Vec<Option<usize>>; 2],
     hand_strength: Vec<[Vec<(usize, usize)>; 2]>,
+    is_memory_allocated: bool,
+    num_storage_elements: u64,
+    total_memory_usage: u64,
 
     // global storage
     cum_regret: MutexLike<Vec<f32>>,
@@ -72,6 +75,7 @@ unsafe impl Sync for PostFlopNode {}
 ///     turn_bet_sizes: [bet_sizes.clone(), bet_sizes.clone()],
 ///     river_bet_sizes: [bet_sizes.clone(), bet_sizes.clone()],
 ///     max_num_bet: 5,
+///     enable_compression: false,
 /// };
 /// ```
 #[derive(Debug, Clone, PartialEq)]
@@ -290,6 +294,11 @@ impl Game for PostFlopGame {
     }
 
     #[inline]
+    fn is_ready(&self) -> bool {
+        self.is_memory_allocated
+    }
+
+    #[inline]
     fn is_compression_enabled(&self) -> bool {
         self.config.enable_compression
     }
@@ -297,31 +306,49 @@ impl Game for PostFlopGame {
 
 impl PostFlopGame {
     /// Constructs a new [`PostFlopGame`] instance with the given configuration.
-    ///
-    /// # Arguments
-    /// - `config` - [`GameConfig`] instance.
-    /// - `max_memory_mb` - Maximum amount of memory in megabytes.
-    pub fn new(config: &GameConfig, max_memory_mb: Option<u32>) -> Result<Self, String> {
+    pub fn new(config: &GameConfig) -> Result<Self, String> {
         let mut game = Self::default();
-        game.update_config(config, max_memory_mb)?;
+        game.update_config(config)?;
         Ok(game)
     }
 
     /// Updates the game configuration.
-    pub fn update_config(
-        &mut self,
-        config: &GameConfig,
-        max_memory_mb: Option<u32>,
-    ) -> Result<(), String> {
+    pub fn update_config(&mut self, config: &GameConfig) -> Result<(), String> {
         self.config = config.clone();
         self.check_config()?;
-        self.init(max_memory_mb)?;
+        self.init();
         Ok(())
     }
 
     /// Returns the card list of private hands of the given player.
     pub fn private_hand_cards(&self, player: usize) -> &Vec<(u8, u8)> {
         &self.private_hand_cards[player]
+    }
+
+    /// Returns the estimated memory usage in bytes.
+    pub fn memory_usage(&self) -> u64 {
+        self.total_memory_usage
+    }
+
+    /// Allocates the memory.
+    pub fn allocate_memory(&mut self) {
+        if self.is_memory_allocated {
+            return;
+        }
+
+        let num_elems = self.num_storage_elements as usize;
+        if self.is_compression_enabled() {
+            self.cum_regret_compressed = MutexLike::new(vec![0; num_elems]);
+            self.strategy_compressed = MutexLike::new(vec![0; num_elems]);
+        } else {
+            self.cum_regret = MutexLike::new(vec![0.0; num_elems]);
+            self.strategy = MutexLike::new(vec![0.0; num_elems]);
+        }
+
+        let counter = AtomicUsize::new(0);
+        self.allocate_memory_recursive(&mut self.root(), &counter);
+
+        self.is_memory_allocated = true;
     }
 
     /// Checks the configuration for errors.
@@ -392,11 +419,10 @@ impl PostFlopGame {
     }
 
     /// Initializes the game.
-    fn init(&mut self, max_memory_mb: Option<u32>) -> Result<(), String> {
+    fn init(&mut self) {
         self.init_range();
         self.init_hand_strength();
-        self.init_root(max_memory_mb)?;
-        Ok(())
+        self.init_root();
     }
 
     /// Initializes fields `initial_reach`, `private_hand_cards` and `same_hand_index`.
@@ -450,7 +476,10 @@ impl PostFlopGame {
                 (board1 + 1..52).into_par_iter().map(move |board2| {
                     if !flop.contains(board1 as usize) && !flop.contains(board2 as usize) {
                         let board = flop.add_card(board1 as usize).add_card(board2 as usize);
-                        let mut strength = [Vec::new(), Vec::new()];
+                        let mut strength = [
+                            Vec::with_capacity(private_hand_cards[0].len()),
+                            Vec::with_capacity(private_hand_cards[1].len()),
+                        ];
 
                         for player in 0..2 {
                             strength[player] = private_hand_cards[player]
@@ -467,6 +496,7 @@ impl PostFlopGame {
                                 })
                                 .collect();
 
+                            strength[player].shrink_to_fit();
                             strength[player].sort_unstable();
                         }
 
@@ -480,7 +510,7 @@ impl PostFlopGame {
     }
 
     /// Initializes the root node of game tree.
-    fn init_root(&mut self, max_memory_mb: Option<u32>) -> Result<(), String> {
+    fn init_root(&mut self) {
         let current_memory_usage = AtomicU64::new(size_of::<PostFlopNode>() as u64);
         let num_storage_elements = AtomicU64::new(0);
         let max_stack_size = [AtomicUsize::new(0), AtomicUsize::new(0)];
@@ -517,20 +547,21 @@ impl PostFlopGame {
         let num_storage_elements = num_storage_elements.load(Ordering::Relaxed);
         let storage_size = 2 * unit_size as u64 * num_storage_elements;
         let stack_usage = (4 * stack_size * rayon::current_num_threads()) as u64;
-        let total_memory_usage = current_memory_usage + storage_size + stack_usage;
+        let mut total_memory_usage = current_memory_usage + storage_size + stack_usage;
 
-        let memory_limit = max_memory_mb
-            .map(|mb| (mb as u64) << 20)
-            .unwrap_or(usize::MAX as u64);
-
-        // memory usage check
-        if total_memory_usage > memory_limit {
-            return Err(format!(
-                "Memory usage {:.2}GB exceeds the limit {:.2}GB",
-                total_memory_usage as f64 / (1 << 30) as f64,
-                memory_limit as f64 / (1 << 30) as f64
-            ));
+        total_memory_usage += vec_memory_usage(&self.hand_strength);
+        for i in 0..2 {
+            total_memory_usage += vec_memory_usage(&self.initial_reach[i]);
+            total_memory_usage += vec_memory_usage(&self.private_hand_cards[i]);
+            total_memory_usage += vec_memory_usage(&self.same_hand_index[i]);
+            for strength in &self.hand_strength {
+                total_memory_usage += vec_memory_usage(&strength[i]);
+            }
         }
+
+        self.is_memory_allocated = false;
+        self.num_storage_elements = num_storage_elements;
+        self.total_memory_usage = total_memory_usage;
 
         self.cum_regret.lock().clear();
         self.cum_regret.lock().shrink_to_fit();
@@ -540,19 +571,6 @@ impl PostFlopGame {
         self.cum_regret_compressed.lock().shrink_to_fit();
         self.strategy_compressed.lock().clear();
         self.strategy_compressed.lock().shrink_to_fit();
-
-        if self.is_compression_enabled() {
-            self.cum_regret_compressed = MutexLike::new(vec![0; num_storage_elements as usize]);
-            self.strategy_compressed = MutexLike::new(vec![0; num_storage_elements as usize]);
-        } else {
-            self.cum_regret = MutexLike::new(vec![0.0; num_storage_elements as usize]);
-            self.strategy = MutexLike::new(vec![0.0; num_storage_elements as usize]);
-        }
-
-        let counter = AtomicUsize::new(0);
-        self.allocate_memory_recursive(&mut self.root(), &counter);
-
-        Ok(())
     }
 
     /// Builds the game tree recursively.
@@ -671,6 +689,9 @@ impl PostFlopGame {
                 }
             }
 
+            node.children.reserve(49);
+            node.iso_chances.reserve(49);
+
             for card in 0..52 {
                 if (1 << card) & flop_mask != 0 {
                     continue;
@@ -685,7 +706,7 @@ impl PostFlopGame {
                     let iso_index = indices[iso_card as usize];
                     let mut iso_chance = IsomorphicChance {
                         index: iso_index,
-                        swap_list: Default::default(),
+                        swap_list: [Vec::with_capacity(51), Vec::with_capacity(51)],
                     };
 
                     for player in 0..2 {
@@ -751,6 +772,9 @@ impl PostFlopGame {
                 }
             }
 
+            node.children.reserve(48);
+            node.iso_chances.reserve(48);
+
             for card in 0..52 {
                 if (1 << card) & turn_mask != 0 {
                     continue;
@@ -765,7 +789,7 @@ impl PostFlopGame {
                     let iso_index = indices[iso_card as usize];
                     let mut iso_chance = IsomorphicChance {
                         index: iso_index,
-                        swap_list: Default::default(),
+                        swap_list: [Vec::with_capacity(51), Vec::with_capacity(51)],
                     };
 
                     for player in 0..2 {
@@ -1218,8 +1242,9 @@ mod tests {
             range: [Range::ones(); 2],
             ..Default::default()
         };
-        let game = PostFlopGame::new(&config, None).unwrap();
-        normalize_strategy(&game);
+        let mut game = PostFlopGame::new(&config).unwrap();
+        game.allocate_memory();
+        normalize_strategy(&mut game);
         let ev0 = compute_ev(&game, 0) + 30.0;
         let ev1 = compute_ev(&game, 1) + 30.0;
         assert!((ev0 - 30.0).abs() < 1e-4);
@@ -1237,8 +1262,9 @@ mod tests {
             max_num_bet: 1,
             ..Default::default()
         };
-        let game = PostFlopGame::new(&config, None).unwrap();
-        normalize_strategy(&game);
+        let mut game = PostFlopGame::new(&config).unwrap();
+        game.allocate_memory();
+        normalize_strategy(&mut game);
         let ev0 = compute_ev(&game, 0) + 30.0;
         let ev1 = compute_ev(&game, 1) + 30.0;
         assert!((ev0 - 37.5).abs() < 1e-4);
@@ -1256,8 +1282,9 @@ mod tests {
             range: ["AA".parse().unwrap(), lose_range_str.parse().unwrap()],
             ..Default::default()
         };
-        let game = PostFlopGame::new(&config, None).unwrap();
-        normalize_strategy(&game);
+        let mut game = PostFlopGame::new(&config).unwrap();
+        game.allocate_memory();
+        normalize_strategy(&mut game);
         let ev0 = compute_ev(&game, 0) + 30.0;
         let ev1 = compute_ev(&game, 1) + 30.0;
         assert!((ev0 - 60.0).abs() < 1e-4);
@@ -1273,7 +1300,7 @@ mod tests {
             range: ["TT".parse().unwrap(), "TT".parse().unwrap()],
             ..Default::default()
         };
-        let game = PostFlopGame::new(&config, None);
+        let game = PostFlopGame::new(&config);
         assert!(game.is_err());
     }
 
@@ -1290,7 +1317,7 @@ mod tests {
         let bet_sizes = bet_sizes_from_str("50%", "50%").unwrap();
 
         let config = GameConfig {
-            flop: flop_from_str("Td9d6h").unwrap(),
+            flop: flop_from_str("Td9s6h").unwrap(),
             initial_pot: 60,
             initial_stack: 770,
             range: [oop_range.parse().unwrap(), ip_range.parse().unwrap()],
@@ -1301,8 +1328,14 @@ mod tests {
             enable_compression: false,
         };
 
-        let game = PostFlopGame::new(&config, Some(3072)).unwrap();
-        solve(&game, 1000, 60.0 * 0.005, true);
+        let mut game = PostFlopGame::new(&config).unwrap();
+        println!(
+            "memory usage: {:.2}GB",
+            game.memory_usage() as f64 / (1024.0 * 1024.0 * 1024.0)
+        );
+        game.allocate_memory();
+
+        solve(&mut game, 1000, 60.0 * 0.005, true);
         let ev0 = compute_ev(&game, 0) + 30.0;
         let ev1 = compute_ev(&game, 1) + 30.0;
 

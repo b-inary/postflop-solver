@@ -18,6 +18,11 @@ pub trait Game: Sync {
     /// Computes the counterfactual values of given node.
     fn evaluate(&self, result: &mut [f32], node: &Self::Node, player: usize, cfreach: &[f32]);
 
+    /// Returns whether the instance is ready to be solved.
+    fn is_ready(&self) -> bool {
+        true
+    }
+
     /// Returns whether the compression is enabled.
     fn is_compression_enabled(&self) -> bool {
         false

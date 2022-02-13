@@ -33,12 +33,20 @@ let config = GameConfig {
 };
 
 // build game tree
-let game = PostFlopGame::new(&config, None).unwrap();
+let mut game = PostFlopGame::new(&config).unwrap();
+
+// check memory usage
+if game.memory_usage() > 4 * (1 << 30) {
+    panic!("memory usage exceeds 4GB");
+}
+
+// allocate memory
+game.allocate_memory();
 
 // solve game
 let max_num_iterations = 1000;
 let target_exploitability = config.initial_pot as f32 * 0.005;
-let exploitability = solve(&game, max_num_iterations, target_exploitability, true);
+let exploitability = solve(&mut game, max_num_iterations, target_exploitability, true);
 
 // compute OOP's EV
 let bias = config.initial_pot as f32 * 0.5;

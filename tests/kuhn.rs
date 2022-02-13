@@ -216,9 +216,9 @@ impl GameNode for KuhnNode {
 
 #[test]
 fn kuhn() {
-    let game = KuhnGame::new();
     let target = 1e-4;
-    solve(&game, 10000, target, false);
+    let mut game = KuhnGame::new();
+    solve(&mut game, 10000, target, false);
 
     let ev = compute_ev(&game, 0);
     let expected_ev = -1.0 / 18.0;
