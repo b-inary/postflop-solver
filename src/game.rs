@@ -28,8 +28,10 @@ pub struct PostFlopGame {
     same_hand_index: [Vec<Option<usize>>; 2],
     hand_strength: Vec<[Vec<(usize, usize)>; 2]>,
     is_memory_allocated: bool,
+    is_compression_enabled: bool,
     num_storage_elements: u64,
-    total_memory_usage: u64,
+    memory_usage: u64,
+    memory_usage_compressed: u64,
 
     // global storage
     cum_regret: MutexLike<Vec<f32>>,
@@ -75,7 +77,6 @@ unsafe impl Sync for PostFlopNode {}
 ///     turn_bet_sizes: [bet_sizes.clone(), bet_sizes.clone()],
 ///     river_bet_sizes: [bet_sizes.clone(), bet_sizes.clone()],
 ///     max_num_bet: 5,
-///     enable_compression: false,
 /// };
 /// ```
 #[derive(Debug, Clone, PartialEq)]
@@ -103,9 +104,6 @@ pub struct GameConfig {
 
     /// Maximum number of bet in each betting round.
     pub max_num_bet: i32,
-
-    /// Enable compressed computation.
-    pub enable_compression: bool,
 }
 
 /// Possible actions in a post-flop game.
@@ -300,7 +298,7 @@ impl Game for PostFlopGame {
 
     #[inline]
     fn is_compression_enabled(&self) -> bool {
-        self.config.enable_compression
+        self.is_compression_enabled
     }
 }
 
@@ -325,19 +323,24 @@ impl PostFlopGame {
         &self.private_hand_cards[player]
     }
 
-    /// Returns the estimated memory usage in bytes.
-    pub fn memory_usage(&self) -> u64 {
-        self.total_memory_usage
+    /// Returns the estimated memory usage in bytes (uncompressed, compressed).
+    pub fn memory_usage(&self) -> (u64, u64) {
+        (self.memory_usage, self.memory_usage_compressed)
     }
 
     /// Allocates the memory.
-    pub fn allocate_memory(&mut self) {
-        if self.is_memory_allocated {
+    pub fn allocate_memory(&mut self, enable_compression: bool) {
+        if self.is_memory_allocated && self.is_compression_enabled == enable_compression {
             return;
         }
 
+        self.clear_storage();
+
+        self.is_memory_allocated = true;
+        self.is_compression_enabled = enable_compression;
+
         let num_elems = self.num_storage_elements as usize;
-        if self.is_compression_enabled() {
+        if enable_compression {
             self.cum_regret_compressed = MutexLike::new(vec![0; num_elems]);
             self.strategy_compressed = MutexLike::new(vec![0; num_elems]);
         } else {
@@ -347,8 +350,6 @@ impl PostFlopGame {
 
         let counter = AtomicUsize::new(0);
         self.allocate_memory_recursive(&mut self.root(), &counter);
-
-        self.is_memory_allocated = true;
     }
 
     /// Checks the configuration for errors.
@@ -537,32 +538,31 @@ impl PostFlopGame {
         #[cfg(feature = "custom_alloc")]
         STACK_UNIT_SIZE.store(4 * stack_size, Ordering::Relaxed);
 
-        let unit_size = if self.is_compression_enabled() {
-            size_of::<i16>()
-        } else {
-            size_of::<f32>()
-        };
-
         let current_memory_usage = current_memory_usage.load(Ordering::Relaxed);
         let num_storage_elements = num_storage_elements.load(Ordering::Relaxed);
-        let storage_size = 2 * unit_size as u64 * num_storage_elements;
         let stack_usage = (4 * stack_size * rayon::current_num_threads()) as u64;
-        let mut total_memory_usage = current_memory_usage + storage_size + stack_usage;
+        let mut memory_usage = current_memory_usage + stack_usage;
 
-        total_memory_usage += vec_memory_usage(&self.hand_strength);
+        memory_usage += vec_memory_usage(&self.hand_strength);
         for i in 0..2 {
-            total_memory_usage += vec_memory_usage(&self.initial_reach[i]);
-            total_memory_usage += vec_memory_usage(&self.private_hand_cards[i]);
-            total_memory_usage += vec_memory_usage(&self.same_hand_index[i]);
+            memory_usage += vec_memory_usage(&self.initial_reach[i]);
+            memory_usage += vec_memory_usage(&self.private_hand_cards[i]);
+            memory_usage += vec_memory_usage(&self.same_hand_index[i]);
             for strength in &self.hand_strength {
-                total_memory_usage += vec_memory_usage(&strength[i]);
+                memory_usage += vec_memory_usage(&strength[i]);
             }
         }
 
         self.is_memory_allocated = false;
         self.num_storage_elements = num_storage_elements;
-        self.total_memory_usage = total_memory_usage;
+        self.memory_usage = memory_usage + 2 * 4 * num_storage_elements;
+        self.memory_usage_compressed = memory_usage + 2 * 2 * num_storage_elements;
 
+        self.clear_storage();
+    }
+
+    /// Clears the storage.
+    fn clear_storage(&mut self) {
         self.cum_regret.lock().clear();
         self.cum_regret.lock().shrink_to_fit();
         self.strategy.lock().clear();
@@ -1146,7 +1146,6 @@ impl Default for GameConfig {
             turn_bet_sizes: Default::default(),
             river_bet_sizes: Default::default(),
             max_num_bet: 0,
-            enable_compression: false,
         }
     }
 }
@@ -1243,7 +1242,7 @@ mod tests {
             ..Default::default()
         };
         let mut game = PostFlopGame::new(&config).unwrap();
-        game.allocate_memory();
+        game.allocate_memory(false);
         normalize_strategy(&mut game);
         let ev0 = compute_ev(&game, 0) + 30.0;
         let ev1 = compute_ev(&game, 1) + 30.0;
@@ -1263,7 +1262,7 @@ mod tests {
             ..Default::default()
         };
         let mut game = PostFlopGame::new(&config).unwrap();
-        game.allocate_memory();
+        game.allocate_memory(false);
         normalize_strategy(&mut game);
         let ev0 = compute_ev(&game, 0) + 30.0;
         let ev1 = compute_ev(&game, 1) + 30.0;
@@ -1283,7 +1282,7 @@ mod tests {
             ..Default::default()
         };
         let mut game = PostFlopGame::new(&config).unwrap();
-        game.allocate_memory();
+        game.allocate_memory(false);
         normalize_strategy(&mut game);
         let ev0 = compute_ev(&game, 0) + 30.0;
         let ev1 = compute_ev(&game, 1) + 30.0;
@@ -1317,7 +1316,7 @@ mod tests {
         let bet_sizes = bet_sizes_from_str("50%", "50%").unwrap();
 
         let config = GameConfig {
-            flop: flop_from_str("Td9s6h").unwrap(),
+            flop: flop_from_str("Td9d6h").unwrap(),
             initial_pot: 60,
             initial_stack: 770,
             range: [oop_range.parse().unwrap(), ip_range.parse().unwrap()],
@@ -1325,15 +1324,14 @@ mod tests {
             turn_bet_sizes: [bet_sizes.clone(), bet_sizes.clone()],
             river_bet_sizes: [bet_sizes.clone(), bet_sizes.clone()],
             max_num_bet: 5,
-            enable_compression: false,
         };
 
         let mut game = PostFlopGame::new(&config).unwrap();
         println!(
             "memory usage: {:.2}GB",
-            game.memory_usage() as f64 / (1024.0 * 1024.0 * 1024.0)
+            game.memory_usage().0 as f64 / (1024.0 * 1024.0 * 1024.0)
         );
-        game.allocate_memory();
+        game.allocate_memory(false);
 
         solve(&mut game, 1000, 60.0 * 0.005, true);
         let ev0 = compute_ev(&game, 0) + 30.0;

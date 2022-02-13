@@ -29,19 +29,27 @@ let config = GameConfig {
     turn_bet_sizes: [bet_sizes.clone(), bet_sizes.clone()],
     river_bet_sizes: [bet_sizes.clone(), bet_sizes.clone()],
     max_num_bet: 4,
-    enable_compression: false,
 };
 
 // build game tree
 let mut game = PostFlopGame::new(&config).unwrap();
 
 // check memory usage
-if game.memory_usage() > 4 * (1 << 30) {
-    panic!("memory usage exceeds 4GB");
-}
+let (mem_usage, mem_usage_compressed) = game.memory_usage();
+println!(
+    "memory usage without compression: {:.2}GB",
+    mem_usage as f64 / (1024.0 * 1024.0 * 1024.0)
+);
+println!(
+    "memory usage with compression: {:.2}GB",
+    mem_usage_compressed as f64 / (1024.0 * 1024.0 * 1024.0)
+);
 
-// allocate memory
-game.allocate_memory();
+// allocate memory without compression
+game.allocate_memory(false);
+
+// allocate memory with compression
+// game.allocate_memory(true);
 
 // solve game
 let max_num_iterations = 1000;
