@@ -200,7 +200,15 @@ fn solve_recursive<T: Game>(
     // if the current player is `player`
     else if node.player() == player {
         // computes the strategy by regret-maching algorithm
-        let strategy = regret_matching(node.cum_regret(), num_actions);
+        let strategy = if game.is_compression_enabled() {
+            regret_matching_compressed(
+                node.cum_regret_compressed(),
+                node.cum_regret_scale(),
+                num_actions,
+            )
+        } else {
+            regret_matching(node.cum_regret(), num_actions)
+        };
 
         // updates the reach probabilities
         #[cfg(feature = "custom_alloc")]
@@ -229,31 +237,69 @@ fn solve_recursive<T: Game>(
         });
 
         // sums up the counterfactual values
-        let cfv_actions = cfv_actions.lock();
+        let mut cfv_actions = cfv_actions.lock();
         let mut cfv_strategy = strategy;
         mul_slice(&mut cfv_strategy, &cfv_actions);
         cfv_strategy.chunks(num_private_hands).for_each(|row| {
             add_slice(result, row);
         });
 
-        // updates the cumulative regret
-        let cum_regret = node.cum_regret_mut();
-        cum_regret.iter_mut().for_each(|el| {
-            *el *= if *el >= 0.0 {
-                params.alpha_t
-            } else {
-                params.beta_t
-            };
-        });
-        add_slice(cum_regret, &cfv_actions);
-        cum_regret.chunks_mut(num_private_hands).for_each(|row| {
-            sub_slice(row, result);
-        });
+        if game.is_compression_enabled() {
+            // updates the cumulative regret
+            let scale = node.cum_regret_scale();
+            let cum_regret = node.cum_regret_compressed_mut();
+            let alpha_decoder = params.alpha_t * scale / i16::MAX as f32;
+            let beta_decoder = params.beta_t * scale / i16::MAX as f32;
+            cfv_actions.iter_mut().zip(&*cum_regret).for_each(|(x, y)| {
+                *x += if *y >= 0 {
+                    (*y as f32) * alpha_decoder
+                } else {
+                    (*y as f32) * beta_decoder
+                }
+            });
+            cfv_actions.chunks_mut(num_private_hands).for_each(|row| {
+                sub_slice(row, result);
+            });
+            let new_scale = cfv_actions.iter().fold(0.0f32, |m, v| v.abs().max(m));
+            let encoder = i16::MAX as f32 / new_scale;
+            cum_regret.iter_mut().zip(&*cfv_actions).for_each(|(x, y)| {
+                *x = (*y * encoder).round() as i16;
+            });
+            node.set_cum_regret_scale(new_scale);
 
-        // updates the cumulative strategy
-        let cum_strategy = node.strategy_mut();
-        mul_slice_scalar(cum_strategy, params.gamma_t);
-        add_slice(cum_strategy, &reach_actions);
+            // updates the cumulative strategy
+            let scale = node.strategy_scale();
+            let strategy = node.strategy_compressed_mut();
+            let decoder = params.gamma_t * scale / u16::MAX as f32;
+            reach_actions.iter_mut().zip(&*strategy).for_each(|(x, y)| {
+                *x += (*y as f32) * decoder;
+            });
+            let new_scale = reach_actions.iter().fold(0.0f32, |m, v| v.max(m));
+            let encoder = u16::MAX as f32 / new_scale;
+            strategy.iter_mut().zip(&*reach_actions).for_each(|(x, y)| {
+                *x = (*y * encoder).round() as u16;
+            });
+            node.set_strategy_scale(new_scale);
+        } else {
+            // updates the cumulative regret
+            let cum_regret = node.cum_regret_mut();
+            cum_regret.iter_mut().for_each(|el| {
+                *el *= if *el >= 0.0 {
+                    params.alpha_t
+                } else {
+                    params.beta_t
+                };
+            });
+            add_slice(cum_regret, &cfv_actions);
+            cum_regret.chunks_mut(num_private_hands).for_each(|row| {
+                sub_slice(row, result);
+            });
+
+            // updates the cumulative strategy
+            let cum_strategy = node.strategy_mut();
+            mul_slice_scalar(cum_strategy, params.gamma_t);
+            add_slice(cum_strategy, &reach_actions);
+        }
 
         #[cfg(feature = "custom_alloc")]
         {
@@ -265,7 +311,15 @@ fn solve_recursive<T: Game>(
     // if the current player is not `player`
     else {
         // computes the strategy by regret-matching algorithm
-        let mut cfreach_actions = regret_matching(node.cum_regret(), num_actions);
+        let mut cfreach_actions = if game.is_compression_enabled() {
+            regret_matching_compressed(
+                node.cum_regret_compressed(),
+                node.cum_regret_scale(),
+                num_actions,
+            )
+        } else {
+            regret_matching(node.cum_regret(), num_actions)
+        };
         let row_size = cfreach_actions.len() / num_actions;
 
         // updates the reach probabilities
@@ -319,6 +373,7 @@ fn regret_matching(regret: &[f32], num_actions: usize) -> Vec<f32, StackAlloc> {
     strategy
 }
 
+/// Computes the strategy by regret-mathcing algorithm.
 #[cfg(not(feature = "custom_alloc"))]
 #[inline]
 fn regret_matching(regret: &[f32], num_actions: usize) -> Vec<f32> {
@@ -326,6 +381,50 @@ fn regret_matching(regret: &[f32], num_actions: usize) -> Vec<f32> {
     let row_size = strategy.len() / num_actions;
 
     strategy.iter_mut().for_each(|el| *el = el.max(0.0));
+
+    let mut denom = vec![0.0; row_size];
+    strategy.chunks(row_size).for_each(|row| {
+        add_slice(&mut denom, row);
+    });
+
+    let default = 1.0 / num_actions as f32;
+    strategy.chunks_mut(row_size).for_each(|row| {
+        div_slice(row, &denom, default);
+    });
+
+    strategy
+}
+
+/// Computes the strategy by regret-mathcing algorithm.
+#[cfg(feature = "custom_alloc")]
+#[inline]
+fn regret_matching_compressed(
+    regret: &[i16],
+    scale: f32,
+    num_actions: usize,
+) -> Vec<f32, StackAlloc> {
+    let mut strategy = decode_signed_slice(regret, scale);
+    let row_size = strategy.len() / num_actions;
+
+    let mut denom = from_elem_in(0.0, row_size, StackAlloc);
+    strategy.chunks(row_size).for_each(|row| {
+        add_slice(&mut denom, row);
+    });
+
+    let default = 1.0 / num_actions as f32;
+    strategy.chunks_mut(row_size).for_each(|row| {
+        div_slice(row, &denom, default);
+    });
+
+    strategy
+}
+
+/// Computes the strategy by regret-mathcing algorithm.
+#[cfg(not(feature = "custom_alloc"))]
+#[inline]
+fn regret_matching_compressed(regret: &[i16], scale: f32, num_actions: usize) -> Vec<f32> {
+    let mut strategy = decode_signed_slice(regret, scale);
+    let row_size = strategy.len() / num_actions;
 
     let mut denom = vec![0.0; row_size];
     strategy.chunks(row_size).for_each(|row| {

@@ -18,10 +18,74 @@ pub fn for_each_child<T: GameNode, OP: Fn(usize) + Sync + Send>(node: &T, op: OP
     }
 }
 
+/// Decodes the encoded `u16` slice to the `f32` slice.
+#[cfg(feature = "custom_alloc")]
+#[inline]
+pub fn decode_unsigned_slice(slice: &[u16], scale: f32) -> Vec<f32, StackAlloc> {
+    let scale = scale / u16::MAX as f32;
+    let mut result = Vec::with_capacity_in(slice.len(), StackAlloc);
+    unsafe {
+        result.set_len(slice.len());
+        for i in 0..slice.len() {
+            *result.get_unchecked_mut(i) = *slice.get_unchecked(i) as f32 * scale;
+        }
+    }
+    result
+}
+
+/// Decodes the encoded `u16` slice to the `f32` slice.
+#[cfg(not(feature = "custom_alloc"))]
+#[inline]
+pub fn decode_unsigned_slice(slice: &[u16], scale: f32) -> Vec<f32> {
+    let scale = scale / u16::MAX as f32;
+    let mut result = Vec::with_capacity(slice.len());
+    unsafe {
+        result.set_len(slice.len());
+        for i in 0..slice.len() {
+            *result.get_unchecked_mut(i) = *slice.get_unchecked(i) as f32 * scale;
+        }
+    }
+    result
+}
+
+/// Decodes the encoded `i16` slice to the `f32` slice.
+#[cfg(feature = "custom_alloc")]
+#[inline]
+pub fn decode_signed_slice(slice: &[i16], scale: f32) -> Vec<f32, StackAlloc> {
+    let scale = scale / i16::MAX as f32;
+    let mut result = Vec::with_capacity_in(slice.len(), StackAlloc);
+    unsafe {
+        result.set_len(slice.len());
+        for i in 0..slice.len() {
+            *result.get_unchecked_mut(i) = (*slice.get_unchecked(i)).max(0) as f32 * scale;
+        }
+    }
+    result
+}
+
+/// Decodes the encoded `i16` slice to the `f32` slice.
+#[cfg(not(feature = "custom_alloc"))]
+#[inline]
+pub fn decode_signed_slice(slice: &[i16], scale: f32) -> Vec<f32> {
+    let scale = scale / i16::MAX as f32;
+    let mut result = Vec::with_capacity(slice.len());
+    unsafe {
+        result.set_len(slice.len());
+        for i in 0..slice.len() {
+            *result.get_unchecked_mut(i) = (*slice.get_unchecked(i)).max(0) as f32 * scale;
+        }
+    }
+    result
+}
+
 /// Normalizes the cumulative strategy.
 #[inline]
 pub fn normalize_strategy<T: Game>(game: &T) {
-    normalize_strategy_recursive::<T::Node>(&mut game.root());
+    if game.is_compression_enabled() {
+        normalize_strategy_compressed_recursive::<T::Node>(&mut game.root());
+    } else {
+        normalize_strategy_recursive::<T::Node>(&mut game.root());
+    }
 }
 
 /// Computes the expected value of `player`'s payoff.
@@ -84,6 +148,46 @@ fn normalize_strategy_recursive<T: GameNode>(node: &mut T) {
     })
 }
 
+/// The recursive helper function for normalizing the strategy.
+fn normalize_strategy_compressed_recursive<T: GameNode>(node: &mut T) {
+    if node.is_terminal() {
+        return;
+    }
+
+    if !node.is_chance() {
+        let num_actions = node.num_actions();
+        let strategy = node.strategy_compressed_mut();
+        let row_size = strategy.len() / num_actions;
+
+        #[cfg(feature = "custom_alloc")]
+        let mut denom = from_elem_in(0, row_size, StackAlloc);
+        #[cfg(not(feature = "custom_alloc"))]
+        let mut denom = vec![0; row_size];
+        strategy.chunks(row_size).for_each(|row| {
+            denom.iter_mut().zip(row).for_each(|(d, v)| {
+                *d += *v as u32;
+            });
+        });
+
+        let default = ((u16::MAX as usize + num_actions / 2) / num_actions) as u16;
+        strategy.chunks_mut(row_size).for_each(|row| {
+            row.iter_mut().zip(denom.iter()).for_each(|(v, d)| {
+                *v = if *d == 0 {
+                    default
+                } else {
+                    ((u16::MAX as u64 * *v as u64 + *d as u64 / 2) / *d as u64) as u16
+                };
+            });
+        });
+
+        node.set_strategy_scale(1.0);
+    }
+
+    for_each_child(node, |action| {
+        normalize_strategy_compressed_recursive::<T>(&mut node.play(action));
+    })
+}
+
 /// The recursive helper function for computing the expected value.
 fn compute_ev_recursive<T: Game>(
     game: &T,
@@ -133,12 +237,22 @@ fn compute_ev_recursive<T: Game>(
     }
     // player node
     else if node.player() == player {
-        let strategy = node.strategy();
-        let row_size = strategy.len() / node.num_actions();
-        #[cfg(feature = "custom_alloc")]
-        let mut reach_actions = strategy.to_vec_in(StackAlloc);
-        #[cfg(not(feature = "custom_alloc"))]
-        let mut reach_actions = strategy.to_vec();
+        let mut reach_actions = if game.is_compression_enabled() {
+            let strategy = node.strategy_compressed();
+            let scale = node.strategy_scale();
+            decode_unsigned_slice(strategy, scale)
+        } else {
+            #[cfg(feature = "custom_alloc")]
+            {
+                node.strategy().to_vec_in(StackAlloc)
+            }
+            #[cfg(not(feature = "custom_alloc"))]
+            {
+                node.strategy().to_vec()
+            }
+        };
+
+        let row_size = reach_actions.len() / node.num_actions();
         reach_actions.chunks_mut(row_size).for_each(|row| {
             mul_slice(row, reach);
         });
@@ -155,13 +269,22 @@ fn compute_ev_recursive<T: Game>(
     }
     // opponent node
     else {
-        let strategy = node.strategy();
-        let row_size = strategy.len() / node.num_actions();
+        let mut cfreach_actions = if game.is_compression_enabled() {
+            let strategy = node.strategy_compressed();
+            let scale = node.strategy_scale();
+            decode_unsigned_slice(strategy, scale)
+        } else {
+            #[cfg(feature = "custom_alloc")]
+            {
+                node.strategy().to_vec_in(StackAlloc)
+            }
+            #[cfg(not(feature = "custom_alloc"))]
+            {
+                node.strategy().to_vec()
+            }
+        };
 
-        #[cfg(feature = "custom_alloc")]
-        let mut cfreach_actions = strategy.to_vec_in(StackAlloc);
-        #[cfg(not(feature = "custom_alloc"))]
-        let mut cfreach_actions = strategy.to_vec();
+        let row_size = cfreach_actions.len() / node.num_actions();
         cfreach_actions.chunks_mut(row_size).for_each(|row| {
             mul_slice(row, cfreach);
         });
@@ -275,12 +398,22 @@ fn compute_best_cfv_recursive<T: Game>(
     // opponent node
     else {
         // updates the reach probabilities
-        let strategy = node.strategy();
-        let row_size = strategy.len() / node.num_actions();
-        #[cfg(feature = "custom_alloc")]
-        let mut cfreach_actions = strategy.to_vec_in(StackAlloc);
-        #[cfg(not(feature = "custom_alloc"))]
-        let mut cfreach_actions = strategy.to_vec();
+        let mut cfreach_actions = if game.is_compression_enabled() {
+            let strategy = node.strategy_compressed();
+            let scale = node.strategy_scale();
+            decode_unsigned_slice(strategy, scale)
+        } else {
+            #[cfg(feature = "custom_alloc")]
+            {
+                node.strategy().to_vec_in(StackAlloc)
+            }
+            #[cfg(not(feature = "custom_alloc"))]
+            {
+                node.strategy().to_vec()
+            }
+        };
+
+        let row_size = cfreach_actions.len() / node.num_actions();
 
         // if the strategy is not normalized, we need to normalize it
         if !is_normalized {

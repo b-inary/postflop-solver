@@ -17,6 +17,11 @@ pub trait Game: Sync {
 
     /// Computes the counterfactual values of given node.
     fn evaluate(&self, result: &mut [f32], node: &Self::Node, player: usize, cfreach: &[f32]);
+
+    /// Returns whether the compression is enabled.
+    fn is_compression_enabled(&self) -> bool {
+        false
+    }
 }
 
 /// The trait representing a node in game tree.
@@ -53,11 +58,51 @@ pub trait GameNode: Sync {
     /// Returns the mutable reference to the cumulative regrets.
     fn cum_regret_mut(&mut self) -> &mut [f32];
 
-    /// Returns the cumulative strategy.
+    /// Returns the strategy.
     fn strategy(&self) -> &[f32];
 
-    /// Returns the mutable reference to the cumulative strategy.
+    /// Returns the mutable reference to the strategy.
     fn strategy_mut(&mut self) -> &mut [f32];
+
+    /// Returns the compressed cumulative regrets.
+    fn cum_regret_compressed(&self) -> &[i16] {
+        unreachable!()
+    }
+
+    /// Returns the mutable reference to the compressed cumulative regrets.
+    fn cum_regret_compressed_mut(&mut self) -> &mut [i16] {
+        unreachable!()
+    }
+
+    /// Returns the compressed strategy.
+    fn strategy_compressed(&self) -> &[u16] {
+        unreachable!()
+    }
+
+    /// Returns the mutable reference to the compressed strategy.
+    fn strategy_compressed_mut(&mut self) -> &mut [u16] {
+        unreachable!()
+    }
+
+    /// Returns the scale of the compressed cumulative regrets.
+    fn cum_regret_scale(&self) -> f32 {
+        unreachable!()
+    }
+
+    /// Sets the scale of the compressed cumulative regrets.
+    fn set_cum_regret_scale(&mut self, _scale: f32) {
+        unreachable!()
+    }
+
+    /// Returns the scale of the compressed strategy.
+    fn strategy_scale(&self) -> f32 {
+        unreachable!()
+    }
+
+    /// Sets the scale of the compressed strategy.
+    fn set_strategy_scale(&mut self, _scale: f32) {
+        unreachable!()
+    }
 
     /// Hint for parallelization. By default, it is set to `false`.
     fn enable_parallelization(&self) -> bool {

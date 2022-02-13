@@ -7,6 +7,7 @@ use holdem_hand_evaluator::Hand;
 use rayon::prelude::*;
 use std::cmp::max;
 use std::mem::{size_of, swap};
+use std::ptr::null_mut;
 use std::slice::{from_raw_parts, from_raw_parts_mut};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
@@ -30,6 +31,8 @@ pub struct PostFlopGame {
     // global storage
     cum_regret: MutexLike<Vec<f32>>,
     strategy: MutexLike<Vec<f32>>,
+    cum_regret_compressed: MutexLike<Vec<i16>>,
+    strategy_compressed: MutexLike<Vec<u16>>,
 }
 
 /// A struct representing a node in post-flop game tree.
@@ -42,6 +45,10 @@ pub struct PostFlopNode {
     iso_chances: Vec<IsomorphicChance>,
     cum_regret: *mut f32,
     strategy: *mut f32,
+    cum_regret_compressed: *mut i16,
+    strategy_compressed: *mut u16,
+    cum_regret_scale: f32,
+    strategy_scale: f32,
     num_elements: usize,
 }
 
@@ -92,6 +99,9 @@ pub struct GameConfig {
 
     /// Maximum number of bet in each betting round.
     pub max_num_bet: i32,
+
+    /// Enable compressed computation.
+    pub enable_compression: bool,
 }
 
 /// Possible actions in a post-flop game.
@@ -277,6 +287,11 @@ impl Game for PostFlopGame {
                 }
             }
         }
+    }
+
+    #[inline]
+    fn is_compression_enabled(&self) -> bool {
+        self.config.enable_compression
     }
 }
 
@@ -469,7 +484,6 @@ impl PostFlopGame {
         let current_memory_usage = AtomicU64::new(size_of::<PostFlopNode>() as u64);
         let num_storage_elements = AtomicU64::new(0);
         let max_stack_size = [AtomicUsize::new(0), AtomicUsize::new(0)];
-        let max_num_private_hands = max(self.num_private_hands(0), self.num_private_hands(1));
 
         let info = BuildTreeInfo {
             last_action: Action::None,
@@ -478,7 +492,7 @@ impl PostFlopGame {
             allin_flag: false,
             current_memory_usage: &current_memory_usage,
             num_storage_elements: &num_storage_elements,
-            stack_size: [align_up(size_of::<f32>() * max_num_private_hands); 2],
+            stack_size: [0, 0],
             max_stack_size: &max_stack_size,
         };
 
@@ -493,9 +507,15 @@ impl PostFlopGame {
         #[cfg(feature = "custom_alloc")]
         STACK_UNIT_SIZE.store(4 * stack_size, Ordering::Relaxed);
 
+        let unit_size = if self.is_compression_enabled() {
+            size_of::<i16>()
+        } else {
+            size_of::<f32>()
+        };
+
         let current_memory_usage = current_memory_usage.load(Ordering::Relaxed);
         let num_storage_elements = num_storage_elements.load(Ordering::Relaxed);
-        let storage_size = 2 * size_of::<f32>() as u64 * num_storage_elements;
+        let storage_size = 2 * unit_size as u64 * num_storage_elements;
         let stack_usage = (4 * stack_size * rayon::current_num_threads()) as u64;
         let total_memory_usage = current_memory_usage + storage_size + stack_usage;
 
@@ -514,11 +534,20 @@ impl PostFlopGame {
 
         self.cum_regret.lock().clear();
         self.cum_regret.lock().shrink_to_fit();
-        self.cum_regret = MutexLike::new(vec![0.0; num_storage_elements as usize]);
-
         self.strategy.lock().clear();
         self.strategy.lock().shrink_to_fit();
-        self.strategy = MutexLike::new(vec![0.0; num_storage_elements as usize]);
+        self.cum_regret_compressed.lock().clear();
+        self.cum_regret_compressed.lock().shrink_to_fit();
+        self.strategy_compressed.lock().clear();
+        self.strategy_compressed.lock().shrink_to_fit();
+
+        if self.is_compression_enabled() {
+            self.cum_regret_compressed = MutexLike::new(vec![0; num_storage_elements as usize]);
+            self.strategy_compressed = MutexLike::new(vec![0; num_storage_elements as usize]);
+        } else {
+            self.cum_regret = MutexLike::new(vec![0.0; num_storage_elements as usize]);
+            self.strategy = MutexLike::new(vec![0.0; num_storage_elements as usize]);
+        }
 
         let counter = AtomicUsize::new(0);
         self.allocate_memory_recursive(&mut self.root(), &counter);
@@ -934,12 +963,23 @@ impl PostFlopGame {
         }
 
         if !node.is_chance() {
-            let cum_regret_ptr = self.cum_regret.lock().as_mut_ptr();
-            let strategy_ptr = self.strategy.lock().as_mut_ptr();
             let index = counter.fetch_add(node.num_elements, Ordering::SeqCst);
             unsafe {
-                node.cum_regret = cum_regret_ptr.add(index);
-                node.strategy = strategy_ptr.add(index);
+                if self.is_compression_enabled() {
+                    let cum_regret_ptr = self.cum_regret_compressed.lock().as_mut_ptr();
+                    let strategy_ptr = self.strategy_compressed.lock().as_mut_ptr();
+                    node.cum_regret = null_mut();
+                    node.strategy = null_mut();
+                    node.cum_regret_compressed = cum_regret_ptr.add(index);
+                    node.strategy_compressed = strategy_ptr.add(index);
+                } else {
+                    let cum_regret_ptr = self.cum_regret.lock().as_mut_ptr();
+                    let strategy_ptr = self.strategy.lock().as_mut_ptr();
+                    node.cum_regret = cum_regret_ptr.add(index);
+                    node.strategy = strategy_ptr.add(index);
+                    node.cum_regret_compressed = null_mut();
+                    node.strategy_compressed = null_mut();
+                }
             }
         }
 
@@ -1006,6 +1046,46 @@ impl GameNode for PostFlopNode {
     }
 
     #[inline]
+    fn cum_regret_compressed(&self) -> &[i16] {
+        unsafe { from_raw_parts(self.cum_regret_compressed, self.num_elements) }
+    }
+
+    #[inline]
+    fn cum_regret_compressed_mut(&mut self) -> &mut [i16] {
+        unsafe { from_raw_parts_mut(self.cum_regret_compressed, self.num_elements) }
+    }
+
+    #[inline]
+    fn strategy_compressed(&self) -> &[u16] {
+        unsafe { from_raw_parts(self.strategy_compressed, self.num_elements) }
+    }
+
+    #[inline]
+    fn strategy_compressed_mut(&mut self) -> &mut [u16] {
+        unsafe { from_raw_parts_mut(self.strategy_compressed, self.num_elements) }
+    }
+
+    #[inline]
+    fn cum_regret_scale(&self) -> f32 {
+        self.cum_regret_scale
+    }
+
+    #[inline]
+    fn set_cum_regret_scale(&mut self, scale: f32) {
+        self.cum_regret_scale = scale;
+    }
+
+    #[inline]
+    fn strategy_scale(&self) -> f32 {
+        self.strategy_scale
+    }
+
+    #[inline]
+    fn set_strategy_scale(&mut self, scale: f32) {
+        self.strategy_scale = scale;
+    }
+
+    #[inline]
     fn enable_parallelization(&self) -> bool {
         self.river == NOT_DEALT
     }
@@ -1020,8 +1100,12 @@ impl Default for PostFlopNode {
             amount: 0,
             children: Vec::new(),
             iso_chances: Vec::new(),
-            cum_regret: std::ptr::null_mut(),
-            strategy: std::ptr::null_mut(),
+            cum_regret: null_mut(),
+            strategy: null_mut(),
+            cum_regret_compressed: null_mut(),
+            strategy_compressed: null_mut(),
+            cum_regret_scale: 0.0,
+            strategy_scale: 0.0,
             num_elements: 0,
         }
     }
@@ -1038,6 +1122,7 @@ impl Default for GameConfig {
             turn_bet_sizes: Default::default(),
             river_bet_sizes: Default::default(),
             max_num_bet: 0,
+            enable_compression: false,
         }
     }
 }
@@ -1213,6 +1298,7 @@ mod tests {
             turn_bet_sizes: [bet_sizes.clone(), bet_sizes.clone()],
             river_bet_sizes: [bet_sizes.clone(), bet_sizes.clone()],
             max_num_bet: 5,
+            enable_compression: false,
         };
 
         let game = PostFlopGame::new(&config, Some(3072)).unwrap();
