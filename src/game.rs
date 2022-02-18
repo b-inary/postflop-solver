@@ -2,9 +2,7 @@ use crate::bet_size::*;
 use crate::interface::*;
 use crate::mutex_like::*;
 use crate::range::*;
-use crate::utility::*;
 use holdem_hand_evaluator::Hand;
-use rayon::prelude::*;
 use std::cmp::max;
 use std::mem::{size_of, swap};
 use std::ptr::null_mut;
@@ -469,45 +467,41 @@ impl PostFlopGame {
             flop = flop.add_card(*card as usize);
         }
 
+        self.hand_strength = vec![Default::default(); 52 * 51 / 2];
         let private_hand_cards = &self.private_hand_cards;
 
-        self.hand_strength = (0..52)
-            .into_par_iter()
-            .flat_map(|board1| {
-                (board1 + 1..52).into_par_iter().map(move |board2| {
-                    if !flop.contains(board1 as usize) && !flop.contains(board2 as usize) {
-                        let board = flop.add_card(board1 as usize).add_card(board2 as usize);
-                        let mut strength = [
-                            Vec::with_capacity(private_hand_cards[0].len()),
-                            Vec::with_capacity(private_hand_cards[1].len()),
-                        ];
+        for board1 in 0..52 {
+            for board2 in board1 + 1..52 {
+                if !flop.contains(board1 as usize) && !flop.contains(board2 as usize) {
+                    let board = flop.add_card(board1 as usize).add_card(board2 as usize);
+                    let mut strength = [
+                        Vec::with_capacity(private_hand_cards[0].len()),
+                        Vec::with_capacity(private_hand_cards[1].len()),
+                    ];
 
-                        for player in 0..2 {
-                            strength[player] = private_hand_cards[player]
-                                .iter()
-                                .enumerate()
-                                .filter_map(|(i, &(hand1, hand2))| {
-                                    let (hand1, hand2) = (hand1 as usize, hand2 as usize);
-                                    if board.contains(hand1) || board.contains(hand2) {
-                                        None
-                                    } else {
-                                        let hand = board.add_card(hand1).add_card(hand2);
-                                        Some((hand.evaluate() as usize, i))
-                                    }
-                                })
-                                .collect();
+                    for player in 0..2 {
+                        strength[player] = private_hand_cards[player]
+                            .iter()
+                            .enumerate()
+                            .filter_map(|(i, &(hand1, hand2))| {
+                                let (hand1, hand2) = (hand1 as usize, hand2 as usize);
+                                if board.contains(hand1) || board.contains(hand2) {
+                                    None
+                                } else {
+                                    let hand = board.add_card(hand1).add_card(hand2);
+                                    Some((hand.evaluate() as usize, i))
+                                }
+                            })
+                            .collect();
 
-                            strength[player].shrink_to_fit();
-                            strength[player].sort_unstable();
-                        }
-
-                        strength
-                    } else {
-                        Default::default()
+                        strength[player].shrink_to_fit();
+                        strength[player].sort_unstable();
                     }
-                })
-            })
-            .collect();
+
+                    self.hand_strength[board_index(board1, board2)] = strength;
+                }
+            }
+        }
     }
 
     /// Initializes the root node of game tree.
@@ -594,18 +588,17 @@ impl PostFlopGame {
                 stack_size[i] += align_up(f32_size * self.num_private_hands(i ^ 1));
             }
 
-            for_each_child(node, |index| {
-                let (last_action, child) = &node.children[index];
+            for (action, child) in &node.children {
                 self.build_tree_recursive(
                     &mut child.lock(),
                     &BuildTreeInfo {
-                        last_action: *last_action,
+                        last_action: *action,
                         last_bet: [0, 0],
                         stack_size,
                         ..*info
                     },
                 );
-            });
+            }
         }
         // player node
         else {
@@ -619,8 +612,7 @@ impl PostFlopGame {
                 stack_size[i] += n * align_up(col_size * self.num_private_hands(node.player()));
             }
 
-            for_each_child(node, |index| {
-                let (action, child) = &node.children[index];
+            for (action, child) in &node.children {
                 let mut last_bet = info.last_bet;
                 let mut num_bet = info.num_bet;
                 let mut allin_flag = info.allin_flag;
@@ -652,7 +644,7 @@ impl PostFlopGame {
                         ..*info
                     },
                 )
-            });
+            }
         }
     }
 
@@ -1007,9 +999,9 @@ impl PostFlopGame {
             }
         }
 
-        for_each_child(node, |action| {
+        for action in node.actions() {
             self.allocate_memory_recursive(&mut node.play(action), counter);
-        });
+        }
     }
 }
 
@@ -1223,6 +1215,7 @@ fn card_from_str<T: Iterator<Item = char>>(chars: &mut T) -> Result<u8, String> 
 mod tests {
     use super::*;
     use crate::solver::*;
+    use crate::utility::*;
 
     #[test]
     fn test_flop_from_str() {
