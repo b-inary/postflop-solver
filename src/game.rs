@@ -301,8 +301,13 @@ impl Game for PostFlopGame {
 }
 
 impl PostFlopGame {
+    /// Constructs a new empty [`PostFlopGame`] (needs `update_config`).
+    pub fn new() -> Self {
+        Self::default()
+    }
+
     /// Constructs a new [`PostFlopGame`] instance with the given configuration.
-    pub fn new(config: &GameConfig) -> Result<Self, String> {
+    pub fn with_config(config: &GameConfig) -> Result<Self, String> {
         let mut game = Self::default();
         game.update_config(config)?;
         Ok(game)
@@ -1234,7 +1239,7 @@ mod tests {
             range: [Range::ones(); 2],
             ..Default::default()
         };
-        let mut game = PostFlopGame::new(&config).unwrap();
+        let mut game = PostFlopGame::with_config(&config).unwrap();
         game.allocate_memory(false);
         normalize_strategy(&mut game);
         let ev0 = compute_ev(&game, 0) + 30.0;
@@ -1254,7 +1259,7 @@ mod tests {
             max_num_bet: 1,
             ..Default::default()
         };
-        let mut game = PostFlopGame::new(&config).unwrap();
+        let mut game = PostFlopGame::with_config(&config).unwrap();
         game.allocate_memory(false);
         normalize_strategy(&mut game);
         let ev0 = compute_ev(&game, 0) + 30.0;
@@ -1274,7 +1279,7 @@ mod tests {
             range: ["AA".parse().unwrap(), lose_range_str.parse().unwrap()],
             ..Default::default()
         };
-        let mut game = PostFlopGame::new(&config).unwrap();
+        let mut game = PostFlopGame::with_config(&config).unwrap();
         game.allocate_memory(false);
         normalize_strategy(&mut game);
         let ev0 = compute_ev(&game, 0) + 30.0;
@@ -1292,7 +1297,7 @@ mod tests {
             range: ["TT".parse().unwrap(), "TT".parse().unwrap()],
             ..Default::default()
         };
-        let game = PostFlopGame::new(&config);
+        let game = PostFlopGame::with_config(&config);
         assert!(game.is_err());
     }
 
@@ -1319,7 +1324,7 @@ mod tests {
             max_num_bet: 5,
         };
 
-        let mut game = PostFlopGame::new(&config).unwrap();
+        let mut game = PostFlopGame::with_config(&config).unwrap();
         println!(
             "memory usage: {:.2}GB",
             game.memory_usage().0 as f64 / (1024.0 * 1024.0 * 1024.0)

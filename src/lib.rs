@@ -19,7 +19,7 @@
 //! };
 //!
 //! // build game tree
-//! let mut game = PostFlopGame::new(&config).unwrap();
+//! let mut game = PostFlopGame::with_config(&config).unwrap();
 //!
 //! // check memory usage
 //! let (mem_usage, mem_usage_compressed) = game.memory_usage();
