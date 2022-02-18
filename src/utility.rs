@@ -23,12 +23,13 @@ pub fn for_each_child<T: GameNode, OP: Fn(usize) + Sync + Send>(node: &T, op: OP
 #[inline]
 pub fn decode_unsigned_slice(slice: &[u16], scale: f32) -> Vec<f32, StackAlloc> {
     let scale = scale / u16::MAX as f32;
-    let mut result = Vec::with_capacity_in(slice.len(), StackAlloc);
+    let mut result = Vec::<f32, StackAlloc>::with_capacity_in(slice.len(), StackAlloc);
+    let ptr = result.as_mut_ptr();
     unsafe {
-        result.set_len(slice.len());
         for i in 0..slice.len() {
-            *result.get_unchecked_mut(i) = *slice.get_unchecked(i) as f32 * scale;
+            *ptr.add(i) = *slice.get_unchecked(i) as f32 * scale;
         }
+        result.set_len(slice.len());
     }
     result
 }
@@ -38,12 +39,13 @@ pub fn decode_unsigned_slice(slice: &[u16], scale: f32) -> Vec<f32, StackAlloc> 
 #[inline]
 pub fn decode_unsigned_slice(slice: &[u16], scale: f32) -> Vec<f32> {
     let scale = scale / u16::MAX as f32;
-    let mut result = Vec::with_capacity(slice.len());
+    let mut result = Vec::<f32>::with_capacity(slice.len());
+    let ptr = result.as_mut_ptr();
     unsafe {
-        result.set_len(slice.len());
         for i in 0..slice.len() {
-            *result.get_unchecked_mut(i) = *slice.get_unchecked(i) as f32 * scale;
+            *ptr.add(i) = *slice.get_unchecked(i) as f32 * scale;
         }
+        result.set_len(slice.len());
     }
     result
 }
@@ -53,12 +55,13 @@ pub fn decode_unsigned_slice(slice: &[u16], scale: f32) -> Vec<f32> {
 #[inline]
 pub fn decode_signed_slice(slice: &[i16], scale: f32) -> Vec<f32, StackAlloc> {
     let scale = scale / i16::MAX as f32;
-    let mut result = Vec::with_capacity_in(slice.len(), StackAlloc);
+    let mut result = Vec::<f32, StackAlloc>::with_capacity_in(slice.len(), StackAlloc);
+    let ptr = result.as_mut_ptr();
     unsafe {
-        result.set_len(slice.len());
         for i in 0..slice.len() {
-            *result.get_unchecked_mut(i) = (*slice.get_unchecked(i)).max(0) as f32 * scale;
+            *ptr.add(i) = (*slice.get_unchecked(i)).max(0) as f32 * scale;
         }
+        result.set_len(slice.len());
     }
     result
 }
@@ -68,12 +71,13 @@ pub fn decode_signed_slice(slice: &[i16], scale: f32) -> Vec<f32, StackAlloc> {
 #[inline]
 pub fn decode_signed_slice(slice: &[i16], scale: f32) -> Vec<f32> {
     let scale = scale / i16::MAX as f32;
-    let mut result = Vec::with_capacity(slice.len());
+    let mut result = Vec::<f32>::with_capacity(slice.len());
+    let ptr = result.as_mut_ptr();
     unsafe {
-        result.set_len(slice.len());
         for i in 0..slice.len() {
-            *result.get_unchecked_mut(i) = (*slice.get_unchecked(i)).max(0) as f32 * scale;
+            *ptr.add(i) = (*slice.get_unchecked(i)).max(0) as f32 * scale;
         }
+        result.set_len(slice.len());
     }
     result
 }
