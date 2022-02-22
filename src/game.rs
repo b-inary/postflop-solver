@@ -53,6 +53,7 @@ pub struct PostFlopNode {
     cum_regret_scale: f32,
     strategy_scale: f32,
     num_elements: usize,
+    is_strategy_locked: bool,
 }
 
 unsafe impl Send for PostFlopNode {}
@@ -143,10 +144,12 @@ const PLAYER_FOLD_FLAG: u16 = 0x300;
 const NOT_DEALT: u8 = 0xff;
 
 #[cfg(not(feature = "custom_alloc"))]
+#[inline]
 fn align_up(size: usize) -> usize {
     size
 }
 
+#[inline]
 fn atomic_set_max(atomic: &AtomicUsize, value: usize) {
     let mut v = atomic.load(Ordering::Relaxed);
     while v < value {
@@ -302,11 +305,13 @@ impl Game for PostFlopGame {
 
 impl PostFlopGame {
     /// Constructs a new empty [`PostFlopGame`] (needs `update_config`).
+    #[inline]
     pub fn new() -> Self {
         Self::default()
     }
 
     /// Constructs a new [`PostFlopGame`] instance with the given configuration.
+    #[inline]
     pub fn with_config(config: &GameConfig) -> Result<Self, String> {
         let mut game = Self::default();
         game.update_config(config)?;
@@ -314,6 +319,7 @@ impl PostFlopGame {
     }
 
     /// Updates the game configuration.
+    #[inline]
     pub fn update_config(&mut self, config: &GameConfig) -> Result<(), String> {
         self.config = config.clone();
         self.check_config()?;
@@ -322,11 +328,13 @@ impl PostFlopGame {
     }
 
     /// Returns the card list of private hands of the given player.
+    #[inline]
     pub fn private_hand_cards(&self, player: usize) -> &Vec<(u8, u8)> {
         &self.private_hand_cards[player]
     }
 
     /// Returns the estimated memory usage in bytes (uncompressed, compressed).
+    #[inline]
     pub fn memory_usage(&self) -> (u64, u64) {
         (self.memory_usage, self.memory_usage_compressed)
     }
@@ -423,6 +431,7 @@ impl PostFlopGame {
     }
 
     /// Initializes the game.
+    #[inline]
     fn init(&mut self) {
         self.init_range();
         self.init_hand_strength();
@@ -561,6 +570,7 @@ impl PostFlopGame {
     }
 
     /// Clears the storage.
+    #[inline]
     fn clear_storage(&mut self) {
         self.cum_regret.lock().clear();
         self.cum_regret.lock().shrink_to_fit();
@@ -1107,12 +1117,18 @@ impl GameNode for PostFlopNode {
     }
 
     #[inline]
+    fn is_strategy_locked(&self) -> bool {
+        self.is_strategy_locked
+    }
+
+    #[inline]
     fn enable_parallelization(&self) -> bool {
         self.river == NOT_DEALT
     }
 }
 
 impl Default for PostFlopNode {
+    #[inline]
     fn default() -> Self {
         Self {
             player: PLAYER_OOP,
@@ -1128,11 +1144,13 @@ impl Default for PostFlopNode {
             cum_regret_scale: 0.0,
             strategy_scale: 0.0,
             num_elements: 0,
+            is_strategy_locked: false,
         }
     }
 }
 
 impl Default for GameConfig {
+    #[inline]
     fn default() -> Self {
         Self {
             flop: [NOT_DEALT; 3],
@@ -1191,6 +1209,7 @@ pub fn flop_from_str(s: &str) -> Result<[u8; 3], String> {
     Ok(result)
 }
 
+#[inline]
 fn card_from_str<T: Iterator<Item = char>>(chars: &mut T) -> Result<u8, String> {
     let rank_char = chars.next().ok_or_else(|| "parse failed".to_string())?;
     let suit_char = chars.next().ok_or_else(|| "parse failed".to_string())?;

@@ -109,6 +109,11 @@ pub trait GameNode: Sync {
         unreachable!()
     }
 
+    /// Returns whether the strategy is locked.
+    fn is_strategy_locked(&self) -> bool {
+        false
+    }
+
     /// Hint for parallelization. By default, it is set to `false`.
     fn enable_parallelization(&self) -> bool {
         false
