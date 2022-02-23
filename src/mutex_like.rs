@@ -1,7 +1,5 @@
-use std::{
-    cell::UnsafeCell,
-    ops::{Deref, DerefMut},
-};
+use std::cell::UnsafeCell;
+use std::ops::{Deref, DerefMut};
 
 /// Mutex-like wrapper, but it actually does not perform any locking
 /// (so there are no performance overheads).

@@ -3,10 +3,10 @@ use crate::interface::*;
 use crate::mutex_like::*;
 use crate::range::*;
 use holdem_hand_evaluator::Hand;
-use std::cmp::max;
-use std::mem::{size_of, swap};
-use std::ptr::null_mut;
-use std::slice::{from_raw_parts, from_raw_parts_mut};
+use std::cmp;
+use std::mem;
+use std::ptr;
+use std::slice;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
 #[cfg(feature = "custom_alloc")]
@@ -25,6 +25,7 @@ pub struct PostFlopGame {
     private_hand_cards: [Vec<(u8, u8)>; 2],
     same_hand_index: [Vec<Option<usize>>; 2],
     hand_strength: Vec<[Vec<(usize, usize)>; 2]>,
+    suit_isomorphism: [u8; 4],
     is_memory_allocated: bool,
     is_compression_enabled: bool,
     num_storage_elements: u64,
@@ -238,7 +239,7 @@ impl Game for PostFlopGame {
         }
         // showdown
         else {
-            let hand_strength = &self.hand_strength[board_index(node.turn, node.river)];
+            let hand_strength = &self.hand_strength[card_pair_index(node.turn, node.river)];
             let player_strength = &hand_strength[player];
             let opponent_strength = &hand_strength[player ^ 1];
 
@@ -442,9 +443,10 @@ impl PostFlopGame {
     fn init_range(&mut self) {
         let flop = self.config.flop;
         let flop_mask: u64 = (1 << flop[0]) | (1 << flop[1]) | (1 << flop[2]);
+        let range = &self.config.range;
 
         for player in 0..2 {
-            let range = &self.config.range[player];
+            let range = range[player];
             let initial_reach = &mut self.initial_reach[player];
             let private_hand_cards = &mut self.private_hand_cards[player];
             initial_reach.clear();
@@ -471,6 +473,21 @@ impl PostFlopGame {
             for hand in player_hands {
                 same_hand_index.push(opponent_hands.binary_search(hand).ok());
             }
+        }
+
+        self.suit_isomorphism[0] = 0;
+        let mut next_index = 1;
+        'outer: for suit2 in 1..4 {
+            for suit1 in 0..suit2 {
+                if range[PLAYER_OOP as usize].is_suit_isomorphic(suit1, suit2)
+                    && range[PLAYER_IP as usize].is_suit_isomorphic(suit1, suit2)
+                {
+                    self.suit_isomorphism[suit2 as usize] = self.suit_isomorphism[suit1 as usize];
+                    continue 'outer;
+                }
+            }
+            self.suit_isomorphism[suit2 as usize] = next_index;
+            next_index += 1;
         }
     }
 
@@ -512,7 +529,7 @@ impl PostFlopGame {
                         strength[player].sort_unstable();
                     }
 
-                    self.hand_strength[board_index(board1, board2)] = strength;
+                    self.hand_strength[card_pair_index(board1, board2)] = strength;
                 }
             }
         }
@@ -520,7 +537,7 @@ impl PostFlopGame {
 
     /// Initializes the root node of game tree.
     fn init_root(&mut self) {
-        let current_memory_usage = AtomicU64::new(size_of::<PostFlopNode>() as u64);
+        let current_memory_usage = AtomicU64::new(mem::size_of::<PostFlopNode>() as u64);
         let num_storage_elements = AtomicU64::new(0);
         let max_stack_size = [AtomicUsize::new(0), AtomicUsize::new(0)];
 
@@ -538,7 +555,7 @@ impl PostFlopGame {
         self.root().children.clear();
         self.build_tree_recursive(&mut self.root(), &info);
 
-        let stack_size = max(
+        let stack_size = cmp::max(
             max_stack_size[0].load(Ordering::Relaxed),
             max_stack_size[1].load(Ordering::Relaxed),
         );
@@ -596,7 +613,7 @@ impl PostFlopGame {
             self.push_chances(node, info);
 
             let mut stack_size = info.stack_size;
-            let f32_size = size_of::<f32>();
+            let f32_size = mem::size_of::<f32>();
             let col_size = f32_size * node.num_actions();
             for i in 0..2 {
                 stack_size[i] += align_up(col_size * self.num_private_hands(i));
@@ -620,7 +637,7 @@ impl PostFlopGame {
             self.push_actions(node, info);
 
             let mut stack_size = info.stack_size;
-            let col_size = size_of::<f32>() * node.num_actions();
+            let col_size = mem::size_of::<f32>() * node.num_actions();
             for i in 0..2 {
                 let n = if i == node.player() { 2 } else { 1 };
                 stack_size[i] += align_up(col_size * self.num_private_hands(i));
@@ -688,10 +705,11 @@ impl PostFlopGame {
             let mut iso_suits = [None; 4];
             for suit1 in 0..4 {
                 for suit2 in suit1 + 1..4 {
-                    if iso_suits[suit2 as usize].is_none()
-                        && flop_rankset[suit1 as usize] == flop_rankset[suit2 as usize]
+                    if iso_suits[suit2].is_none()
+                        && flop_rankset[suit1] == flop_rankset[suit2]
+                        && self.suit_isomorphism[suit1] == self.suit_isomorphism[suit2]
                     {
-                        iso_suits[suit2 as usize] = Some(suit1);
+                        iso_suits[suit2] = Some(suit1 as u8);
                     }
                 }
             }
@@ -770,11 +788,12 @@ impl PostFlopGame {
             let mut iso_suits = [None; 4];
             for suit1 in 0..4 {
                 for suit2 in suit1 + 1..4 {
-                    if iso_suits[suit2 as usize].is_none()
-                        && flop_rankset[suit1 as usize] == flop_rankset[suit2 as usize]
-                        && turn_rankset[suit1 as usize] == turn_rankset[suit2 as usize]
+                    if iso_suits[suit2].is_none()
+                        && flop_rankset[suit1] == flop_rankset[suit2]
+                        && turn_rankset[suit1] == turn_rankset[suit2]
+                        && self.suit_isomorphism[suit1] == self.suit_isomorphism[suit2]
                     {
-                        iso_suits[suit2 as usize] = Some(suit1);
+                        iso_suits[suit2] = Some(suit1 as u8);
                     }
                 }
             }
@@ -999,8 +1018,8 @@ impl PostFlopGame {
                 if self.is_compression_enabled() {
                     let cum_regret_ptr = self.cum_regret_compressed.lock().as_mut_ptr();
                     let strategy_ptr = self.strategy_compressed.lock().as_mut_ptr();
-                    node.cum_regret = null_mut();
-                    node.strategy = null_mut();
+                    node.cum_regret = ptr::null_mut();
+                    node.strategy = ptr::null_mut();
                     node.cum_regret_compressed = cum_regret_ptr.add(index);
                     node.strategy_compressed = strategy_ptr.add(index);
                 } else {
@@ -1008,8 +1027,8 @@ impl PostFlopGame {
                     let strategy_ptr = self.strategy.lock().as_mut_ptr();
                     node.cum_regret = cum_regret_ptr.add(index);
                     node.strategy = strategy_ptr.add(index);
-                    node.cum_regret_compressed = null_mut();
-                    node.strategy_compressed = null_mut();
+                    node.cum_regret_compressed = ptr::null_mut();
+                    node.strategy_compressed = ptr::null_mut();
                 }
             }
         }
@@ -1058,42 +1077,42 @@ impl GameNode for PostFlopNode {
 
     #[inline]
     fn cum_regret(&self) -> &[f32] {
-        unsafe { from_raw_parts(self.cum_regret, self.num_elements) }
+        unsafe { slice::from_raw_parts(self.cum_regret, self.num_elements) }
     }
 
     #[inline]
     fn cum_regret_mut(&mut self) -> &mut [f32] {
-        unsafe { from_raw_parts_mut(self.cum_regret, self.num_elements) }
+        unsafe { slice::from_raw_parts_mut(self.cum_regret, self.num_elements) }
     }
 
     #[inline]
     fn strategy(&self) -> &[f32] {
-        unsafe { from_raw_parts(self.strategy, self.num_elements) }
+        unsafe { slice::from_raw_parts(self.strategy, self.num_elements) }
     }
 
     #[inline]
     fn strategy_mut(&mut self) -> &mut [f32] {
-        unsafe { from_raw_parts_mut(self.strategy, self.num_elements) }
+        unsafe { slice::from_raw_parts_mut(self.strategy, self.num_elements) }
     }
 
     #[inline]
     fn cum_regret_compressed(&self) -> &[i16] {
-        unsafe { from_raw_parts(self.cum_regret_compressed, self.num_elements) }
+        unsafe { slice::from_raw_parts(self.cum_regret_compressed, self.num_elements) }
     }
 
     #[inline]
     fn cum_regret_compressed_mut(&mut self) -> &mut [i16] {
-        unsafe { from_raw_parts_mut(self.cum_regret_compressed, self.num_elements) }
+        unsafe { slice::from_raw_parts_mut(self.cum_regret_compressed, self.num_elements) }
     }
 
     #[inline]
     fn strategy_compressed(&self) -> &[u16] {
-        unsafe { from_raw_parts(self.strategy_compressed, self.num_elements) }
+        unsafe { slice::from_raw_parts(self.strategy_compressed, self.num_elements) }
     }
 
     #[inline]
     fn strategy_compressed_mut(&mut self) -> &mut [u16] {
-        unsafe { from_raw_parts_mut(self.strategy_compressed, self.num_elements) }
+        unsafe { slice::from_raw_parts_mut(self.strategy_compressed, self.num_elements) }
     }
 
     #[inline]
@@ -1137,10 +1156,10 @@ impl Default for PostFlopNode {
             amount: 0,
             children: Vec::new(),
             iso_chances: Vec::new(),
-            cum_regret: null_mut(),
-            strategy: null_mut(),
-            cum_regret_compressed: null_mut(),
-            strategy_compressed: null_mut(),
+            cum_regret: ptr::null_mut(),
+            strategy: ptr::null_mut(),
+            cum_regret_compressed: ptr::null_mut(),
+            strategy_compressed: ptr::null_mut(),
             cum_regret_scale: 0.0,
             strategy_scale: 0.0,
             num_elements: 0,
@@ -1167,15 +1186,7 @@ impl Default for GameConfig {
 
 #[inline]
 fn vec_memory_usage<T>(vec: &Vec<T>) -> u64 {
-    vec.capacity() as u64 * size_of::<T>() as u64
-}
-
-#[inline]
-fn board_index(mut turn: u8, mut river: u8) -> usize {
-    if turn > river {
-        swap(&mut turn, &mut river);
-    }
-    turn as usize * (101 - turn as usize) / 2 + river as usize - 1
+    vec.capacity() as u64 * mem::size_of::<T>() as u64
 }
 
 /// Attempts to convert an optionally space-separated string into a sorted flop array.

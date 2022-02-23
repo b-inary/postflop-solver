@@ -7,7 +7,7 @@ use std::io::{self, Write};
 #[cfg(feature = "custom_alloc")]
 use crate::alloc::*;
 #[cfg(feature = "custom_alloc")]
-use std::{mem, vec::from_elem_in};
+use std::{mem, vec};
 
 struct DiscountParams {
     alpha_t: f32,
@@ -150,7 +150,7 @@ fn solve_recursive<T: Game>(
 
     // allocates memory for storing the counterfactual values
     #[cfg(feature = "custom_alloc")]
-    let cfv_actions = MutexLike::new(from_elem_in(
+    let cfv_actions = MutexLike::new(vec::from_elem_in(
         0.0,
         num_actions * num_private_hands,
         StackAlloc,
@@ -366,7 +366,7 @@ fn regret_matching(regret: &[f32], num_actions: usize) -> Vec<f32, StackAlloc> {
 
     strategy.iter_mut().for_each(|el| *el = el.max(0.0));
 
-    let mut denom = from_elem_in(0.0, row_size, StackAlloc);
+    let mut denom = vec::from_elem_in(0.0, row_size, StackAlloc);
     strategy.chunks(row_size).for_each(|row| {
         add_slice(&mut denom, row);
     });
@@ -412,7 +412,7 @@ fn regret_matching_compressed(
     let mut strategy = decode_signed_slice(regret, scale);
     let row_size = strategy.len() / num_actions;
 
-    let mut denom = from_elem_in(0.0, row_size, StackAlloc);
+    let mut denom = vec::from_elem_in(0.0, row_size, StackAlloc);
     strategy.chunks(row_size).for_each(|row| {
         add_slice(&mut denom, row);
     });
