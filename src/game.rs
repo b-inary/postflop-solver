@@ -76,7 +76,7 @@ unsafe impl Sync for PostFlopNode {}
 ///     flop_bet_sizes: [bet_sizes.clone(), bet_sizes.clone()],
 ///     turn_bet_sizes: [bet_sizes.clone(), bet_sizes.clone()],
 ///     river_bet_sizes: [bet_sizes.clone(), bet_sizes.clone()],
-///     max_num_bet: 5,
+///     ..Default::default()
 /// };
 /// ```
 #[derive(Debug, Clone, PartialEq)]
@@ -102,8 +102,15 @@ pub struct GameConfig {
     /// Bet size candidates of each player in river.
     pub river_bet_sizes: [BetSizeCandidates; 2],
 
-    /// Maximum number of bet in each betting round.
-    pub max_num_bet: i32,
+    /// Add all-in action when SPR is below this value (set 0 to disable).
+    pub add_all_in_threshold: f32,
+
+    /// Replace bet action with all-in action when the ratio of opponent's next bet size to the pot
+    /// size will be less than this value (set 0 to disable).
+    pub replace_all_in_threshold: f32,
+
+    /// Enable bet size adjustment of last two bets.
+    pub adjust_last_two_bet_sizes: bool,
 }
 
 /// Possible actions in a post-flop game.
@@ -879,6 +886,9 @@ impl PostFlopGame {
         let bet_diff = opponent_bet - player_bet;
         let pot = self.config.initial_pot + 2 * (node.amount + bet_diff);
 
+        let max_bet = self.config.initial_stack - node.amount + player_bet;
+        let min_bet = max_bet.min(opponent_bet + bet_diff);
+
         let (candidates, is_river) = if node.turn == NOT_DEALT {
             (&self.config.flop_bet_sizes, false)
         } else if node.river == NOT_DEALT {
@@ -909,16 +919,19 @@ impl PostFlopGame {
             actions.push((Action::Check, player_after_check));
 
             // add first bet
-            if info.num_bet < self.config.max_num_bet {
-                for &bet_size in &candidates[player as usize].bet {
-                    match bet_size {
-                        BetSize::PotRelative(ratio) => {
-                            let size = (pot as f32 * ratio).round() as i32;
-                            actions.push((Action::Bet(size), player_opponent));
-                        }
-                        BetSize::LastBetRelative(_) => panic!("unexpected bet size"),
+            for &bet_size in &candidates[player as usize].bet {
+                match bet_size {
+                    BetSize::PotRelative(ratio) => {
+                        let size = (pot as f32 * ratio).round() as i32;
+                        actions.push((Action::Bet(size), player_opponent));
                     }
+                    BetSize::LastBetRelative(_) => panic!("unexpected bet size"),
                 }
+            }
+
+            // add all-in
+            if max_bet <= (pot as f32 * self.config.add_all_in_threshold) as i32 {
+                actions.push((Action::AllIn, player_opponent));
             }
         } else {
             // add fold
@@ -928,30 +941,73 @@ impl PostFlopGame {
             actions.push((Action::Call, player_after_call));
 
             // add raise
-            if !info.allin_flag && info.num_bet < self.config.max_num_bet {
-                for &bet_size in &candidates[player as usize].raise {
-                    match bet_size {
-                        BetSize::PotRelative(ratio) => {
-                            let size = opponent_bet + (pot as f32 * ratio).round() as i32;
-                            actions.push((Action::Raise(size), player_opponent));
-                        }
-                        BetSize::LastBetRelative(ratio) => {
-                            let size = (opponent_bet as f32 * ratio).round() as i32;
-                            actions.push((Action::Raise(size), player_opponent));
-                        }
+            for &bet_size in &candidates[player as usize].raise {
+                match bet_size {
+                    BetSize::PotRelative(ratio) => {
+                        let size = opponent_bet + (pot as f32 * ratio).round() as i32;
+                        actions.push((Action::Raise(size), player_opponent));
+                    }
+                    BetSize::LastBetRelative(ratio) => {
+                        let size = (opponent_bet as f32 * ratio).round() as i32;
+                        actions.push((Action::Raise(size), player_opponent));
                     }
                 }
             }
+
+            // add all-in
+            if max_bet <= opponent_bet + (pot as f32 * self.config.add_all_in_threshold) as i32 {
+                actions.push((Action::AllIn, player_opponent));
+            }
         }
 
-        let max_bet = self.config.initial_stack - node.amount + player_bet;
-        let min_bet = max_bet.min(opponent_bet + bet_diff);
+        let adjust_size = |size: i32| {
+            let new_bet_diff = size - opponent_bet;
+            let new_pot = pot + 2 * new_bet_diff;
+
+            if max_bet <= size + (new_pot as f32 * self.config.replace_all_in_threshold) as i32 {
+                return max_bet;
+            }
+
+            if !self.config.adjust_last_two_bet_sizes {
+                return size;
+            }
+
+            let mut min_opponent_ratio = f32::INFINITY;
+            for &bet_size in &candidates[player_opponent as usize].raise {
+                match bet_size {
+                    BetSize::PotRelative(ratio) => {
+                        min_opponent_ratio = min_opponent_ratio.min(ratio);
+                    }
+                    BetSize::LastBetRelative(ratio) => {
+                        let pot_ratio = size as f32 * (ratio - 1.0) / new_pot as f32;
+                        min_opponent_ratio = min_opponent_ratio.min(pot_ratio);
+                    }
+                }
+            }
+
+            let min_opponent_bet = size + (new_pot as f32 * min_opponent_ratio).round() as i32;
+            let next_bet_diff = min_opponent_bet - size;
+            let next_pot = new_pot + 2 * next_bet_diff;
+
+            // next opponent bet will be always all-in
+            let threshold = (next_pot as f32 * self.config.replace_all_in_threshold) as i32;
+            if max_bet <= min_opponent_bet + threshold {
+                let ratio = new_bet_diff as f32 / pot as f32;
+                let a = 2.0 * pot as f32 * ratio * min_opponent_ratio;
+                let b = pot as f32 * (ratio + min_opponent_ratio);
+                let c = (max_bet - opponent_bet) as f32;
+                let coef = ((4.0 * a * c + b * b).sqrt() - b) / (2.0 * a);
+                return opponent_bet + (new_bet_diff as f32 * coef).round() as i32;
+            }
+
+            size
+        };
 
         // adjust bet sizes
         for (action, _) in actions.iter_mut() {
             match *action {
                 Action::Bet(size) => {
-                    let adjusted_size = size.clamp(min_bet, max_bet);
+                    let adjusted_size = adjust_size(size).clamp(min_bet, max_bet);
                     if adjusted_size == max_bet {
                         *action = Action::AllIn;
                     } else if size != adjusted_size {
@@ -959,7 +1015,7 @@ impl PostFlopGame {
                     }
                 }
                 Action::Raise(size) => {
-                    let adjusted_size = size.clamp(min_bet, max_bet);
+                    let adjusted_size = adjust_size(size).clamp(min_bet, max_bet);
                     if adjusted_size == max_bet {
                         *action = Action::AllIn;
                     } else if size != adjusted_size {
@@ -1179,7 +1235,9 @@ impl Default for GameConfig {
             flop_bet_sizes: Default::default(),
             turn_bet_sizes: Default::default(),
             river_bet_sizes: Default::default(),
-            max_num_bet: 0,
+            add_all_in_threshold: 1.5,
+            replace_all_in_threshold: 0.1,
+            adjust_last_two_bet_sizes: true,
         }
     }
 }
@@ -1286,7 +1344,6 @@ mod tests {
             initial_stack: 970,
             range: [Range::ones(); 2],
             river_bet_sizes: [bet_sizes_from_str("50%", "").unwrap(), Default::default()],
-            max_num_bet: 1,
             ..Default::default()
         };
         let mut game = PostFlopGame::with_config(&config).unwrap();
@@ -1351,7 +1408,7 @@ mod tests {
             flop_bet_sizes: [bet_sizes.clone(), bet_sizes.clone()],
             turn_bet_sizes: [bet_sizes.clone(), bet_sizes.clone()],
             river_bet_sizes: [bet_sizes.clone(), bet_sizes.clone()],
-            max_num_bet: 5,
+            ..Default::default()
         };
 
         let mut game = PostFlopGame::with_config(&config).unwrap();

@@ -297,9 +297,9 @@ impl Range {
 
     /// Creates a range from raw data.
     #[inline]
-    pub fn from_raw(data: &[f32; 52 * 51 / 2]) -> Self {
+    pub fn from_raw_data(data: &[f32]) -> Self {
         Self {
-            data: data.to_owned(),
+            data: data.try_into().unwrap(),
         }
     }
 
