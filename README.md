@@ -28,7 +28,7 @@ let config = GameConfig {
     flop_bet_sizes: [bet_sizes.clone(), bet_sizes.clone()],
     turn_bet_sizes: [bet_sizes.clone(), bet_sizes.clone()],
     river_bet_sizes: [bet_sizes.clone(), bet_sizes.clone()],
-    max_num_bet: 4,
+    ..Default::default()
 };
 
 // build game tree

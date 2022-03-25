@@ -130,7 +130,6 @@ pub enum Action {
 struct BuildTreeInfo<'a> {
     last_action: Action,
     last_bet: [i32; 2],
-    num_bet: i32,
     allin_flag: bool,
     current_memory_usage: &'a AtomicU64,
     num_storage_elements: &'a AtomicU64,
@@ -551,7 +550,6 @@ impl PostFlopGame {
         let info = BuildTreeInfo {
             last_action: Action::None,
             last_bet: [0, 0],
-            num_bet: 0,
             allin_flag: false,
             current_memory_usage: &current_memory_usage,
             num_storage_elements: &num_storage_elements,
@@ -653,7 +651,6 @@ impl PostFlopGame {
 
             for (action, child) in &node.children {
                 let mut last_bet = info.last_bet;
-                let mut num_bet = info.num_bet;
                 let mut allin_flag = info.allin_flag;
 
                 match *action {
@@ -662,11 +659,9 @@ impl PostFlopGame {
                     }
                     Action::Bet(size) | Action::Raise(size) => {
                         last_bet[node.player as usize] = size;
-                        num_bet += 1;
                     }
                     Action::AllIn => {
                         last_bet[node.player as usize] += self.config.initial_stack - node.amount;
-                        num_bet += 1;
                         allin_flag = true;
                     }
                     _ => {}
@@ -677,7 +672,6 @@ impl PostFlopGame {
                     &BuildTreeInfo {
                         last_action: *action,
                         last_bet,
-                        num_bet,
                         allin_flag,
                         stack_size,
                         ..*info
@@ -940,23 +934,26 @@ impl PostFlopGame {
             // add call
             actions.push((Action::Call, player_after_call));
 
-            // add raise
-            for &bet_size in &candidates[player as usize].raise {
-                match bet_size {
-                    BetSize::PotRelative(ratio) => {
-                        let size = opponent_bet + (pot as f32 * ratio).round() as i32;
-                        actions.push((Action::Raise(size), player_opponent));
-                    }
-                    BetSize::LastBetRelative(ratio) => {
-                        let size = (opponent_bet as f32 * ratio).round() as i32;
-                        actions.push((Action::Raise(size), player_opponent));
+            if !info.allin_flag {
+                // add raise
+                for &bet_size in &candidates[player as usize].raise {
+                    match bet_size {
+                        BetSize::PotRelative(ratio) => {
+                            let size = opponent_bet + (pot as f32 * ratio).round() as i32;
+                            actions.push((Action::Raise(size), player_opponent));
+                        }
+                        BetSize::LastBetRelative(ratio) => {
+                            let size = (opponent_bet as f32 * ratio).round() as i32;
+                            actions.push((Action::Raise(size), player_opponent));
+                        }
                     }
                 }
-            }
 
-            // add all-in
-            if max_bet <= opponent_bet + (pot as f32 * self.config.add_all_in_threshold) as i32 {
-                actions.push((Action::AllIn, player_opponent));
+                // add all-in
+                let all_in_threshold = (pot as f32 * self.config.add_all_in_threshold) as i32;
+                if max_bet <= opponent_bet + all_in_threshold {
+                    actions.push((Action::AllIn, player_opponent));
+                }
             }
         }
 
@@ -1408,7 +1405,9 @@ mod tests {
             flop_bet_sizes: [bet_sizes.clone(), bet_sizes.clone()],
             turn_bet_sizes: [bet_sizes.clone(), bet_sizes.clone()],
             river_bet_sizes: [bet_sizes.clone(), bet_sizes.clone()],
-            ..Default::default()
+            add_all_in_threshold: 0.0,
+            replace_all_in_threshold: 0.0,
+            adjust_last_two_bet_sizes: false,
         };
 
         let mut game = PostFlopGame::with_config(&config).unwrap();
