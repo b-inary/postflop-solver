@@ -18,10 +18,10 @@ use std::str::FromStr;
 /// let queen_rank = 10;
 ///
 /// // check that the hand "QQ" is in the range
-/// assert_eq!(range.get_prob_pair(queen_rank), 1.0);
+/// assert_eq!(range.get_weight_pair(queen_rank), 1.0);
 ///
 /// // check that the hand "AKo" is not in the range
-/// assert_eq!(range.get_prob_offsuit(ace_rank, king_rank), 0.0);
+/// assert_eq!(range.get_weight_offsuit(ace_rank, king_rank), 0.0);
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Range {
@@ -37,11 +37,11 @@ enum Suitedness {
 }
 
 const COMBO_PAT: &str = r"(?:(?:[AKQJT2-9]{2}[os]?)|(?:(?:[AKQJT2-9][cdhs]){2}))";
-const PROB_PAT: &str = r"(?:(?:[01](\.\d*)?)|(?:\.\d+))";
+const WEIGHT_PAT: &str = r"(?:(?:[01](\.\d*)?)|(?:\.\d+))";
 
 static RANGE_REGEX: Lazy<Regex> = Lazy::new(|| {
     Regex::new(&format!(
-        r"^(?P<range>{COMBO_PAT}(?:\+|(?:-{COMBO_PAT}))?)(?::(?P<prob>{PROB_PAT}))?$"
+        r"^(?P<range>{COMBO_PAT}(?:\+|(?:-{COMBO_PAT}))?)(?::(?P<weight>{WEIGHT_PAT}))?$"
     ))
     .unwrap()
 });
@@ -214,7 +214,7 @@ fn parse_simple_singleton(combo: &str) -> Result<(u8, u8, Suitedness), String> {
     let suit2 = char_to_suit(chars.next().unwrap())?;
     if rank1 < rank2 {
         return Err(format!(
-            "First rank must be equal or higher than second rank: {combo}"
+            "The first rank must be equal or higher than the second rank: {combo}"
         ));
     }
     if rank1 == rank2 && suit1 == suit2 {
@@ -235,11 +235,11 @@ fn parse_compound_singleton(combo: &str) -> Result<(u8, u8, Suitedness), String>
     });
     if rank1 < rank2 {
         return Err(format!(
-            "First rank must be equal or higher than second rank: {combo}"
+            "The first rank must be equal or higher than the second rank: {combo}"
         ));
     }
     if rank1 == rank2 && suitedness != Suitedness::All {
-        return Err(format!("Pair with suitedness is not allowed: {combo}"));
+        return Err(format!("A pair with suitedness is not allowed: {combo}"));
     }
     Ok((rank1, rank2, suitedness))
 }
@@ -263,11 +263,11 @@ fn check_rank(rank: u8) -> Result<(), String> {
 }
 
 #[inline]
-fn check_prob(prob: f32) -> Result<(), String> {
-    if (0.0..=1.0).contains(&prob) {
+fn check_weight(weight: f32) -> Result<(), String> {
+    if (0.0..=1.0).contains(&weight) {
         Ok(())
     } else {
-        Err(format!("Invalid probability: {prob}"))
+        Err(format!("Invalid weight: {weight}"))
     }
 }
 
@@ -303,80 +303,123 @@ impl Range {
         }
     }
 
-    /// Obtains the probability by card indices.
+    /// Creates a range from a set of sanitized range strings.
+    #[inline]
+    pub fn from_sanitized_ranges(ranges: &str) -> Result<Self, String> {
+        let mut ranges = ranges.split(',').collect::<Vec<_>>();
+
+        // remove last empty element if any
+        if ranges.last().unwrap().is_empty() {
+            ranges.pop();
+        }
+
+        let mut result = Self::new();
+
+        for range in ranges.into_iter().rev() {
+            let mut split = range.split(':');
+            let range = split.next().unwrap();
+
+            let weight = split.next().map_or(1.0, |s| s.parse().unwrap());
+            check_weight(weight)?;
+
+            if range.contains('-') {
+                result.update_with_dash_range(range, weight)?;
+            } else if range.contains('+') {
+                result.update_with_plus_range(range, weight)?;
+            } else {
+                result.update_with_singleton(range, weight)?;
+            }
+        }
+
+        Ok(result)
+    }
+
+    /// Obtains the raw data of the range.
+    #[inline]
+    pub fn raw_data(&self) -> &[f32] {
+        &self.data
+    }
+
+    /// Obtains the weight by card indices.
     ///
     /// Input card ID: 2c2d2h2s => `0-3`, 3c3d3h3s => `4-7`, ..., AcAdAhAs => `48-51`.
     #[inline]
-    pub fn get_prob_by_cards(&self, card1: u8, card2: u8) -> f32 {
+    pub fn get_weight_by_cards(&self, card1: u8, card2: u8) -> f32 {
         self.data[card_pair_index(card1, card2)]
     }
 
-    /// Obtains the average probability of a pair.
+    /// Obtains the average weight of a pair.
     #[inline]
-    pub fn get_prob_pair(&self, rank: u8) -> f32 {
-        self.get_average_prob(&pair_indices(rank))
+    pub fn get_weight_pair(&self, rank: u8) -> f32 {
+        self.get_average_weight(&pair_indices(rank))
     }
 
-    /// Obtains the average probability of a suited hand.
+    /// Obtains the average weight of a suited hand.
     #[inline]
-    pub fn get_prob_suited(&self, rank1: u8, rank2: u8) -> f32 {
-        self.get_average_prob(&suited_indices(rank1, rank2))
+    pub fn get_weight_suited(&self, rank1: u8, rank2: u8) -> f32 {
+        self.get_average_weight(&suited_indices(rank1, rank2))
     }
 
-    /// Obtains the average probability of an offsuit hand.
+    /// Obtains the average weight of an offsuit hand.
     #[inline]
-    pub fn get_prob_offsuit(&self, rank1: u8, rank2: u8) -> f32 {
-        self.get_average_prob(&offsuit_indices(rank1, rank2))
+    pub fn get_weight_offsuit(&self, rank1: u8, rank2: u8) -> f32 {
+        self.get_average_weight(&offsuit_indices(rank1, rank2))
     }
 
-    /// Sets the probability by card indices.
+    /// Sets the weight by card indices.
     ///
     /// Input card ID: 2c2d2h2s => `0-3`, 3c3d3h3s => `4-7`, ..., AcAdAhAs => `48-51`.
     #[inline]
-    pub fn set_prob_by_cards(&mut self, card1: u8, card2: u8, prob: f32) -> Result<(), String> {
+    pub fn set_weight_by_cards(&mut self, card1: u8, card2: u8, weight: f32) -> Result<(), String> {
         check_card(card1)?;
         check_card(card2)?;
-        self.data[card_pair_index(card1, card2)] = prob;
+        self.data[card_pair_index(card1, card2)] = weight;
         Ok(())
     }
 
-    /// Sets the probability of a pair.
+    /// Sets the weight of a pair.
     #[inline]
-    pub fn set_prob_pair(&mut self, rank: u8, prob: f32) -> Result<(), String> {
+    pub fn set_weight_pair(&mut self, rank: u8, weight: f32) -> Result<(), String> {
         check_rank(rank)?;
-        check_prob(prob)?;
-        self.set_prob(&pair_indices(rank), prob);
+        check_weight(weight)?;
+        self.set_weight(&pair_indices(rank), weight);
         Ok(())
     }
 
-    /// Sets the probability of a suited hand.
+    /// Sets the weight of a suited hand.
     #[inline]
-    pub fn set_prob_suited(&mut self, rank1: u8, rank2: u8, prob: f32) -> Result<(), String> {
+    pub fn set_weight_suited(&mut self, rank1: u8, rank2: u8, weight: f32) -> Result<(), String> {
         check_rank(rank1)?;
         check_rank(rank2)?;
-        check_prob(prob)?;
+        check_weight(weight)?;
         if rank1 == rank2 {
             return Err(format!(
-                "set_prob_suited() accepts non-pairs, but got rank1 = rank2 = {rank1}"
+                "set_weight_suited() accepts non-pairs, but got rank1 = rank2 = {rank1}"
             ));
         }
-        self.set_prob(&suited_indices(rank1, rank2), prob);
+        self.set_weight(&suited_indices(rank1, rank2), weight);
         Ok(())
     }
 
-    /// Sets the probability of an offsuit hand.
+    /// Sets the weight of an offsuit hand.
     #[inline]
-    pub fn set_prob_offsuit(&mut self, rank1: u8, rank2: u8, prob: f32) -> Result<(), String> {
+    pub fn set_weight_offsuit(&mut self, rank1: u8, rank2: u8, weight: f32) -> Result<(), String> {
         check_rank(rank1)?;
         check_rank(rank2)?;
-        check_prob(prob)?;
+        check_weight(weight)?;
         if rank1 == rank2 {
             return Err(format!(
-                "set_prob_offsuit() accepts non-pairs, but got rank1 = rank2 = {rank1}"
+                "set_weight_offsuit() accepts non-pairs, but got rank1 = rank2 = {rank1}"
             ));
         }
-        self.set_prob(&offsuit_indices(rank1, rank2), prob);
+        self.set_weight(&offsuit_indices(rank1, rank2), weight);
         Ok(())
+    }
+
+    /// Clears the range.
+    #[inline]
+    pub fn clear(&mut self) {
+        self.data.fill(0.0);
     }
 
     /// Returns whether the range is empty.
@@ -402,9 +445,9 @@ impl Range {
             for card2 in card1 + 1..52 {
                 let card1_replaced = (card1 & !3) | replace_suit(card1 & 3);
                 let card2_replaced = (card2 & !3) | replace_suit(card2 & 3);
-                let prob = self.get_prob_by_cards(card1, card2);
-                let prob_replaced = self.get_prob_by_cards(card1_replaced, card2_replaced);
-                if (prob - prob_replaced).abs() >= 1e-4 {
+                let weight = self.get_weight_by_cards(card1, card2);
+                let weight_replaced = self.get_weight_by_cards(card1_replaced, card2_replaced);
+                if (weight - weight_replaced).abs() >= 1e-4 {
                     return false;
                 }
             }
@@ -414,13 +457,15 @@ impl Range {
     }
 
     #[inline]
-    fn is_same_prob(&self, indices: &[usize]) -> bool {
-        let prob = self.data[indices[0]];
-        indices.iter().all(|i| (self.data[*i] - prob).abs() < 1e-4)
+    fn is_same_weight(&self, indices: &[usize]) -> bool {
+        let weight = self.data[indices[0]];
+        indices
+            .iter()
+            .all(|i| (self.data[*i] - weight).abs() < 1e-4)
     }
 
     #[inline]
-    fn get_average_prob(&self, indices: &[usize]) -> f32 {
+    fn get_average_weight(&self, indices: &[usize]) -> f32 {
         let mut sum = 0.0;
         for i in indices {
             sum += self.data[*i] as f64;
@@ -429,21 +474,21 @@ impl Range {
     }
 
     #[inline]
-    fn set_prob(&mut self, indices: &[usize], prob: f32) {
+    fn set_weight(&mut self, indices: &[usize], weight: f32) {
         for i in indices {
-            self.data[*i] = prob;
+            self.data[*i] = weight;
         }
     }
 
     #[inline]
-    fn update_with_singleton(&mut self, combo: &str, prob: f32) -> Result<(), String> {
+    fn update_with_singleton(&mut self, combo: &str, weight: f32) -> Result<(), String> {
         let (rank1, rank2, suitedness) = parse_singleton(combo)?;
-        self.set_prob(&indices_with_suitedness(rank1, rank2, suitedness), prob);
+        self.set_weight(&indices_with_suitedness(rank1, rank2, suitedness), weight);
         Ok(())
     }
 
     #[inline]
-    fn update_with_plus_range(&mut self, range: &str, prob: f32) -> Result<(), String> {
+    fn update_with_plus_range(&mut self, range: &str, weight: f32) -> Result<(), String> {
         debug_assert!(range.ends_with('+'));
         let lowest_combo = &range[..range.len() - 1];
         let (rank1, rank2, suitedness) = parse_singleton(lowest_combo)?;
@@ -451,19 +496,19 @@ impl Range {
         if gap <= 1 {
             // pair and connector (e.g.,  88+, T9s+)
             for i in rank1..13 {
-                self.set_prob(&indices_with_suitedness(i, i - gap, suitedness), prob);
+                self.set_weight(&indices_with_suitedness(i, i - gap, suitedness), weight);
             }
         } else {
             // otherwise (e.g., ATo+)
             for i in rank2..rank1 {
-                self.set_prob(&indices_with_suitedness(rank1, i, suitedness), prob);
+                self.set_weight(&indices_with_suitedness(rank1, i, suitedness), weight);
             }
         }
         Ok(())
     }
 
     #[inline]
-    fn update_with_dash_range(&mut self, range: &str, prob: f32) -> Result<(), String> {
+    fn update_with_dash_range(&mut self, range: &str, weight: f32) -> Result<(), String> {
         let combo_pair = range.split('-').collect::<Vec<_>>();
         debug_assert!(combo_pair.len() == 2);
         let (rank11, rank12, suitedness) = parse_singleton(combo_pair[0])?;
@@ -475,13 +520,13 @@ impl Range {
         } else if gap == gap2 && rank11 > rank21 {
             // same gap (e.g., 88-55, KQo-JTo)
             for i in rank21..=rank11 {
-                self.set_prob(&indices_with_suitedness(i, i - gap, suitedness), prob);
+                self.set_weight(&indices_with_suitedness(i, i - gap, suitedness), weight);
             }
             Ok(())
         } else if rank11 == rank21 && rank12 > rank22 {
             // same first rank (e.g., A5s-A2s)
             for i in rank22..=rank12 {
-                self.set_prob(&indices_with_suitedness(rank11, i, suitedness), prob);
+                self.set_weight(&indices_with_suitedness(rank11, i, suitedness), weight);
             }
             Ok(())
         } else {
@@ -499,10 +544,10 @@ impl Range {
 
             if start.is_some()
                 && (i == -1
-                    || !self.is_same_prob(&pair_indices(rank))
-                    || start.unwrap().1 != self.get_prob_pair(rank))
+                    || !self.is_same_weight(&pair_indices(rank))
+                    || start.unwrap().1 != self.get_weight_pair(rank))
             {
-                let (start_rank, prob) = start.unwrap();
+                let (start_rank, weight) = start.unwrap();
                 let s = rank_to_char(start_rank).unwrap();
                 let e = rank_to_char(prev_rank).unwrap();
                 let mut tmp = if start_rank == prev_rank {
@@ -512,19 +557,19 @@ impl Range {
                 } else {
                     format!("{s}{s}-{e}{e}")
                 };
-                if prob != 1.0 {
-                    tmp += &format!(":{prob}");
+                if weight != 1.0 {
+                    tmp += &format!(":{weight}");
                 }
                 result.push(tmp);
                 start = None;
             }
 
             if i >= 0
-                && self.is_same_prob(&pair_indices(rank))
-                && self.get_prob_pair(rank) > 0.0
+                && self.is_same_weight(&pair_indices(rank))
+                && self.get_weight_pair(rank) > 0.0
                 && start.is_none()
             {
-                start = Some((rank, self.get_prob_pair(rank)));
+                start = Some((rank, self.get_weight_pair(rank)));
             }
         }
     }
@@ -543,12 +588,12 @@ impl Range {
 
     fn can_unsuit(&self, rank1: u8) -> bool {
         for rank2 in 0..rank1 {
-            let same_suited = self.is_same_prob(&suited_indices(rank1, rank2));
-            let same_offsuit = self.is_same_prob(&offsuit_indices(rank1, rank2));
-            let prob_suited = self.get_prob_suited(rank1, rank2);
-            let prob_offsuit = self.get_prob_offsuit(rank1, rank2);
-            if (same_suited && same_offsuit && prob_suited != prob_offsuit)
-                || (same_suited != same_offsuit && prob_suited > 0.0 && prob_offsuit > 0.0)
+            let same_suited = self.is_same_weight(&suited_indices(rank1, rank2));
+            let same_offsuit = self.is_same_weight(&offsuit_indices(rank1, rank2));
+            let weight_suited = self.get_weight_suited(rank1, rank2);
+            let weight_offsuit = self.get_weight_offsuit(rank1, rank2);
+            if (same_suited && same_offsuit && weight_suited != weight_offsuit)
+                || (same_suited != same_offsuit && weight_suited > 0.0 && weight_offsuit > 0.0)
             {
                 return false;
             }
@@ -573,10 +618,10 @@ impl Range {
 
             if start.is_some()
                 && (i == -1
-                    || !self.is_same_prob(&getter(rank1, rank2))
-                    || start.unwrap().1 != self.get_average_prob(&getter(rank1, rank2)))
+                    || !self.is_same_weight(&getter(rank1, rank2))
+                    || start.unwrap().1 != self.get_average_weight(&getter(rank1, rank2)))
             {
-                let (start_rank2, prob) = start.unwrap();
+                let (start_rank2, weight) = start.unwrap();
                 let s = rank_to_char(start_rank2).unwrap();
                 let e = rank_to_char(prev_rank2).unwrap();
                 let mut tmp = if start_rank2 == prev_rank2 {
@@ -586,19 +631,19 @@ impl Range {
                 } else {
                     format!("{rank1_char}{s}{suit_char}-{rank1_char}{e}{suit_char}")
                 };
-                if prob != 1.0 {
-                    tmp += &format!(":{prob}");
+                if weight != 1.0 {
+                    tmp += &format!(":{weight}");
                 }
                 result.push(tmp);
                 start = None;
             }
 
             if i >= 0
-                && self.is_same_prob(&getter(rank1, rank2))
-                && self.get_average_prob(&getter(rank1, rank2)) > 0.0
+                && self.is_same_weight(&getter(rank1, rank2))
+                && self.get_average_weight(&getter(rank1, rank2)) > 0.0
                 && start.is_none()
             {
-                start = Some((rank2, self.get_average_prob(&getter(rank1, rank2))));
+                start = Some((rank2, self.get_average_weight(&getter(rank1, rank2))));
             }
         }
     }
@@ -607,19 +652,19 @@ impl Range {
     fn suit_specified_strings(&self, result: &mut Vec<String>) {
         // pairs
         for rank in (0..13).rev() {
-            if !self.is_same_prob(&pair_indices(rank)) {
+            if !self.is_same_weight(&pair_indices(rank)) {
                 for suit1 in 0..4 {
                     for suit2 in suit1 + 1..4 {
-                        let prob = self.get_prob_by_cards(4 * rank + suit1, 4 * rank + suit2);
-                        if prob > 0.0 {
+                        let weight = self.get_weight_by_cards(4 * rank + suit1, 4 * rank + suit2);
+                        if weight > 0.0 {
                             let mut tmp = format!(
                                 "{rank}{suit1}{rank}{suit2}",
                                 rank = rank_to_char(rank).unwrap(),
                                 suit1 = suit_to_char(suit1).unwrap(),
                                 suit2 = suit_to_char(suit2).unwrap(),
                             );
-                            if prob != 1.0 {
-                                tmp += &format!(":{prob}");
+                            if weight != 1.0 {
+                                tmp += &format!(":{weight}");
                             }
                             result.push(tmp);
                         }
@@ -632,18 +677,18 @@ impl Range {
         for rank1 in (0..13).rev() {
             for rank2 in (0..rank1).rev() {
                 // suited
-                if !self.is_same_prob(&suited_indices(rank1, rank2)) {
+                if !self.is_same_weight(&suited_indices(rank1, rank2)) {
                     for suit in 0..4 {
-                        let prob = self.get_prob_by_cards(4 * rank1 + suit, 4 * rank2 + suit);
-                        if prob > 0.0 {
+                        let weight = self.get_weight_by_cards(4 * rank1 + suit, 4 * rank2 + suit);
+                        if weight > 0.0 {
                             let mut tmp = format!(
                                 "{rank1}{suit}{rank2}{suit}",
                                 rank1 = rank_to_char(rank1).unwrap(),
                                 rank2 = rank_to_char(rank2).unwrap(),
                                 suit = suit_to_char(suit).unwrap(),
                             );
-                            if prob != 1.0 {
-                                tmp += &format!(":{prob}");
+                            if weight != 1.0 {
+                                tmp += &format!(":{weight}");
                             }
                             result.push(tmp);
                         }
@@ -651,13 +696,13 @@ impl Range {
                 }
 
                 // offsuit
-                if !self.is_same_prob(&offsuit_indices(rank1, rank2)) {
+                if !self.is_same_weight(&offsuit_indices(rank1, rank2)) {
                     for suit1 in 0..4 {
                         for suit2 in 0..4 {
                             if suit1 != suit2 {
-                                let prob =
-                                    self.get_prob_by_cards(4 * rank1 + suit1, 4 * rank2 + suit2);
-                                if prob > 0.0 {
+                                let weight =
+                                    self.get_weight_by_cards(4 * rank1 + suit1, 4 * rank2 + suit2);
+                                if weight > 0.0 {
                                     let mut tmp = format!(
                                         "{rank1}{suit1}{rank2}{suit2}",
                                         rank1 = rank_to_char(rank1).unwrap(),
@@ -665,8 +710,8 @@ impl Range {
                                         rank2 = rank_to_char(rank2).unwrap(),
                                         suit2 = suit_to_char(suit2).unwrap(),
                                     );
-                                    if prob != 1.0 {
-                                        tmp += &format!(":{prob}");
+                                    if weight != 1.0 {
+                                        tmp += &format!(":{weight}");
                                     }
                                     result.push(tmp);
                                 }
@@ -699,18 +744,18 @@ impl FromStr for Range {
                 .captures(range)
                 .ok_or_else(|| format!("Failed to parse range: {range}"))?;
 
-            let range_str = caps.name("range").unwrap().as_str();
-            let prob = caps
-                .name("prob")
+            let range = caps.name("range").unwrap().as_str();
+            let weight = caps
+                .name("weight")
                 .map_or(1.0, |s| s.as_str().parse().unwrap());
-            check_prob(prob)?;
+            check_weight(weight)?;
 
-            if range_str.contains('-') {
-                result.update_with_dash_range(range_str, prob)?;
-            } else if range_str.contains('+') {
-                result.update_with_plus_range(range_str, prob)?;
+            if range.contains('-') {
+                result.update_with_dash_range(range, weight)?;
+            } else if range.contains('+') {
+                result.update_with_plus_range(range, weight)?;
             } else {
-                result.update_with_singleton(range_str, prob)?;
+                result.update_with_singleton(range, weight)?;
             }
         }
 
@@ -752,13 +797,13 @@ mod tests {
         ];
 
         for (s, expected) in tests {
-            if let Some((range, prob)) = expected {
+            if let Some((range, weight)) = expected {
                 let caps = RANGE_REGEX.captures(s).unwrap();
                 assert_eq!(caps.name("range").unwrap().as_str(), range);
-                if let Some(prob) = prob {
-                    assert_eq!(caps.name("prob").unwrap().as_str(), prob);
+                if let Some(weight) = weight {
+                    assert_eq!(caps.name("weight").unwrap().as_str(), weight);
                 } else {
-                    assert!(caps.name("prob").is_none());
+                    assert!(caps.name("weight").is_none());
                 }
             } else {
                 assert!(!RANGE_REGEX.is_match(s));
@@ -842,8 +887,8 @@ mod tests {
         let pair_error = "AAo".parse::<Range>();
         assert!(pair_error.is_err());
 
-        let prob_error = "AQo:1.1".parse::<Range>();
-        assert!(prob_error.is_err());
+        let weight_error = "AQo:1.1".parse::<Range>();
+        assert!(weight_error.is_err());
 
         let dash_error_1 = "AQo-AQo".parse::<Range>();
         assert!(dash_error_1.is_err());
@@ -864,10 +909,10 @@ mod tests {
         assert!(data.is_ok());
 
         let data = data.unwrap();
-        assert_eq!(data.get_prob_suited(3, 6), 0.5);
-        assert_eq!(data.get_prob_suited(6, 3), 0.5);
-        assert_eq!(data.get_prob_offsuit(3, 6), 0.0);
-        assert_eq!(data.get_prob_offsuit(6, 3), 0.0);
+        assert_eq!(data.get_weight_suited(3, 6), 0.5);
+        assert_eq!(data.get_weight_suited(6, 3), 0.5);
+        assert_eq!(data.get_weight_offsuit(3, 6), 0.0);
+        assert_eq!(data.get_weight_offsuit(6, 3), 0.0);
     }
 
     #[test]

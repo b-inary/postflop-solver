@@ -401,11 +401,11 @@ impl PostFlopGame {
         }
 
         if self.config.range[PLAYER_OOP as usize].is_empty() {
-            return Err("OOP's range is not initialized".to_string());
+            return Err("OOP range is not initialized".to_string());
         }
 
         if self.config.range[PLAYER_IP as usize].is_empty() {
-            return Err("IP's range is not initialized".to_string());
+            return Err("IP range is not initialized".to_string());
         }
 
         let mut num_combinations = 0.0;
@@ -413,12 +413,12 @@ impl PostFlopGame {
         for c1 in 0..52 {
             for c2 in c1 + 1..52 {
                 let oop_mask: u64 = (1 << c1) | (1 << c2);
-                let oop_prob = self.config.range[0].get_prob_by_cards(c1, c2);
+                let oop_prob = self.config.range[0].get_weight_by_cards(c1, c2);
                 if oop_mask & flop_mask == 0 && oop_prob > 0.0 {
                     for c3 in 0..52 {
                         for c4 in c3 + 1..52 {
                             let ip_mask: u64 = (1 << c3) | (1 << c4);
-                            let ip_prob = self.config.range[1].get_prob_by_cards(c3, c4);
+                            let ip_prob = self.config.range[1].get_weight_by_cards(c3, c4);
                             if ip_mask & (flop_mask | oop_mask) == 0 {
                                 num_combinations += oop_prob as f64 * ip_prob as f64;
                             }
@@ -461,7 +461,7 @@ impl PostFlopGame {
             for card1 in 0..52 {
                 for card2 in card1 + 1..52 {
                     let hand_mask: u64 = (1 << card1) | (1 << card2);
-                    let prob = range.get_prob_by_cards(card1, card2);
+                    let prob = range.get_weight_by_cards(card1, card2);
                     if prob > 0.0 && hand_mask & flop_mask == 0 {
                         initial_reach.push(prob);
                         private_hand_cards.push((card1, card2));
