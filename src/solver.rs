@@ -336,17 +336,15 @@ fn solve_recursive<T: Game>(
         // computes the counterfactual values of each action
         for_each_child(node, |action| {
             let cfreach = row(&cfreach_actions, action, row_size);
-            if cfreach.iter().any(|&x| x > 0.0) {
-                solve_recursive(
-                    row_mut(&mut cfv_actions.lock(), action, num_private_hands),
-                    game,
-                    &mut node.play(action),
-                    player,
-                    reach,
-                    cfreach,
-                    params,
-                );
-            }
+            solve_recursive(
+                row_mut(&mut cfv_actions.lock(), action, num_private_hands),
+                game,
+                &mut node.play(action),
+                player,
+                reach,
+                cfreach,
+                params,
+            );
         });
 
         // sums up the counterfactual values
