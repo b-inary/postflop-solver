@@ -38,7 +38,7 @@ impl DiscountParams {
 /// Performs CFR until the given number of iterations or exploitability is satisfied, and returns
 /// the exploitability.
 pub fn solve<T: Game>(
-    game: &mut T,
+    game: &T,
     num_iterations: i32,
     target_exploitability: f32,
     print_progress: bool,
@@ -105,7 +105,7 @@ pub fn solve<T: Game>(
 
 /// Proceeds CFR iteration for one step.
 #[inline]
-pub fn solve_step<T: Game>(game: &mut T, current_iteration: i32) {
+pub fn solve_step<T: Game>(game: &T, current_iteration: i32) {
     if !game.is_ready() {
         panic!("the game is not ready");
     }
@@ -281,7 +281,7 @@ fn solve_recursive<T: Game>(
                 });
                 let new_scale = reach_actions.iter().fold(0.0f32, |m, v| v.max(m));
                 let encoder = u16::MAX as f32 / new_scale;
-                strategy.iter_mut().zip(&*reach_actions).for_each(|(x, y)| {
+                strategy.iter_mut().zip(&reach_actions).for_each(|(x, y)| {
                     *x = (*y * encoder).round() as u16;
                 });
                 node.set_strategy_scale(new_scale);

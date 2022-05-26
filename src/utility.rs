@@ -82,9 +82,20 @@ pub fn decode_signed_slice(slice: &[i16], scale: f32) -> Vec<f32> {
     result
 }
 
+/// Encodes the `f32` slice to the `i16` slice.
+#[inline]
+pub fn encode_signed_slice(dst: &mut [i16], slice: &[f32]) -> f32 {
+    let scale = slice.iter().fold(0.0f32, |m, v| v.abs().max(m));
+    let encoder = i16::MAX as f32 / scale;
+    dst.iter_mut()
+        .zip(slice)
+        .for_each(|(d, s)| *d = (s * encoder).round() as i16);
+    scale
+}
+
 /// Normalizes the cumulative strategy.
 #[inline]
-pub fn normalize_strategy<T: Game>(game: &mut T) {
+pub fn normalize_strategy<T: Game>(game: &T) {
     if !game.is_ready() {
         panic!("the game is not ready");
     }
@@ -95,14 +106,46 @@ pub fn normalize_strategy<T: Game>(game: &mut T) {
     }
 }
 
-/// Computes the expected value of `player`'s payoff.
+/// Computes the expected values of each player's payoff and save them to `cum_regret`.
 #[inline]
-pub fn compute_ev<T: Game>(game: &T, player: usize) -> f32 {
+pub fn compute_ev<T: Game>(game: &T) {
     if !game.is_ready() {
         panic!("the game is not ready");
     }
+    let mut ev = [
+        vec![0.0; game.num_private_hands(0)],
+        vec![0.0; game.num_private_hands(1)],
+    ];
     let reach = [game.initial_reach(0), game.initial_reach(1)];
-    compute_ev_recursive(game, &game.root(), player, reach[player], reach[player ^ 1])
+    for player in 0..2 {
+        compute_ev_recursive(
+            &mut ev[player],
+            game,
+            &mut game.root(),
+            player,
+            reach[player],
+            reach[player ^ 1],
+        );
+    }
+}
+
+/// Computes the scalar expected value of the given node.
+#[inline]
+pub fn compute_ev_scalar<T: Game>(game: &T, node: &T::Node) -> f32 {
+    if !game.is_ready() {
+        panic!("the game is not ready");
+    }
+    let get_sum = |evs: &[f32]| {
+        evs.iter()
+            .take(game.num_private_hands(node.player()))
+            .fold(0.0, |sum, v| sum + *v as f64) as f32
+    };
+    if game.is_compression_enabled() {
+        let slice = node.cum_regret_compressed();
+        get_sum(&decode_signed_slice(slice, node.cum_regret_scale()))
+    } else {
+        get_sum(node.cum_regret())
+    }
 }
 
 /// Computes the exploitability of the strategy.
@@ -203,53 +246,77 @@ fn normalize_strategy_compressed_recursive<T: GameNode>(node: &mut T) {
 
 /// The recursive helper function for computing the expected value.
 fn compute_ev_recursive<T: Game>(
+    result: &mut [f32],
     game: &T,
-    node: &T::Node,
+    node: &mut T::Node,
     player: usize,
     reach: &[f32],
     cfreach: &[f32],
-) -> f32 {
+) {
     // terminal node
     if node.is_terminal() {
-        #[cfg(feature = "custom_alloc")]
-        let mut cfv = vec::from_elem_in(0.0, game.num_private_hands(player), StackAlloc);
-        #[cfg(not(feature = "custom_alloc"))]
-        let mut cfv = vec![0.0; game.num_private_hands(player)];
-        game.evaluate(&mut cfv, node, player, cfreach);
-        return cfv
-            .iter()
-            .zip(reach)
-            .fold(0.0, |acc, (v, r)| acc + *v as f64 * *r as f64) as f32;
+        game.evaluate(result, node, player, cfreach);
+        mul_slice(result, reach);
+        return;
     }
 
+    // allocates memory for storing the expected values
+    let num_actions = node.num_actions();
+    let num_private_hands = game.num_private_hands(player);
     #[cfg(feature = "custom_alloc")]
-    let ev = MutexLike::new(vec::from_elem_in(0.0, node.num_actions(), StackAlloc));
+    let ev_actions = MutexLike::new(vec::from_elem_in(
+        0.0,
+        num_actions * num_private_hands,
+        StackAlloc,
+    ));
     #[cfg(not(feature = "custom_alloc"))]
-    let ev = MutexLike::new(vec![0.0; node.num_actions()]);
+    let ev_actions = MutexLike::new(vec![0.0; num_actions * num_private_hands]);
 
     // chance node
     if node.is_chance() {
+        // updates the reach probabilities
         #[cfg(feature = "custom_alloc")]
         let mut cfreach = cfreach.to_vec_in(StackAlloc);
         #[cfg(not(feature = "custom_alloc"))]
         let mut cfreach = cfreach.to_vec();
         mul_slice_scalar(&mut cfreach, node.chance_factor());
 
-        #[cfg(feature = "custom_alloc")]
-        let mut weights = vec::from_elem_in(1.0, node.num_actions(), StackAlloc);
-        #[cfg(not(feature = "custom_alloc"))]
-        let mut weights = vec![1.0; node.num_actions()];
-        for iso_chance in node.isomorphic_chances() {
-            weights[iso_chance.index] += 1.0;
-        }
-
+        // computes the expected values of each action
         for_each_child(node, |action| {
-            ev.lock()[action] = weights[action]
-                * compute_ev_recursive(game, &node.play(action), player, reach, &cfreach);
+            compute_ev_recursive(
+                row_mut(&mut ev_actions.lock(), action, num_private_hands),
+                game,
+                &mut node.play(action),
+                player,
+                reach,
+                &cfreach,
+            );
         });
+
+        // sums up the expected values
+        let mut ev_actions = ev_actions.lock();
+        ev_actions.chunks(num_private_hands).for_each(|row| {
+            add_slice(result, row);
+        });
+
+        // get information about isomorphic chances
+        let iso_chances = node.isomorphic_chances();
+
+        // processes isomorphic chances
+        for iso_chance in iso_chances {
+            let tmp = row_mut(&mut ev_actions, iso_chance.index, num_private_hands);
+            for &(i, j) in &iso_chance.swap_list[player] {
+                tmp.swap(i, j);
+            }
+            add_slice(result, tmp);
+            for &(i, j) in &iso_chance.swap_list[player] {
+                tmp.swap(i, j);
+            }
+        }
     }
     // player node
     else if node.player() == player {
+        // updates the reach probabilities
         let mut reach_actions = if game.is_compression_enabled() {
             let strategy = node.strategy_compressed();
             let scale = node.strategy_scale();
@@ -270,18 +337,37 @@ fn compute_ev_recursive<T: Game>(
             mul_slice(row, reach);
         });
 
+        // computes the expected values of each action
         for_each_child(node, |action| {
-            ev.lock()[action] = compute_ev_recursive(
+            compute_ev_recursive(
+                row_mut(&mut ev_actions.lock(), action, num_private_hands),
                 game,
-                &node.play(action),
+                &mut node.play(action),
                 player,
                 row(&reach_actions, action, row_size),
                 cfreach,
             );
         });
+
+        // sums up the expected values
+        let ev_actions = ev_actions.lock();
+        ev_actions.chunks(num_private_hands).for_each(|row| {
+            add_slice(result, row);
+        });
+
+        // save to `cum_regret` field
+        if game.is_compression_enabled() {
+            let cum_regret = node.cum_regret_compressed_mut();
+            let new_scale = encode_signed_slice(cum_regret, result);
+            node.set_cum_regret_scale(new_scale);
+        } else {
+            let cum_regret = node.cum_regret_mut();
+            cum_regret.iter_mut().zip(result).for_each(|(r, v)| *r = *v);
+        }
     }
     // opponent node
     else {
+        // updates the reach probabilities
         let mut cfreach_actions = if game.is_compression_enabled() {
             let strategy = node.strategy_compressed();
             let scale = node.strategy_scale();
@@ -302,18 +388,24 @@ fn compute_ev_recursive<T: Game>(
             mul_slice(row, cfreach);
         });
 
+        // computes the expected values of each action
         for_each_child(node, |action| {
-            ev.lock()[action] = compute_ev_recursive(
+            compute_ev_recursive(
+                row_mut(&mut ev_actions.lock(), action, num_private_hands),
                 game,
-                &node.play(action),
+                &mut node.play(action),
                 player,
                 reach,
                 row(&cfreach_actions, action, row_size),
             );
         });
-    }
 
-    ev.lock().iter().sum::<f32>()
+        // sums up the expected values
+        let ev_actions = ev_actions.lock();
+        ev_actions.chunks(num_private_hands).for_each(|row| {
+            add_slice(result, row);
+        });
+    }
 }
 
 /// The recursive helper function for computing the counterfactual values of best response.

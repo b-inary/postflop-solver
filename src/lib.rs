@@ -41,11 +41,12 @@
 //! // solve game
 //! let max_num_iterations = 1000;
 //! let target_exploitability = config.initial_pot as f32 * 0.005;
-//! let exploitability = solve(&mut game, max_num_iterations, target_exploitability, true);
+//! let exploitability = solve(&game, max_num_iterations, target_exploitability, true);
 //!
 //! // compute OOP's EV
+//! compute_ev(&game);
 //! let bias = config.initial_pot as f32 * 0.5;
-//! let ev = compute_ev(&game, 0) + bias;
+//! let ev = compute_ev_scalar(&game, &game.root()) + bias;
 //! ```
 
 #![cfg_attr(feature = "custom_alloc", feature(allocator_api))]

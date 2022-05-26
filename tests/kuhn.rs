@@ -217,10 +217,11 @@ impl GameNode for KuhnNode {
 #[test]
 fn kuhn() {
     let target = 1e-4;
-    let mut game = KuhnGame::new();
-    solve(&mut game, 10000, target, false);
+    let game = KuhnGame::new();
+    solve(&game, 10000, target, false);
+    compute_ev(&game);
 
-    let ev = compute_ev(&game, 0);
+    let ev = compute_ev_scalar(&game, &game.root());
     let expected_ev = -1.0 / 18.0;
     assert!((ev - expected_ev).abs() <= 2.0 * target);
 }

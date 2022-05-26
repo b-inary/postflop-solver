@@ -1326,9 +1326,10 @@ mod tests {
         };
         let mut game = PostFlopGame::with_config(&config).unwrap();
         game.allocate_memory(false);
-        normalize_strategy(&mut game);
-        let ev0 = compute_ev(&game, 0) + 30.0;
-        let ev1 = compute_ev(&game, 1) + 30.0;
+        normalize_strategy(&game);
+        compute_ev(&game);
+        let ev0 = compute_ev_scalar(&game, &game.root()) + 30.0;
+        let ev1 = 60.0 - ev0;
         assert!((ev0 - 30.0).abs() < 1e-4);
         assert!((ev1 - 30.0).abs() < 1e-4);
     }
@@ -1345,9 +1346,10 @@ mod tests {
         };
         let mut game = PostFlopGame::with_config(&config).unwrap();
         game.allocate_memory(false);
-        normalize_strategy(&mut game);
-        let ev0 = compute_ev(&game, 0) + 30.0;
-        let ev1 = compute_ev(&game, 1) + 30.0;
+        normalize_strategy(&game);
+        compute_ev(&game);
+        let ev0 = compute_ev_scalar(&game, &game.root()) + 30.0;
+        let ev1 = 60.0 - ev0;
         assert!((ev0 - 37.5).abs() < 1e-4);
         assert!((ev1 - 22.5).abs() < 1e-4);
     }
@@ -1365,9 +1367,10 @@ mod tests {
         };
         let mut game = PostFlopGame::with_config(&config).unwrap();
         game.allocate_memory(false);
-        normalize_strategy(&mut game);
-        let ev0 = compute_ev(&game, 0) + 30.0;
-        let ev1 = compute_ev(&game, 1) + 30.0;
+        normalize_strategy(&game);
+        compute_ev(&game);
+        let ev0 = compute_ev_scalar(&game, &game.root()) + 30.0;
+        let ev1 = 60.0 - ev0;
         assert!((ev0 - 60.0).abs() < 1e-4);
         assert!((ev1 - 0.0).abs() < 1e-4);
     }
@@ -1417,9 +1420,10 @@ mod tests {
         );
         game.allocate_memory(false);
 
-        solve(&mut game, 1000, 60.0 * 0.005, true);
-        let ev0 = compute_ev(&game, 0) + 30.0;
-        let ev1 = compute_ev(&game, 1) + 30.0;
+        solve(&game, 1000, 60.0 * 0.005, true);
+        compute_ev(&game);
+        let ev0 = compute_ev_scalar(&game, &game.root()) + 30.0;
+        let ev1 = 60.0 - ev0;
 
         // verified by GTO+
         assert!((ev0 - 26.24).abs() < 0.5);
