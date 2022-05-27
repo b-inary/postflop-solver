@@ -169,9 +169,13 @@ pub fn compute_exploitability<T: Game>(game: &T, is_normalized: bool) -> f32 {
             is_normalized,
         );
     }
-    let cfv_sum0 = cfv[0].iter().fold(0.0, |acc, v| acc + *v as f64);
-    let cfv_sum1 = cfv[1].iter().fold(0.0, |acc, v| acc + *v as f64);
-    (cfv_sum0 + cfv_sum1) as f32 / 2.0
+    let get_sum = |player: usize| {
+        cfv[player]
+            .iter()
+            .zip(reach[player])
+            .fold(0.0, |sum, (&cfv, &reach)| sum + cfv as f64 * reach as f64)
+    };
+    (get_sum(0) + get_sum(1)) as f32 / 2.0
 }
 
 /// The recursive helper function for normalizing the strategy.
@@ -260,9 +264,10 @@ fn compute_ev_recursive<T: Game>(
         return;
     }
 
-    // allocates memory for storing the expected values
     let num_actions = node.num_actions();
     let num_private_hands = game.num_private_hands(player);
+
+    // allocates memory for storing the expected values
     #[cfg(feature = "custom_alloc")]
     let ev_actions = MutexLike::new(vec::from_elem_in(
         0.0,
@@ -367,7 +372,6 @@ fn compute_ev_recursive<T: Game>(
     }
     // opponent node
     else {
-        // updates the reach probabilities
         let mut cfreach_actions = if game.is_compression_enabled() {
             let strategy = node.strategy_compressed();
             let scale = node.strategy_scale();
@@ -383,6 +387,7 @@ fn compute_ev_recursive<T: Game>(
             }
         };
 
+        // updates the reach probabilities
         let row_size = cfreach_actions.len() / node.num_actions();
         cfreach_actions.chunks_mut(row_size).for_each(|row| {
             mul_slice(row, cfreach);
@@ -423,9 +428,10 @@ fn compute_best_cfv_recursive<T: Game>(
         return;
     }
 
-    // allocates memory for storing the counterfactual values
     let num_actions = node.num_actions();
     let num_private_hands = game.num_private_hands(player);
+
+    // allocates memory for storing the counterfactual values
     #[cfg(feature = "custom_alloc")]
     let cfv_actions = MutexLike::new(vec::from_elem_in(
         0.0,
@@ -502,7 +508,6 @@ fn compute_best_cfv_recursive<T: Game>(
     }
     // opponent node
     else {
-        // updates the reach probabilities
         let mut cfreach_actions = if game.is_compression_enabled() {
             let strategy = node.strategy_compressed();
             let scale = node.strategy_scale();
@@ -536,6 +541,7 @@ fn compute_best_cfv_recursive<T: Game>(
             });
         }
 
+        // updates the reach probabilities
         cfreach_actions.chunks_mut(row_size).for_each(|row| {
             mul_slice(row, cfreach);
         });

@@ -517,18 +517,26 @@ impl Range {
         let gap2 = rank21 - rank22;
         if suitedness != suitedness2 {
             Err(format!("Suitedness does not match: {range}"))
-        } else if gap == gap2 && rank11 > rank21 {
+        } else if gap == gap2 {
             // same gap (e.g., 88-55, KQo-JTo)
-            for i in rank21..=rank11 {
-                self.set_weight(&indices_with_suitedness(i, i - gap, suitedness), weight);
+            if rank11 > rank21 {
+                for i in rank21..=rank11 {
+                    self.set_weight(&indices_with_suitedness(i, i - gap, suitedness), weight);
+                }
+                Ok(())
+            } else {
+                Err(format!("Range must be in descending order: {range}"))
             }
-            Ok(())
-        } else if rank11 == rank21 && rank12 > rank22 {
+        } else if rank11 == rank21 {
             // same first rank (e.g., A5s-A2s)
-            for i in rank22..=rank12 {
-                self.set_weight(&indices_with_suitedness(rank11, i, suitedness), weight);
+            if rank12 > rank22 {
+                for i in rank22..=rank12 {
+                    self.set_weight(&indices_with_suitedness(rank11, i, suitedness), weight);
+                }
+                Ok(())
+            } else {
+                Err(format!("Range must be in descending order: {range}"))
             }
-            Ok(())
         } else {
             Err(format!("Invalid range: {range}"))
         }
@@ -653,8 +661,8 @@ impl Range {
         // pairs
         for rank in (0..13).rev() {
             if !self.is_same_weight(&pair_indices(rank)) {
-                for suit1 in 0..4 {
-                    for suit2 in suit1 + 1..4 {
+                for suit1 in (0..4).rev() {
+                    for suit2 in (0..suit1).rev() {
                         let weight = self.get_weight_by_cards(4 * rank + suit1, 4 * rank + suit2);
                         if weight > 0.0 {
                             let mut tmp = format!(
@@ -678,7 +686,7 @@ impl Range {
             for rank2 in (0..rank1).rev() {
                 // suited
                 if !self.is_same_weight(&suited_indices(rank1, rank2)) {
-                    for suit in 0..4 {
+                    for suit in (0..4).rev() {
                         let weight = self.get_weight_by_cards(4 * rank1 + suit, 4 * rank2 + suit);
                         if weight > 0.0 {
                             let mut tmp = format!(
@@ -697,8 +705,8 @@ impl Range {
 
                 // offsuit
                 if !self.is_same_weight(&offsuit_indices(rank1, rank2)) {
-                    for suit1 in 0..4 {
-                        for suit2 in 0..4 {
+                    for suit1 in (0..4).rev() {
+                        for suit2 in (0..4).rev() {
                             if suit1 != suit2 {
                                 let weight =
                                     self.get_weight_by_cards(4 * rank1 + suit1, 4 * rank2 + suit2);
@@ -925,7 +933,7 @@ mod tests {
             ("AA,AK,AQ", "AA,AQ+"),
             ("AK,AQ,AJs", "AJs+,AQo+"),
             ("KQ,KT,K9,K8,K6,K5", "KQ,KT-K8,K6-K5"),
-            ("AhAs-QhQs,JJ", "JJ,AhAs,KhKs,QhQs"),
+            ("AhAs-QhQs,JJ", "JJ,AsAh,KsKh,QsQh"),
             ("KJs+,KQo,KsJh", "KJs+,KQo,KsJh"),
             ("KcQh,KJ", "KJ,KcQh"),
         ];
