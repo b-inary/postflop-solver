@@ -52,7 +52,7 @@ pub trait GameNode: Sync {
     fn chance_factor(&self) -> f32;
 
     /// Returns the list of isomorphic chances.
-    fn isomorphic_chances(&self) -> &Vec<IsomorphicChance>;
+    fn isomorphic_chances(&self) -> &[IsomorphicChance];
 
     /// Returns the node after taking the given action.
     fn play(&self, action: usize) -> MutexGuardLike<Self>;

@@ -294,7 +294,7 @@ impl GameNode for LeducNode {
     }
 
     #[inline]
-    fn isomorphic_chances(&self) -> &Vec<IsomorphicChance> {
+    fn isomorphic_chances(&self) -> &[IsomorphicChance] {
         &self.iso_chances
     }
 

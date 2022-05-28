@@ -342,7 +342,7 @@ impl PostFlopGame {
 
     /// Returns the card list of private hands of the given player.
     #[inline]
-    pub fn private_hand_cards(&self, player: usize) -> &Vec<(u8, u8)> {
+    pub fn private_hand_cards(&self, player: usize) -> &[(u8, u8)] {
         &self.private_hand_cards[player]
     }
 
@@ -1125,7 +1125,7 @@ impl GameNode for PostFlopNode {
     }
 
     #[inline]
-    fn isomorphic_chances(&self) -> &Vec<IsomorphicChance> {
+    fn isomorphic_chances(&self) -> &[IsomorphicChance] {
         &self.iso_chances
     }
 

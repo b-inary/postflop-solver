@@ -184,7 +184,7 @@ impl GameNode for KuhnNode {
     }
 
     #[inline]
-    fn isomorphic_chances(&self) -> &Vec<IsomorphicChance> {
+    fn isomorphic_chances(&self) -> &[IsomorphicChance] {
         unreachable!()
     }
 
