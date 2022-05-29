@@ -160,6 +160,12 @@ fn solve_recursive<T: Game>(
 
     // if the `node` is chance
     if node.is_chance() {
+        // use 64-bit floating point values
+        #[cfg(feature = "custom_alloc")]
+        let mut result_f64 = vec::from_elem_in(0.0, num_private_hands, StackAlloc);
+        #[cfg(not(feature = "custom_alloc"))]
+        let mut result_f64 = vec![0.0; num_private_hands];
+
         // updates the reach probabilities
         #[cfg(feature = "custom_alloc")]
         let mut cfreach = cfreach.to_vec_in(StackAlloc);
@@ -183,7 +189,9 @@ fn solve_recursive<T: Game>(
         // sums up the counterfactual values
         let mut cfv_actions = cfv_actions.lock();
         cfv_actions.chunks(num_private_hands).for_each(|row| {
-            add_slice(result, row);
+            result_f64.iter_mut().zip(row).for_each(|(r, &v)| {
+                *r += v as f64;
+            });
         });
 
         // get information about isomorphic chances
@@ -195,11 +203,17 @@ fn solve_recursive<T: Game>(
             for &(i, j) in &game.isomorphic_swap(node, i)[player] {
                 tmp.swap(i, j);
             }
-            add_slice(result, tmp);
+            result_f64.iter_mut().zip(&*tmp).for_each(|(r, &v)| {
+                *r += v as f64;
+            });
             for &(i, j) in &game.isomorphic_swap(node, i)[player] {
                 tmp.swap(i, j);
             }
         }
+
+        result.iter_mut().zip(&result_f64).for_each(|(r, &v)| {
+            *r = v as f32;
+        });
     }
     // if the current player is `player`
     else if node.player() == player {
