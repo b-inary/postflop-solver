@@ -15,6 +15,12 @@ pub trait Game: Sync {
     /// Returns the initial reach probabilities of given player.
     fn initial_reach(&self, player: usize) -> &[f32];
 
+    /// Returns the list of isomorphic chances.
+    fn isomorphic_chances(&self, node: &Self::Node) -> &[usize];
+
+    /// Returns the swap list of the given isomorphic chance.
+    fn isomorphic_swap(&self, node: &Self::Node, index: usize) -> &[Vec<(usize, usize)>; 2];
+
     /// Computes the counterfactual values of given node.
     fn evaluate(&self, result: &mut [f32], node: &Self::Node, player: usize, cfreach: &[f32]);
 
@@ -50,9 +56,6 @@ pub trait GameNode: Sync {
 
     /// Returns the effective coefficient of chance.
     fn chance_factor(&self) -> f32;
-
-    /// Returns the list of isomorphic chances.
-    fn isomorphic_chances(&self) -> &[IsomorphicChance];
 
     /// Returns the node after taking the given action.
     fn play(&self, action: usize) -> MutexGuardLike<Self>;
@@ -118,14 +121,4 @@ pub trait GameNode: Sync {
     fn enable_parallelization(&self) -> bool {
         false
     }
-}
-
-/// The struct representing an isomorphic chance branch.
-#[derive(Debug, Clone)]
-pub struct IsomorphicChance {
-    /// The index of isomorphic chance.
-    pub index: usize,
-
-    /// The swap indices of each player.
-    pub swap_list: [Vec<(usize, usize)>; 2],
 }

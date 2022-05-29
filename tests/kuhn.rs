@@ -53,6 +53,16 @@ impl Game for KuhnGame {
         &self.initial_reach
     }
 
+    #[inline]
+    fn isomorphic_chances(&self, _node: &Self::Node) -> &[usize] {
+        unreachable!()
+    }
+
+    #[inline]
+    fn isomorphic_swap(&self, _node: &Self::Node, _index: usize) -> &[Vec<(usize, usize)>; 2] {
+        unreachable!()
+    }
+
     fn evaluate(&self, result: &mut [f32], node: &Self::Node, player: usize, cfreach: &[f32]) {
         let num_hands = NUM_PRIVATE_HANDS * (NUM_PRIVATE_HANDS - 1);
         let num_hands_inv = 1.0 / num_hands as f32;
@@ -180,11 +190,6 @@ impl GameNode for KuhnNode {
 
     #[inline]
     fn chance_factor(&self) -> f32 {
-        unreachable!()
-    }
-
-    #[inline]
-    fn isomorphic_chances(&self) -> &[IsomorphicChance] {
         unreachable!()
     }
 

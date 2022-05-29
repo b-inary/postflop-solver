@@ -4,6 +4,8 @@ use postflop_solver::*;
 struct LeducGame {
     root: MutexLike<LeducNode>,
     initial_reach: Vec<f32>,
+    isomorphism: Vec<usize>,
+    isomorphism_swap: [Vec<(usize, usize)>; 2],
 }
 
 struct LeducNode {
@@ -11,7 +13,6 @@ struct LeducNode {
     board: usize,
     amount: i32,
     children: Vec<(Action, MutexLike<LeducNode>)>,
-    iso_chances: Vec<IsomorphicChance>,
     cum_regret: Vec<f32>,
     strategy: Vec<f32>,
 }
@@ -60,6 +61,16 @@ impl Game for LeducGame {
         &self.initial_reach
     }
 
+    #[inline]
+    fn isomorphic_chances(&self, _node: &Self::Node) -> &[usize] {
+        &self.isomorphism
+    }
+
+    #[inline]
+    fn isomorphic_swap(&self, _node: &Self::Node, _index: usize) -> &[Vec<(usize, usize)>; 2] {
+        &self.isomorphism_swap
+    }
+
     fn evaluate(&self, result: &mut [f32], node: &Self::Node, player: usize, cfreach: &[f32]) {
         let num_hands = NUM_PRIVATE_HANDS * (NUM_PRIVATE_HANDS - 1);
         let num_hands_inv = 1.0 / num_hands as f32;
@@ -106,6 +117,8 @@ impl LeducGame {
         Self {
             root: Self::build_tree(),
             initial_reach: vec![1.0; NUM_PRIVATE_HANDS],
+            isomorphism: vec![0, 1, 2],
+            isomorphism_swap: [vec![(0, 1), (2, 3), (4, 5)], vec![(0, 1), (2, 3), (4, 5)]],
         }
     }
 
@@ -115,7 +128,6 @@ impl LeducGame {
             board: NOT_DEALT,
             amount: 1,
             children: Vec::new(),
-            iso_chances: Vec::new(),
             cum_regret: Default::default(),
             strategy: Default::default(),
         };
@@ -163,7 +175,6 @@ impl LeducGame {
                     board: node.board,
                     amount: node.amount + bet_diff,
                     children: Vec::new(),
-                    iso_chances: Vec::new(),
                     cum_regret: Default::default(),
                     strategy: Default::default(),
                 }),
@@ -188,21 +199,10 @@ impl LeducGame {
                     board: index * 2,
                     amount: node.amount,
                     children: Vec::new(),
-                    iso_chances: Vec::new(),
                     cum_regret: Default::default(),
                     strategy: Default::default(),
                 }),
             ));
-        }
-
-        for index in 0..3 {
-            node.iso_chances.push(IsomorphicChance {
-                index,
-                swap_list: [
-                    vec![(index * 2, index * 2 + 1)],
-                    vec![(index * 2, index * 2 + 1)],
-                ],
-            });
         }
     }
 
@@ -291,11 +291,6 @@ impl GameNode for LeducNode {
     #[inline]
     fn chance_factor(&self) -> f32 {
         1.0 / 4.0
-    }
-
-    #[inline]
-    fn isomorphic_chances(&self) -> &[IsomorphicChance] {
-        &self.iso_chances
     }
 
     #[inline]

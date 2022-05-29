@@ -305,16 +305,16 @@ fn compute_ev_recursive<T: Game>(
         });
 
         // get information about isomorphic chances
-        let iso_chances = node.isomorphic_chances();
+        let isomorphic_chances = game.isomorphic_chances(node);
 
         // processes isomorphic chances
-        for iso_chance in iso_chances {
-            let tmp = row_mut(&mut ev_actions, iso_chance.index, num_private_hands);
-            for &(i, j) in &iso_chance.swap_list[player] {
+        for i in 0..isomorphic_chances.len() {
+            let tmp = row_mut(&mut ev_actions, isomorphic_chances[i], num_private_hands);
+            for &(i, j) in &game.isomorphic_swap(node, i)[player] {
                 tmp.swap(i, j);
             }
             add_slice(result, tmp);
-            for &(i, j) in &iso_chance.swap_list[player] {
+            for &(i, j) in &game.isomorphic_swap(node, i)[player] {
                 tmp.swap(i, j);
             }
         }
@@ -469,16 +469,16 @@ fn compute_best_cfv_recursive<T: Game>(
         });
 
         // get information about isomorphic chances
-        let iso_chances = node.isomorphic_chances();
+        let isomorphic_chances = game.isomorphic_chances(node);
 
         // processes isomorphic chances
-        for iso_chance in iso_chances {
-            let tmp = row_mut(&mut cfv_actions, iso_chance.index, num_private_hands);
-            for &(i, j) in &iso_chance.swap_list[player] {
+        for i in 0..isomorphic_chances.len() {
+            let tmp = row_mut(&mut cfv_actions, isomorphic_chances[i], num_private_hands);
+            for &(i, j) in &game.isomorphic_swap(node, i)[player] {
                 tmp.swap(i, j);
             }
             add_slice(result, tmp);
-            for &(i, j) in &iso_chance.swap_list[player] {
+            for &(i, j) in &game.isomorphic_swap(node, i)[player] {
                 tmp.swap(i, j);
             }
         }

@@ -25,7 +25,12 @@ pub struct PostFlopGame {
     private_hand_cards: [Vec<(u8, u8)>; 2],
     same_hand_index: [Vec<Option<usize>>; 2],
     hand_strength: Vec<[Vec<(usize, usize)>; 2]>,
-    suit_isomorphism: [u8; 4],
+    turn_isomorphism: Vec<usize>,
+    turn_isomorphism_card: Vec<(u8, u8)>,
+    turn_isomorphism_swap: [[Vec<(usize, usize)>; 2]; 4],
+    river_isomorphism: Vec<Vec<usize>>,
+    river_isomorphism_card: Vec<Vec<(u8, u8)>>,
+    river_isomorphism_swap: Vec<[[Vec<(usize, usize)>; 2]; 4]>,
     is_memory_allocated: bool,
     is_compression_enabled: bool,
     num_storage_elements: u64,
@@ -46,7 +51,6 @@ pub struct PostFlopNode {
     river: u8,
     amount: i32,
     children: Vec<(Action, MutexLike<PostFlopNode>)>,
-    iso_chances: Vec<IsomorphicChance>,
     cum_regret: *mut f32,
     strategy: *mut f32,
     cum_regret_compressed: *mut i16,
@@ -183,6 +187,25 @@ impl Game for PostFlopGame {
     #[inline]
     fn initial_reach(&self, player: usize) -> &[f32] {
         &self.initial_reach[player]
+    }
+
+    #[inline]
+    fn isomorphic_chances(&self, node: &Self::Node) -> &[usize] {
+        if node.turn == NOT_DEALT {
+            &self.turn_isomorphism
+        } else {
+            &self.river_isomorphism[node.turn as usize]
+        }
+    }
+
+    #[inline]
+    fn isomorphic_swap(&self, node: &Self::Node, index: usize) -> &[Vec<(usize, usize)>; 2] {
+        if node.turn == NOT_DEALT {
+            &self.turn_isomorphism_swap[self.turn_isomorphism_card[index].0 as usize & 3]
+        } else {
+            &self.river_isomorphism_swap[node.turn as usize]
+                [self.river_isomorphism_card[node.turn as usize][index].0 as usize & 3]
+        }
     }
 
     fn evaluate(&self, result: &mut [f32], node: &Self::Node, player: usize, cfreach: &[f32]) {
@@ -447,6 +470,7 @@ impl PostFlopGame {
     #[inline]
     fn init(&mut self) {
         self.init_range();
+        self.init_isomorphism();
         self.init_hand_strength();
         self.init_root();
     }
@@ -486,20 +510,193 @@ impl PostFlopGame {
                 same_hand_index.push(opponent_hands.binary_search(hand).ok());
             }
         }
+    }
 
-        self.suit_isomorphism[0] = 0;
+    /// Initializes a field related to isomorphism.
+    fn init_isomorphism(&mut self) {
+        let range = &self.config.range;
+        let mut suit_isomorphism = [0; 4];
         let mut next_index = 1;
         'outer: for suit2 in 1..4 {
             for suit1 in 0..suit2 {
                 if range[PLAYER_OOP as usize].is_suit_isomorphic(suit1, suit2)
                     && range[PLAYER_IP as usize].is_suit_isomorphic(suit1, suit2)
                 {
-                    self.suit_isomorphism[suit2 as usize] = self.suit_isomorphism[suit1 as usize];
+                    suit_isomorphism[suit2 as usize] = suit_isomorphism[suit1 as usize];
                     continue 'outer;
                 }
             }
-            self.suit_isomorphism[suit2 as usize] = next_index;
+            suit_isomorphism[suit2 as usize] = next_index;
             next_index += 1;
+        }
+
+        let flop = self.config.flop;
+        let flop_mask: u64 = (1 << flop[0]) | (1 << flop[1]) | (1 << flop[2]);
+
+        let mut flop_rankset = [0; 4];
+        for card in flop {
+            let rank = card >> 2;
+            let suit = card & 3;
+            flop_rankset[suit as usize] |= 1 << rank;
+        }
+
+        self.turn_isomorphism.clear();
+        self.turn_isomorphism_card.clear();
+        self.turn_isomorphism_swap.iter_mut().for_each(|x| {
+            x[0].clear();
+            x[1].clear();
+        });
+
+        let mut isomorphic_suit = [None; 4];
+        let mut reverse_table = [usize::MAX; 52 * 51 / 2];
+
+        // turn isomorphism
+        for suit1 in 1..4 {
+            for suit2 in 0..suit1 {
+                if flop_rankset[suit1 as usize] == flop_rankset[suit2 as usize]
+                    && suit_isomorphism[suit1 as usize] == suit_isomorphism[suit2 as usize]
+                {
+                    isomorphic_suit[suit1 as usize] = Some(suit2);
+
+                    let replacer = |card: u8| {
+                        if card & 3 == suit1 {
+                            card - suit1 + suit2
+                        } else if card & 3 == suit2 {
+                            card + suit1 - suit2
+                        } else {
+                            card
+                        }
+                    };
+
+                    let swap_list = &mut self.turn_isomorphism_swap[suit1 as usize];
+
+                    for player in 0..2 {
+                        reverse_table.fill(usize::MAX);
+                        let cards = &self.private_hand_cards[player];
+                        for i in 0..cards.len() {
+                            reverse_table[card_pair_index(cards[i].0, cards[i].1)] = i;
+                        }
+
+                        for i in 0..cards.len() {
+                            let c1 = replacer(cards[i].0);
+                            let c2 = replacer(cards[i].1);
+                            let index = reverse_table[card_pair_index(c1, c2)];
+                            if index != usize::MAX && i < index {
+                                swap_list[player].push((i, index));
+                            }
+                        }
+                    }
+
+                    break;
+                }
+            }
+        }
+
+        let mut counter = 0;
+        let mut indices = [0; 52];
+
+        for card in 0..52 {
+            if (1 << card) & flop_mask != 0 {
+                continue;
+            }
+
+            let suit = card & 3;
+
+            if let Some(replace_suit) = isomorphic_suit[suit as usize] {
+                let replace_card = card - suit + replace_suit;
+                self.turn_isomorphism.push(indices[replace_card as usize]);
+                self.turn_isomorphism_card.push((card, replace_card));
+            } else {
+                indices[card as usize] = counter;
+                counter += 1;
+            }
+        }
+
+        self.river_isomorphism.clear();
+        self.river_isomorphism_card.clear();
+        self.river_isomorphism_swap.clear();
+
+        // river isomorphism
+        for turn in 0..52 {
+            self.river_isomorphism.push(Vec::new());
+            self.river_isomorphism_card.push(Vec::new());
+            self.river_isomorphism_swap.push(Default::default());
+
+            if (1 << turn) & flop_mask != 0 {
+                continue;
+            }
+
+            let river_isomorphism = self.river_isomorphism.last_mut().unwrap();
+            let river_isomorphism_card = self.river_isomorphism_card.last_mut().unwrap();
+            let river_isomorphism_swap = self.river_isomorphism_swap.last_mut().unwrap();
+
+            let turn_mask = flop_mask | (1 << turn);
+            let mut turn_rankset = flop_rankset;
+            turn_rankset[turn as usize & 3] |= 1 << (turn >> 2);
+
+            isomorphic_suit.fill(None);
+
+            for suit1 in 1..4 {
+                for suit2 in 0..suit1 {
+                    if flop_rankset[suit1 as usize] == flop_rankset[suit2 as usize]
+                        && turn_rankset[suit1 as usize] == turn_rankset[suit2 as usize]
+                        && suit_isomorphism[suit1 as usize] == suit_isomorphism[suit2 as usize]
+                    {
+                        isomorphic_suit[suit1 as usize] = Some(suit2 as u8);
+
+                        let replacer = |card: u8| {
+                            if card & 3 == suit1 {
+                                card - suit1 + suit2
+                            } else if card & 3 == suit2 {
+                                card + suit1 - suit2
+                            } else {
+                                card
+                            }
+                        };
+
+                        let swap_list = &mut river_isomorphism_swap[suit1 as usize];
+
+                        for player in 0..2 {
+                            reverse_table.fill(usize::MAX);
+                            let cards = &self.private_hand_cards[player];
+                            for i in 0..cards.len() {
+                                reverse_table[card_pair_index(cards[i].0, cards[i].1)] = i;
+                            }
+
+                            for i in 0..cards.len() {
+                                let c1 = replacer(cards[i].0);
+                                let c2 = replacer(cards[i].1);
+                                let index = reverse_table[card_pair_index(c1, c2)];
+                                if index != usize::MAX && i < index {
+                                    swap_list[player].push((i, index));
+                                }
+                            }
+                        }
+
+                        break;
+                    }
+                }
+            }
+
+            counter = 0;
+            indices.fill(0);
+
+            for card in 0..52 {
+                if (1 << card) & turn_mask != 0 {
+                    continue;
+                }
+
+                let suit = card & 3;
+
+                if let Some(replace_suit) = isomorphic_suit[suit as usize] {
+                    let replace_card = card - suit + replace_suit;
+                    river_isomorphism.push(indices[replace_card as usize]);
+                    river_isomorphism_card.push((card, replace_card));
+                } else {
+                    indices[card as usize] = counter;
+                    counter += 1;
+                }
+            }
         }
     }
 
@@ -692,15 +889,6 @@ impl PostFlopGame {
         let flop = self.config.flop;
         let flop_mask: u64 = (1 << flop[0]) | (1 << flop[1]) | (1 << flop[2]);
 
-        let mut indices = [0; 52];
-
-        let mut flop_rankset = [0; 4];
-        for card in flop {
-            let rank = card >> 2;
-            let suit = card & 3;
-            flop_rankset[suit as usize] |= 1 << rank;
-        }
-
         // deal turn
         if node.turn == NOT_DEALT {
             let next_player = if !info.allin_flag {
@@ -709,65 +897,16 @@ impl PostFlopGame {
                 PLAYER_CHANCE
             };
 
-            let mut iso_suits = [None; 4];
-            for suit1 in 0..4 {
-                for suit2 in suit1 + 1..4 {
-                    if iso_suits[suit2].is_none()
-                        && flop_rankset[suit1] == flop_rankset[suit2]
-                        && self.suit_isomorphism[suit1] == self.suit_isomorphism[suit2]
-                    {
-                        iso_suits[suit2] = Some(suit1 as u8);
-                    }
-                }
-            }
-
             node.children.reserve(49);
-            node.iso_chances.reserve(49);
 
             for card in 0..52 {
-                if (1 << card) & flop_mask != 0 {
-                    continue;
-                }
-
-                let rank = card >> 2;
-                let suit = card & 3;
-
-                // isomorphic chance
-                if let Some(iso_suit) = iso_suits[suit as usize] {
-                    let iso_card = rank << 2 | iso_suit;
-                    let iso_index = indices[iso_card as usize];
-                    let mut iso_chance = IsomorphicChance {
-                        index: iso_index,
-                        swap_list: [Vec::with_capacity(51), Vec::with_capacity(51)],
-                    };
-
-                    for player in 0..2 {
-                        let cards = &self.private_hand_cards[player];
-                        for i in 0..cards.len() {
-                            let (c1, c2) = cards[i];
-                            if c1 == card {
-                                if let Ok(j) = cards.binary_search(&(iso_card, c2)) {
-                                    iso_chance.swap_list[player].push((i, j));
-                                }
-                            }
-                            if c2 == card {
-                                if let Ok(j) = cards.binary_search(&(c1, iso_card)) {
-                                    iso_chance.swap_list[player].push((i, j));
-                                }
-                            }
-                        }
-                        iso_chance.swap_list[player].shrink_to_fit();
-                        info.current_memory_usage.fetch_add(
-                            vec_memory_usage(&iso_chance.swap_list[player]),
-                            Ordering::Relaxed,
-                        );
-                    }
-
-                    node.iso_chances.push(iso_chance);
-                }
-                // normal chance
-                else {
-                    indices[card as usize] = node.children.len();
+                if (1 << card) & flop_mask == 0
+                    && self
+                        .turn_isomorphism_card
+                        .iter()
+                        .map(|(c, _)| c)
+                        .all(|&c| c != card)
+                {
                     node.children.push((
                         Action::Chance(card),
                         MutexLike::new(PostFlopNode {
@@ -783,8 +922,6 @@ impl PostFlopGame {
         // deal river
         else {
             let turn_mask = flop_mask | (1 << node.turn);
-            let mut turn_rankset = flop_rankset;
-            turn_rankset[node.turn as usize & 3] |= 1 << (node.turn >> 2);
 
             let next_player = if !info.allin_flag {
                 PLAYER_OOP
@@ -792,66 +929,15 @@ impl PostFlopGame {
                 PLAYER_TERMINAL_FLAG
             };
 
-            let mut iso_suits = [None; 4];
-            for suit1 in 0..4 {
-                for suit2 in suit1 + 1..4 {
-                    if iso_suits[suit2].is_none()
-                        && flop_rankset[suit1] == flop_rankset[suit2]
-                        && turn_rankset[suit1] == turn_rankset[suit2]
-                        && self.suit_isomorphism[suit1] == self.suit_isomorphism[suit2]
-                    {
-                        iso_suits[suit2] = Some(suit1 as u8);
-                    }
-                }
-            }
-
             node.children.reserve(48);
-            node.iso_chances.reserve(48);
 
             for card in 0..52 {
-                if (1 << card) & turn_mask != 0 {
-                    continue;
-                }
-
-                let rank = card >> 2;
-                let suit = card & 3;
-
-                // isomorphic chance
-                if let Some(iso_suit) = iso_suits[suit as usize] {
-                    let iso_card = rank << 2 | iso_suit;
-                    let iso_index = indices[iso_card as usize];
-                    let mut iso_chance = IsomorphicChance {
-                        index: iso_index,
-                        swap_list: [Vec::with_capacity(51), Vec::with_capacity(51)],
-                    };
-
-                    for player in 0..2 {
-                        let cards = &self.private_hand_cards[player];
-                        for i in 0..cards.len() {
-                            let (c1, c2) = cards[i];
-                            if c1 == card {
-                                if let Ok(j) = cards.binary_search(&(iso_card, c2)) {
-                                    iso_chance.swap_list[player].push((i, j));
-                                }
-                            }
-                            if c2 == card {
-                                if let Ok(j) = cards.binary_search(&(c1, iso_card)) {
-                                    iso_chance.swap_list[player].push((i, j));
-                                }
-                            }
-                        }
-                        iso_chance.swap_list[player].shrink_to_fit();
-                        info.current_memory_usage.fetch_add(
-                            vec_memory_usage(&iso_chance.swap_list[player]),
-                            Ordering::Relaxed,
-                        );
-                    }
-
-                    node.iso_chances.push(iso_chance);
-                }
-                // normal chance
-                else {
-                    indices[card as usize] = node.children.len();
+                if (1 << card) & turn_mask == 0
+                    && self.river_isomorphism_card[node.turn as usize]
+                        .iter()
+                        .map(|(c, _)| c)
+                        .all(|&c| c != card)
+                {
                     node.children.push((
                         Action::Chance(card),
                         MutexLike::new(PostFlopNode {
@@ -867,12 +953,8 @@ impl PostFlopGame {
         }
 
         node.children.shrink_to_fit();
-        node.iso_chances.shrink_to_fit();
-
-        info.current_memory_usage.fetch_add(
-            vec_memory_usage(&node.children) + vec_memory_usage(&node.iso_chances),
-            Ordering::Relaxed,
-        );
+        info.current_memory_usage
+            .fetch_add(vec_memory_usage(&node.children), Ordering::Relaxed);
     }
 
     /// Pushes the actions to the `node`.
@@ -1125,11 +1207,6 @@ impl GameNode for PostFlopNode {
     }
 
     #[inline]
-    fn isomorphic_chances(&self) -> &[IsomorphicChance] {
-        &self.iso_chances
-    }
-
-    #[inline]
     fn play(&self, action: usize) -> MutexGuardLike<Self> {
         self.children[action].1.lock()
     }
@@ -1222,7 +1299,6 @@ impl Default for PostFlopNode {
             river: NOT_DEALT,
             amount: 0,
             children: Vec::new(),
-            iso_chances: Vec::new(),
             cum_regret: ptr::null_mut(),
             strategy: ptr::null_mut(),
             cum_regret_compressed: ptr::null_mut(),
@@ -1482,6 +1558,5 @@ mod tests {
         // verified by PioSolver
         assert!((ev0 - 105.0).abs() < 0.5);
         assert!((ev1 - 75.0).abs() < 0.5);
-        println!("EV: {:.3} vs {:.3}", ev0, ev1);
     }
 }
