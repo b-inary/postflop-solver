@@ -13,7 +13,7 @@ pub trait Game: Sync {
     fn num_private_hands(&self, player: usize) -> usize;
 
     /// Returns the initial reach probabilities of given player.
-    fn initial_reach(&self, player: usize) -> &[f32];
+    fn initial_weight(&self, player: usize) -> &[f32];
 
     /// Returns the list of isomorphic chances.
     fn isomorphic_chances(&self, node: &Self::Node) -> &[usize];

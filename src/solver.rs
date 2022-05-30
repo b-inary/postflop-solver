@@ -48,7 +48,7 @@ pub fn solve<T: Game>(
     }
 
     let mut root = game.root();
-    let reach = [game.initial_reach(0), game.initial_reach(1)];
+    let reach = [game.initial_weight(0), game.initial_weight(1)];
 
     if print_progress {
         print!("iteration: 0 / {}", num_iterations);
@@ -111,7 +111,7 @@ pub fn solve_step<T: Game>(game: &T, current_iteration: i32) {
     }
 
     let mut root = game.root();
-    let reach = [game.initial_reach(0), game.initial_reach(1)];
+    let reach = [game.initial_weight(0), game.initial_weight(1)];
     let params = DiscountParams::new(current_iteration);
 
     // alternating updates

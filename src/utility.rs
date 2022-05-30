@@ -126,7 +126,7 @@ pub fn compute_ev<T: Game>(game: &T) {
         vec![0.0; game.num_private_hands(0)],
         vec![0.0; game.num_private_hands(1)],
     ];
-    let reach = [game.initial_reach(0), game.initial_reach(1)];
+    let reach = [game.initial_weight(0), game.initial_weight(1)];
     for player in 0..2 {
         compute_ev_recursive(
             &mut ev[player],
@@ -168,7 +168,7 @@ pub fn compute_exploitability<T: Game>(game: &T, is_normalized: bool) -> f32 {
         vec![0.0; game.num_private_hands(0)],
         vec![0.0; game.num_private_hands(1)],
     ];
-    let reach = [game.initial_reach(0), game.initial_reach(1)];
+    let reach = [game.initial_weight(0), game.initial_weight(1)];
     for player in 0..2 {
         compute_best_cfv_recursive(
             &mut cfv[player],

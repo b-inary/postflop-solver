@@ -3,7 +3,7 @@ use postflop_solver::*;
 
 struct KuhnGame {
     root: MutexLike<KuhnNode>,
-    initial_reach: Vec<f32>,
+    initial_weight: Vec<f32>,
 }
 
 struct KuhnNode {
@@ -49,8 +49,8 @@ impl Game for KuhnGame {
     }
 
     #[inline]
-    fn initial_reach(&self, _player: usize) -> &[f32] {
-        &self.initial_reach
+    fn initial_weight(&self, _player: usize) -> &[f32] {
+        &self.initial_weight
     }
 
     #[inline]
@@ -97,7 +97,7 @@ impl KuhnGame {
     pub fn new() -> Self {
         Self {
             root: Self::build_tree(),
-            initial_reach: vec![1.0; NUM_PRIVATE_HANDS],
+            initial_weight: vec![1.0; NUM_PRIVATE_HANDS],
         }
     }
 

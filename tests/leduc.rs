@@ -3,7 +3,7 @@ use postflop_solver::*;
 
 struct LeducGame {
     root: MutexLike<LeducNode>,
-    initial_reach: Vec<f32>,
+    initial_weight: Vec<f32>,
     isomorphism: Vec<usize>,
     isomorphism_swap: [Vec<(usize, usize)>; 2],
 }
@@ -57,8 +57,8 @@ impl Game for LeducGame {
     }
 
     #[inline]
-    fn initial_reach(&self, _player: usize) -> &[f32] {
-        &self.initial_reach
+    fn initial_weight(&self, _player: usize) -> &[f32] {
+        &self.initial_weight
     }
 
     #[inline]
@@ -116,7 +116,7 @@ impl LeducGame {
     pub fn new() -> Self {
         Self {
             root: Self::build_tree(),
-            initial_reach: vec![1.0; NUM_PRIVATE_HANDS],
+            initial_weight: vec![1.0; NUM_PRIVATE_HANDS],
             isomorphism: vec![0, 1, 2],
             isomorphism_swap: [vec![(0, 1), (2, 3), (4, 5)], vec![(0, 1), (2, 3), (4, 5)]],
         }

@@ -21,15 +21,15 @@ pub struct PostFlopGame {
     // computed from `config`
     root: MutexLike<PostFlopNode>,
     num_combinations_inv: f64,
-    initial_reach: [Vec<f32>; 2],
+    initial_weight: [Vec<f32>; 2],
     private_hand_cards: [Vec<(u8, u8)>; 2],
     same_hand_index: [Vec<Option<usize>>; 2],
     hand_strength: Vec<[Vec<(usize, usize)>; 2]>,
     turn_isomorphism: Vec<usize>,
-    turn_isomorphism_card: Vec<(u8, u8)>,
+    turn_isomorphism_card: Vec<u8>,
     turn_isomorphism_swap: [[Vec<(usize, usize)>; 2]; 4],
     river_isomorphism: Vec<Vec<usize>>,
-    river_isomorphism_card: Vec<Vec<(u8, u8)>>,
+    river_isomorphism_card: Vec<Vec<u8>>,
     river_isomorphism_swap: Vec<[[Vec<(usize, usize)>; 2]; 4]>,
     is_memory_allocated: bool,
     is_compression_enabled: bool,
@@ -185,8 +185,8 @@ impl Game for PostFlopGame {
     }
 
     #[inline]
-    fn initial_reach(&self, player: usize) -> &[f32] {
-        &self.initial_reach[player]
+    fn initial_weight(&self, player: usize) -> &[f32] {
+        &self.initial_weight[player]
     }
 
     #[inline]
@@ -201,10 +201,10 @@ impl Game for PostFlopGame {
     #[inline]
     fn isomorphic_swap(&self, node: &Self::Node, index: usize) -> &[Vec<(usize, usize)>; 2] {
         if node.turn == NOT_DEALT {
-            &self.turn_isomorphism_swap[self.turn_isomorphism_card[index].0 as usize & 3]
+            &self.turn_isomorphism_swap[self.turn_isomorphism_card[index] as usize & 3]
         } else {
             &self.river_isomorphism_swap[node.turn as usize]
-                [self.river_isomorphism_card[node.turn as usize][index].0 as usize & 3]
+                [self.river_isomorphism_card[node.turn as usize][index] as usize & 3]
         }
     }
 
@@ -399,6 +399,16 @@ impl PostFlopGame {
         self.allocate_memory_recursive(&mut self.root(), &counter);
     }
 
+    /// Returns card list of isomorphic chances.
+    #[inline]
+    pub fn isomorphic_card(&self, node: &PostFlopNode) -> &[u8] {
+        if node.turn == NOT_DEALT {
+            &self.turn_isomorphism_card
+        } else {
+            &self.river_isomorphism_card[node.turn as usize]
+        }
+    }
+
     /// Checks the configuration for errors.
     fn check_config(&mut self) -> Result<(), String> {
         let flop = self.config.flop;
@@ -475,7 +485,7 @@ impl PostFlopGame {
         self.init_root();
     }
 
-    /// Initializes fields `initial_reach`, `private_hand_cards` and `same_hand_index`.
+    /// Initializes fields `initial_weight`, `private_hand_cards` and `same_hand_index`.
     fn init_range(&mut self) {
         let flop = self.config.flop;
         let flop_mask: u64 = (1 << flop[0]) | (1 << flop[1]) | (1 << flop[2]);
@@ -483,9 +493,9 @@ impl PostFlopGame {
 
         for player in 0..2 {
             let range = range[player];
-            let initial_reach = &mut self.initial_reach[player];
+            let initial_weight = &mut self.initial_weight[player];
             let private_hand_cards = &mut self.private_hand_cards[player];
-            initial_reach.clear();
+            initial_weight.clear();
             private_hand_cards.clear();
 
             for card1 in 0..52 {
@@ -493,7 +503,7 @@ impl PostFlopGame {
                     let hand_mask: u64 = (1 << card1) | (1 << card2);
                     let weight = range.get_weight_by_cards(card1, card2);
                     if weight > 0.0 && hand_mask & flop_mask == 0 {
-                        initial_reach.push(weight);
+                        initial_weight.push(weight);
                         private_hand_cards.push((card1, card2));
                     }
                 }
@@ -605,7 +615,7 @@ impl PostFlopGame {
             if let Some(replace_suit) = isomorphic_suit[suit as usize] {
                 let replace_card = card - suit + replace_suit;
                 self.turn_isomorphism.push(indices[replace_card as usize]);
-                self.turn_isomorphism_card.push((card, replace_card));
+                self.turn_isomorphism_card.push(card);
             } else {
                 indices[card as usize] = counter;
                 counter += 1;
@@ -691,7 +701,7 @@ impl PostFlopGame {
                 if let Some(replace_suit) = isomorphic_suit[suit as usize] {
                     let replace_card = card - suit + replace_suit;
                     river_isomorphism.push(indices[replace_card as usize]);
-                    river_isomorphism_card.push((card, replace_card));
+                    river_isomorphism_card.push(card);
                 } else {
                     indices[card as usize] = counter;
                     counter += 1;
@@ -783,7 +793,7 @@ impl PostFlopGame {
 
         memory_usage += vec_memory_usage(&self.hand_strength);
         for i in 0..2 {
-            memory_usage += vec_memory_usage(&self.initial_reach[i]);
+            memory_usage += vec_memory_usage(&self.initial_weight[i]);
             memory_usage += vec_memory_usage(&self.private_hand_cards[i]);
             memory_usage += vec_memory_usage(&self.same_hand_index[i]);
             for strength in &self.hand_strength {
@@ -905,13 +915,7 @@ impl PostFlopGame {
             node.children.reserve(49);
 
             for card in 0..52 {
-                if (1 << card) & flop_mask == 0
-                    && self
-                        .turn_isomorphism_card
-                        .iter()
-                        .map(|(c, _)| c)
-                        .all(|&c| c != card)
-                {
+                if (1 << card) & flop_mask == 0 && !self.turn_isomorphism_card.contains(&card) {
                     node.children.push((
                         Action::Chance(card),
                         MutexLike::new(PostFlopNode {
@@ -938,10 +942,7 @@ impl PostFlopGame {
 
             for card in 0..52 {
                 if (1 << card) & turn_mask == 0
-                    && self.river_isomorphism_card[node.turn as usize]
-                        .iter()
-                        .map(|(c, _)| c)
-                        .all(|&c| c != card)
+                    && !self.river_isomorphism_card[node.turn as usize].contains(&card)
                 {
                     node.children.push((
                         Action::Chance(card),
