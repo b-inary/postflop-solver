@@ -1,14 +1,17 @@
 use crate::interface::*;
 use crate::mutex_like::*;
 use crate::sliceop::*;
-use rayon::prelude::*;
 
 #[cfg(feature = "custom_alloc")]
 use crate::alloc::*;
 #[cfg(feature = "custom_alloc")]
 use std::vec;
 
+#[cfg(feature = "rayon")]
+use rayon::prelude::*;
+
 /// Executes `op` for each child potentially in parallel.
+#[cfg(feature = "rayon")]
 #[inline]
 pub fn for_each_child<T: GameNode, OP: Fn(usize) + Sync + Send>(node: &T, op: OP) {
     if node.enable_parallelization() {
@@ -16,6 +19,13 @@ pub fn for_each_child<T: GameNode, OP: Fn(usize) + Sync + Send>(node: &T, op: OP
     } else {
         node.actions().into_iter().for_each(op);
     }
+}
+
+/// Executes `op` for each child.
+#[cfg(not(feature = "rayon"))]
+#[inline]
+pub fn for_each_child<T: GameNode, OP: Fn(usize) + Sync + Send>(node: &T, op: OP) {
+    node.actions().into_iter().for_each(op);
 }
 
 /// Decodes the encoded `u16` slice to the `f32` slice.

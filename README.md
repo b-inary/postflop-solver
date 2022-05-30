@@ -1,6 +1,8 @@
 # postflop-solver
 
-Efficient open-source post-flop solver library written in Rust (work in progress)
+An open-source postflop solver written in Rust
+
+Web interface repository: https://github.com/b-inary/wasm-postflop
 
 ## Usage
 
@@ -22,8 +24,8 @@ let ip_range = "22+,A4s+,A9o+,K9s+,KTo+,Q9s+,QTo+,J9+,T9,98s,87s,76s,65s";
 let bet_sizes = bet_sizes_from_str("50%", "50%").unwrap();
 let config = GameConfig {
     flop: flop_from_str("Td9d6h").unwrap(),
-    initial_pot: 60,
-    initial_stack: 370,
+    starting_pot: 180,
+    effective_stack: 910,
     range: [oop_range.parse().unwrap(), ip_range.parse().unwrap()],
     flop_bet_sizes: [bet_sizes.clone(), bet_sizes.clone()],
     turn_bet_sizes: [bet_sizes.clone(), bet_sizes.clone()],
@@ -53,11 +55,11 @@ game.allocate_memory(false);
 
 // solve game
 let max_num_iterations = 1000;
-let target_exploitability = config.initial_pot as f32 * 0.005;
+let target_exploitability = config.starting_pot as f32 * 0.005;
 let exploitability = solve(&game, max_num_iterations, target_exploitability, true);
 
 // compute OOP's EV
 compute_ev(&game);
-let bias = config.initial_pot as f32 * 0.5;
+let bias = config.starting_pot as f32 * 0.5;
 let ev = compute_ev_scalar(&game, &game.root()) + bias;
 ```

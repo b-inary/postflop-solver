@@ -74,8 +74,8 @@ unsafe impl Sync for PostFlopNode {}
 ///
 /// let config = GameConfig {
 ///     flop: flop_from_str("Td9d6h").unwrap(),
-///     initial_pot: 60,
-///     initial_stack: 970,
+///     starting_pot: 60,
+///     effective_stack: 970,
 ///     range: [Range::ones(), Range::ones()],
 ///     flop_bet_sizes: [bet_sizes.clone(), bet_sizes.clone()],
 ///     turn_bet_sizes: [bet_sizes.clone(), bet_sizes.clone()],
@@ -89,10 +89,10 @@ pub struct GameConfig {
     pub flop: [u8; 3],
 
     /// Initial pot size: must be greater than 0.
-    pub initial_pot: i32,
+    pub starting_pot: i32,
 
     /// Initial effective stack size: must be greater than 0.
-    pub initial_stack: i32,
+    pub effective_stack: i32,
 
     /// Initial range of each player.
     pub range: [Range; 2],
@@ -209,7 +209,7 @@ impl Game for PostFlopGame {
     }
 
     fn evaluate(&self, result: &mut [f32], node: &Self::Node, player: usize, cfreach: &[f32]) {
-        let amount = self.config.initial_pot as f64 * 0.5 + node.amount as f64;
+        let amount = self.config.starting_pot as f64 * 0.5 + node.amount as f64;
         let amount_normalized = amount * self.num_combinations_inv;
 
         let player_cards = &self.private_hand_cards[player];
@@ -415,26 +415,26 @@ impl PostFlopGame {
             return Err(format!("Flop cards must be unique: flop = {:?}", flop));
         }
 
-        if self.config.initial_pot <= 0 {
+        if self.config.starting_pot <= 0 {
             return Err(format!(
-                "Initial pot must be positive: initial_pot = {}",
-                self.config.initial_pot
+                "Initial pot must be positive: starting_pot = {}",
+                self.config.starting_pot
             ));
         }
 
-        if self.config.initial_stack <= 0 {
+        if self.config.effective_stack <= 0 {
             return Err(format!(
-                "Initial stack must be positive: initial_stack = {}",
-                self.config.initial_stack
+                "Initial stack must be positive: effective_stack = {}",
+                self.config.effective_stack
             ));
         }
 
         if self.config.range[PLAYER_OOP as usize].is_empty() {
-            return Err("OOP range is not initialized".to_string());
+            return Err("OOP range is empty".to_string());
         }
 
         if self.config.range[PLAYER_IP as usize].is_empty() {
-            return Err("IP range is not initialized".to_string());
+            return Err("IP range is empty".to_string());
         }
 
         let mut num_combinations = 0.0;
@@ -773,7 +773,12 @@ impl PostFlopGame {
 
         let current_memory_usage = current_memory_usage.load(Ordering::Relaxed);
         let num_storage_elements = num_storage_elements.load(Ordering::Relaxed);
+
+        #[cfg(feature = "rayon")]
         let stack_usage = (4 * stack_size * rayon::current_num_threads()) as u64;
+        #[cfg(not(feature = "rayon"))]
+        let stack_usage = 4 * stack_size as u64;
+
         let mut memory_usage = current_memory_usage + stack_usage;
 
         memory_usage += vec_memory_usage(&self.hand_strength);
@@ -966,9 +971,9 @@ impl PostFlopGame {
         let opponent_bet = info.last_bet[player_opponent as usize];
 
         let bet_diff = opponent_bet - player_bet;
-        let pot = self.config.initial_pot + 2 * (node.amount + bet_diff);
+        let pot = self.config.starting_pot + 2 * (node.amount + bet_diff);
 
-        let max_bet = self.config.initial_stack - node.amount + player_bet;
+        let max_bet = self.config.effective_stack - node.amount + player_bet;
         let min_bet = max_bet.min(opponent_bet + bet_diff);
 
         let (candidates, is_river) = if node.turn == NOT_DEALT {
@@ -1316,8 +1321,8 @@ impl Default for GameConfig {
     fn default() -> Self {
         Self {
             flop: [NOT_DEALT; 3],
-            initial_pot: 0,
-            initial_stack: 0,
+            starting_pot: 0,
+            effective_stack: 0,
             range: Default::default(),
             flop_bet_sizes: Default::default(),
             turn_bet_sizes: Default::default(),
@@ -1409,8 +1414,8 @@ mod tests {
     fn all_check_all_range() {
         let config = GameConfig {
             flop: flop_from_str("Td9d6h").unwrap(),
-            initial_pot: 60,
-            initial_stack: 970,
+            starting_pot: 60,
+            effective_stack: 970,
             range: [Range::ones(); 2],
             ..Default::default()
         };
@@ -1428,8 +1433,8 @@ mod tests {
     fn one_raise_all_range() {
         let config = GameConfig {
             flop: flop_from_str("Td9d6h").unwrap(),
-            initial_pot: 60,
-            initial_stack: 970,
+            starting_pot: 60,
+            effective_stack: 970,
             range: [Range::ones(); 2],
             river_bet_sizes: [bet_sizes_from_str("50%", "").unwrap(), Default::default()],
             ..Default::default()
@@ -1450,8 +1455,8 @@ mod tests {
         let lose_range_str = "22+,A2+,K9-K2,Q8-Q2,J8-J2,T8-T2,92+,82+,72+,62+";
         let config = GameConfig {
             flop: flop_from_str("AcAdKh").unwrap(),
-            initial_pot: 60,
-            initial_stack: 970,
+            starting_pot: 60,
+            effective_stack: 970,
             range: ["AA".parse().unwrap(), lose_range_str.parse().unwrap()],
             ..Default::default()
         };
@@ -1469,8 +1474,8 @@ mod tests {
     fn no_assignment() {
         let config = GameConfig {
             flop: flop_from_str("Td9d6h").unwrap(),
-            initial_pot: 60,
-            initial_stack: 970,
+            starting_pot: 60,
+            effective_stack: 970,
             range: ["TT".parse().unwrap(), "TT".parse().unwrap()],
             ..Default::default()
         };
@@ -1492,8 +1497,8 @@ mod tests {
 
         let config = GameConfig {
             flop: flop_from_str("Td9d6h").unwrap(),
-            initial_pot: 60,
-            initial_stack: 770,
+            starting_pot: 60,
+            effective_stack: 770,
             range: [oop_range.parse().unwrap(), ip_range.parse().unwrap()],
             flop_bet_sizes: [bet_sizes.clone(), bet_sizes.clone()],
             turn_bet_sizes: [bet_sizes.clone(), bet_sizes.clone()],
@@ -1532,8 +1537,8 @@ mod tests {
 
         let config = GameConfig {
             flop: flop_from_str("QsJh2h").unwrap(),
-            initial_pot: 180,
-            initial_stack: 910,
+            starting_pot: 180,
+            effective_stack: 910,
             range: [oop_range.parse().unwrap(), ip_range.parse().unwrap()],
             flop_bet_sizes: [flop_bet_sizes.clone(), flop_bet_sizes.clone()],
             turn_bet_sizes: [turn_bet_sizes.clone(), turn_bet_sizes.clone()],
