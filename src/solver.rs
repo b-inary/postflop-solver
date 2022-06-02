@@ -139,7 +139,7 @@ fn solve_recursive<T: Game>(
 ) {
     // returns the counterfactual values when the `node` is terminal
     if node.is_terminal() {
-        game.evaluate(result, node, player, cfreach);
+        game.evaluate(result, node, player, cfreach, false);
         return;
     }
 

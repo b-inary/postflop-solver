@@ -15,14 +15,25 @@ pub trait Game: Sync {
     /// Returns the initial reach probabilities of given player.
     fn initial_weight(&self, player: usize) -> &[f32];
 
+    /// Computes the counterfactual values or equity of given node.
+    fn evaluate(
+        &self,
+        result: &mut [f32],
+        node: &Self::Node,
+        player: usize,
+        cfreach: &[f32],
+        compute_equity: bool,
+    );
+
     /// Returns the list of isomorphic chances.
-    fn isomorphic_chances(&self, node: &Self::Node) -> &[usize];
+    fn isomorphic_chances(&self, _node: &Self::Node) -> &[usize] {
+        &[]
+    }
 
     /// Returns the swap list of the given isomorphic chance.
-    fn isomorphic_swap(&self, node: &Self::Node, index: usize) -> &[Vec<(usize, usize)>; 2];
-
-    /// Computes the counterfactual values of given node.
-    fn evaluate(&self, result: &mut [f32], node: &Self::Node, player: usize, cfreach: &[f32]);
+    fn isomorphic_swap(&self, _node: &Self::Node, _index: usize) -> &[Vec<(usize, usize)>; 2] {
+        unreachable!()
+    }
 
     /// Returns whether the instance is ready to be solved.
     fn is_ready(&self) -> bool {
@@ -109,6 +120,16 @@ pub trait GameNode: Sync {
 
     /// Sets the scale of the compressed strategy.
     fn set_strategy_scale(&mut self, _scale: f32) {
+        unreachable!()
+    }
+
+    /// Returns the scale of the compressed equity.
+    fn equity_scale(&self) -> f32 {
+        unreachable!()
+    }
+
+    /// Sets the scale of the compressed equity.
+    fn set_equity_scale(&mut self, _scale: f32) {
         unreachable!()
     }
 

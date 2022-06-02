@@ -53,24 +53,28 @@ impl Game for KuhnGame {
         &self.initial_weight
     }
 
-    #[inline]
-    fn isomorphic_chances(&self, _node: &Self::Node) -> &[usize] {
-        unreachable!()
-    }
-
-    #[inline]
-    fn isomorphic_swap(&self, _node: &Self::Node, _index: usize) -> &[Vec<(usize, usize)>; 2] {
-        unreachable!()
-    }
-
-    fn evaluate(&self, result: &mut [f32], node: &Self::Node, player: usize, cfreach: &[f32]) {
+    fn evaluate(
+        &self,
+        result: &mut [f32],
+        node: &Self::Node,
+        player: usize,
+        cfreach: &[f32],
+        compute_equity: bool,
+    ) {
         let num_hands = NUM_PRIVATE_HANDS * (NUM_PRIVATE_HANDS - 1);
         let num_hands_inv = 1.0 / num_hands as f32;
 
+        let amount = if compute_equity {
+            0.5
+        } else {
+            node.amount as f32
+        };
+        let amount_normalized = amount * num_hands_inv;
+
         if node.player & PLAYER_FOLD_FLAG == PLAYER_FOLD_FLAG {
             let folded_player = node.player & PLAYER_MASK;
-            let payoff = node.amount * [1, -1][(player == folded_player) as usize];
-            let payoff_normalized = payoff as f32 * num_hands_inv;
+            let sign = [1.0, -1.0][(player == folded_player) as usize];
+            let payoff_normalized = amount_normalized * sign;
             for my_card in 0..NUM_PRIVATE_HANDS {
                 for opp_card in 0..NUM_PRIVATE_HANDS {
                     if my_card != opp_card {
@@ -82,8 +86,8 @@ impl Game for KuhnGame {
             for my_card in 0..NUM_PRIVATE_HANDS {
                 for opp_card in 0..NUM_PRIVATE_HANDS {
                     if my_card != opp_card {
-                        let payoff = node.amount * [1, -1][(my_card < opp_card) as usize];
-                        let payoff_normalized = payoff as f32 * num_hands_inv;
+                        let sign = [1.0, -1.0][(my_card < opp_card) as usize];
+                        let payoff_normalized = amount_normalized * sign;
                         result[my_card] += payoff_normalized * cfreach[opp_card];
                     }
                 }
@@ -224,9 +228,9 @@ fn kuhn() {
     let target = 1e-4;
     let game = KuhnGame::new();
     solve(&game, 10000, target, false);
-    compute_ev(&game);
+    compute_ev_and_equity(&game);
 
-    let ev = compute_ev_scalar(&game, &game.root());
+    let ev = get_root_ev(&game);
     let expected_ev = -1.0 / 18.0;
     assert!((ev - expected_ev).abs() <= 2.0 * target);
 }

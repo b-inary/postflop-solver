@@ -44,9 +44,9 @@
 //! let exploitability = solve(&game, max_num_iterations, target_exploitability, true);
 //!
 //! // compute OOP's EV
-//! compute_ev(&game);
+//! compute_ev_and_equity(&game);
 //! let bias = config.starting_pot as f32 * 0.5;
-//! let ev = compute_ev_scalar(&game, &game.root()) + bias;
+//! let ev = get_root_ev(&game) + bias;
 //! ```
 
 #![cfg_attr(feature = "custom_alloc", feature(allocator_api))]
