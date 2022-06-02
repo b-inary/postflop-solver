@@ -1289,6 +1289,12 @@ impl GameNode for PostFlopNode {
 }
 
 impl PostFlopNode {
+    /// Returns the betted amount.
+    #[inline]
+    pub fn amount(&self) -> i32 {
+        self.amount
+    }
+
     /// Returns the possible actions for the current player.
     #[inline]
     pub fn get_actions(&self) -> Vec<Action> {
