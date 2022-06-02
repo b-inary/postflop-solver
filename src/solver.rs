@@ -17,19 +17,17 @@ struct DiscountParams {
 
 impl DiscountParams {
     const ALPHA: f64 = 1.5;
-    const BETA: f64 = 0.0;
-    const GAMMA: f64 = 4.0;
+    const GAMMA: f64 = 5.0;
 
-    pub fn new(current_iteration: i32) -> Self {
-        let float = (current_iteration - 1).max(0) as f64;
+    pub fn new(current_iteration: u32) -> Self {
+        let float = (current_iteration as i32 - 1).max(0) as f64;
 
         let pow_alpha = float.powf(Self::ALPHA);
-        let pow_beta = float.powf(Self::BETA);
         let pow_gamma = (float / (float + 1.0)).powf(Self::GAMMA);
 
         Self {
-            alpha_t: (pow_alpha / (pow_alpha + 1.0)) as f32,
-            beta_t: (pow_beta / (pow_beta + 1.0)) as f32,
+            alpha_t: (pow_alpha / (pow_alpha + 1.5)) as f32,
+            beta_t: 0.5,
             gamma_t: pow_gamma as f32,
         }
     }
@@ -39,7 +37,7 @@ impl DiscountParams {
 /// the exploitability.
 pub fn solve<T: Game>(
     game: &T,
-    num_iterations: i32,
+    num_iterations: u32,
     target_exploitability: f32,
     print_progress: bool,
 ) -> f32 {
@@ -105,7 +103,7 @@ pub fn solve<T: Game>(
 
 /// Proceeds CFR iteration for one step.
 #[inline]
-pub fn solve_step<T: Game>(game: &T, current_iteration: i32) {
+pub fn solve_step<T: Game>(game: &T, current_iteration: u32) {
     if !game.is_ready() {
         panic!("the game is not ready");
     }
