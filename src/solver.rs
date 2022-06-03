@@ -26,7 +26,7 @@ impl DiscountParams {
         let pow_gamma = (float / (float + 1.0)).powf(Self::GAMMA);
 
         Self {
-            alpha_t: (pow_alpha / (pow_alpha + 1.5)) as f32,
+            alpha_t: (pow_alpha / (pow_alpha + 1.0)) as f32,
             beta_t: 0.5,
             gamma_t: pow_gamma as f32,
         }
