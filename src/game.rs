@@ -14,6 +14,14 @@ use crate::alloc::*;
 #[cfg(feature = "custom_alloc")]
 use std::vec;
 
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct StrengthItem {
+    strength: usize,
+    index: usize,
+}
+
+type SwapList = Vec<(usize, usize)>;
+
 /// A struct representing a post-flop game.
 #[derive(Default)]
 pub struct PostFlopGame {
@@ -26,13 +34,13 @@ pub struct PostFlopGame {
     initial_weight: [Vec<f32>; 2],
     private_hand_cards: [Vec<(u8, u8)>; 2],
     same_hand_index: [Vec<Option<usize>>; 2],
-    hand_strength: Vec<[Vec<(usize, usize)>; 2]>,
+    hand_strength: Vec<[Vec<StrengthItem>; 2]>,
     turn_isomorphism: Vec<usize>,
     turn_isomorphism_card: Vec<u8>,
-    turn_isomorphism_swap: [[Vec<(usize, usize)>; 2]; 4],
+    turn_isomorphism_swap: [[SwapList; 2]; 4],
     river_isomorphism: Vec<Vec<usize>>,
     river_isomorphism_card: Vec<Vec<u8>>,
-    river_isomorphism_swap: Vec<[[Vec<(usize, usize)>; 2]; 4]>,
+    river_isomorphism_swap: Vec<[[SwapList; 2]; 4]>,
     is_memory_allocated: bool,
     is_compression_enabled: bool,
     num_storage_elements: u64,
@@ -465,9 +473,9 @@ impl PostFlopGame {
 
         for i in 0..player_len {
             unsafe {
-                let (val, index) = *player_strength.get_unchecked(i);
-                while j < opponent_len && opponent_strength.get_unchecked(j).0 < val {
-                    let opponent_index = opponent_strength.get_unchecked(j).1;
+                let StrengthItem { strength, index } = *player_strength.get_unchecked(i);
+                while j < opponent_len && opponent_strength.get_unchecked(j).strength < strength {
+                    let opponent_index = opponent_strength.get_unchecked(j).index;
                     let (c1, c2) = *opponent_cards.get_unchecked(opponent_index);
                     let cfreach_opp = *cfreach.get_unchecked(opponent_index) as f64;
                     cfreach_sum += cfreach_opp;
@@ -489,9 +497,9 @@ impl PostFlopGame {
 
         for i in (0..player_len).rev() {
             unsafe {
-                let (val, index) = *player_strength.get_unchecked(i);
-                while j > 0 && opponent_strength.get_unchecked(j - 1).0 > val {
-                    let opponent_index = opponent_strength.get_unchecked(j - 1).1;
+                let StrengthItem { strength, index } = *player_strength.get_unchecked(i);
+                while j > 0 && opponent_strength.get_unchecked(j - 1).strength > strength {
+                    let opponent_index = opponent_strength.get_unchecked(j - 1).index;
                     let (c1, c2) = *opponent_cards.get_unchecked(opponent_index);
                     let cfreach_opp = *cfreach.get_unchecked(opponent_index) as f64;
                     cfreach_sum += cfreach_opp;
@@ -832,13 +840,16 @@ impl PostFlopGame {
                         strength[player] = private_hand_cards[player]
                             .iter()
                             .enumerate()
-                            .filter_map(|(i, &(hand1, hand2))| {
+                            .filter_map(|(index, &(hand1, hand2))| {
                                 let (hand1, hand2) = (hand1 as usize, hand2 as usize);
                                 if board.contains(hand1) || board.contains(hand2) {
                                     None
                                 } else {
                                     let hand = board.add_card(hand1).add_card(hand2);
-                                    Some((hand.evaluate() as usize, i))
+                                    Some(StrengthItem {
+                                        strength: hand.evaluate() as usize,
+                                        index,
+                                    })
                                 }
                             })
                             .collect();
@@ -1628,7 +1639,7 @@ mod tests {
             range: [oop_range.parse().unwrap(), ip_range.parse().unwrap()],
             flop_bet_sizes: [bet_sizes.clone(), bet_sizes.clone()],
             turn_bet_sizes: [bet_sizes.clone(), bet_sizes.clone()],
-            river_bet_sizes: [bet_sizes.clone(), bet_sizes.clone()],
+            river_bet_sizes: [bet_sizes.clone(), bet_sizes],
             add_all_in_threshold: 0.0,
             replace_all_in_threshold: 0.0,
             adjust_last_two_bet_sizes: false,
@@ -1666,9 +1677,9 @@ mod tests {
             starting_pot: 180,
             effective_stack: 910,
             range: [oop_range.parse().unwrap(), ip_range.parse().unwrap()],
-            flop_bet_sizes: [flop_bet_sizes.clone(), flop_bet_sizes.clone()],
-            turn_bet_sizes: [turn_bet_sizes.clone(), turn_bet_sizes.clone()],
-            river_bet_sizes: [river_bet_sizes.clone(), river_bet_sizes.clone()],
+            flop_bet_sizes: [flop_bet_sizes.clone(), flop_bet_sizes],
+            turn_bet_sizes: [turn_bet_sizes.clone(), turn_bet_sizes],
+            river_bet_sizes: [river_bet_sizes.clone(), river_bet_sizes],
             add_all_in_threshold: 5.0,
             replace_all_in_threshold: 0.1,
             adjust_last_two_bet_sizes: false,

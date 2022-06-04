@@ -1,5 +1,6 @@
 use once_cell::sync::Lazy;
 use regex::Regex;
+use std::fmt::Write;
 use std::mem;
 use std::str::FromStr;
 
@@ -566,7 +567,7 @@ impl Range {
                     format!("{s}{s}-{e}{e}")
                 };
                 if weight != 1.0 {
-                    tmp += &format!(":{weight}");
+                    write!(tmp, ":{weight}").unwrap();
                 }
                 result.push(tmp);
                 start = None;
@@ -613,7 +614,8 @@ impl Range {
     fn high_cards_strings(&self, result: &mut Vec<String>, rank1: u8, suitedness: Suitedness) {
         let rank1_char = rank_to_char(rank1).unwrap();
         let mut start: Option<(u8, f32)> = None;
-        let (getter, suit_char): (fn(u8, u8) -> Vec<usize>, &str) = match suitedness {
+        type FnPairToIndices = fn(u8, u8) -> Vec<usize>;
+        let (getter, suit_char): (FnPairToIndices, &str) = match suitedness {
             Suitedness::Suited => (suited_indices, "s"),
             Suitedness::Offsuit => (offsuit_indices, "o"),
             Suitedness::All => (nonpair_indices, ""),
@@ -640,7 +642,7 @@ impl Range {
                     format!("{rank1_char}{s}{suit_char}-{rank1_char}{e}{suit_char}")
                 };
                 if weight != 1.0 {
-                    tmp += &format!(":{weight}");
+                    write!(tmp, ":{weight}").unwrap();
                 }
                 result.push(tmp);
                 start = None;
@@ -672,7 +674,7 @@ impl Range {
                                 suit2 = suit_to_char(suit2).unwrap(),
                             );
                             if weight != 1.0 {
-                                tmp += &format!(":{weight}");
+                                write!(tmp, ":{weight}").unwrap();
                             }
                             result.push(tmp);
                         }
@@ -696,7 +698,7 @@ impl Range {
                                 suit = suit_to_char(suit).unwrap(),
                             );
                             if weight != 1.0 {
-                                tmp += &format!(":{weight}");
+                                write!(tmp, ":{weight}").unwrap();
                             }
                             result.push(tmp);
                         }
@@ -719,7 +721,7 @@ impl Range {
                                         suit2 = suit_to_char(suit2).unwrap(),
                                     );
                                     if weight != 1.0 {
-                                        tmp += &format!(":{weight}");
+                                        write!(tmp, ":{weight}").unwrap();
                                     }
                                     result.push(tmp);
                                 }
