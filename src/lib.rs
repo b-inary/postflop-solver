@@ -71,3 +71,6 @@ pub use range::*;
 pub use sliceop::*;
 pub use solver::*;
 pub use utility::*;
+
+#[cfg(feature = "custom_alloc")]
+pub use alloc::*;
