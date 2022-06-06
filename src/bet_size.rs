@@ -11,10 +11,10 @@ static TRIM_REGEX: Lazy<Regex> = Lazy::new(|| Regex::new(r"\s*(,)\s*").unwrap())
 ///
 /// # Examples
 /// ```
+/// use postflop_solver::BetSizeCandidates;
 /// use postflop_solver::BetSize::{PotRelative, LastBetRelative};
-/// use postflop_solver::bet_sizes_from_str;
 ///
-/// let bet_size = bet_sizes_from_str("0.5", "75%, 2.5x").unwrap();
+/// let bet_size = BetSizeCandidates::try_from(("0.5", "75%, 2.5x")).unwrap();
 ///
 /// assert_eq!(bet_size.bet, vec![PotRelative(0.5)]);
 /// assert_eq!(bet_size.raise, vec![PotRelative(0.75), LastBetRelative(2.5)]);
@@ -38,48 +38,52 @@ pub enum BetSize {
     LastBetRelative(f32),
 }
 
-/// Attempts to convert comma-separated strings into bet sizes.
-///
-/// # Examples
-/// ```
-/// use postflop_solver::BetSize::{PotRelative, LastBetRelative};
-/// use postflop_solver::bet_sizes_from_str;
-///
-/// let bet_size = bet_sizes_from_str("0.5", "75%, 2.5x").unwrap();
-///
-/// assert_eq!(bet_size.bet, vec![PotRelative(0.5)]);
-/// assert_eq!(bet_size.raise, vec![PotRelative(0.75), LastBetRelative(2.5)]);
-/// ```
-pub fn bet_sizes_from_str(bet: &str, raise: &str) -> Result<BetSizeCandidates, String> {
-    let bet_string = TRIM_REGEX.replace_all(bet, "$1").trim().to_string();
-    let mut bet_sizes = bet_string.split(',').collect::<Vec<_>>();
+impl TryFrom<(&str, &str)> for BetSizeCandidates {
+    type Error = String;
 
-    let raise_string = TRIM_REGEX.replace_all(raise, "$1").trim().to_string();
-    let mut raise_sizes = raise_string.split(',').collect::<Vec<_>>();
+    /// Attempts to convert comma-separated strings into bet sizes.
+    ///
+    /// # Examples
+    /// ```
+    /// use postflop_solver::BetSizeCandidates;
+    /// use postflop_solver::BetSize::{PotRelative, LastBetRelative};
+    ///
+    /// let bet_size = BetSizeCandidates::try_from(("0.5", "75%, 2.5x")).unwrap();
+    ///
+    /// assert_eq!(bet_size.bet, vec![PotRelative(0.5)]);
+    /// assert_eq!(bet_size.raise, vec![PotRelative(0.75), LastBetRelative(2.5)]);
+    /// ```
+    fn try_from((bet_str, raise_str): (&str, &str)) -> Result<Self, Self::Error> {
+        let bet_string = TRIM_REGEX.replace_all(bet_str, "$1").trim().to_string();
+        let mut bet_sizes = bet_string.split(',').collect::<Vec<_>>();
 
-    if bet_sizes.last().unwrap().is_empty() {
-        bet_sizes.pop();
+        let raise_string = TRIM_REGEX.replace_all(raise_str, "$1").trim().to_string();
+        let mut raise_sizes = raise_string.split(',').collect::<Vec<_>>();
+
+        if bet_sizes.last().unwrap().is_empty() {
+            bet_sizes.pop();
+        }
+
+        if raise_sizes.last().unwrap().is_empty() {
+            raise_sizes.pop();
+        }
+
+        let mut bet = Vec::new();
+        let mut raise = Vec::new();
+
+        for bet_size in bet_sizes {
+            bet.push(bet_size_from_str(bet_size, false)?);
+        }
+
+        for raise_size in raise_sizes {
+            raise.push(bet_size_from_str(raise_size, true)?);
+        }
+
+        bet.sort_unstable_by(|l, r| l.partial_cmp(r).unwrap());
+        raise.sort_unstable_by(|l, r| l.partial_cmp(r).unwrap());
+
+        Ok(BetSizeCandidates { bet, raise })
     }
-
-    if raise_sizes.last().unwrap().is_empty() {
-        raise_sizes.pop();
-    }
-
-    let mut bet = Vec::new();
-    let mut raise = Vec::new();
-
-    for bet_size in bet_sizes {
-        bet.push(bet_size_from_str(bet_size, false)?);
-    }
-
-    for raise_size in raise_sizes {
-        raise.push(bet_size_from_str(raise_size, true)?);
-    }
-
-    bet.sort_unstable_by(|l, r| l.partial_cmp(r).unwrap());
-    raise.sort_unstable_by(|l, r| l.partial_cmp(r).unwrap());
-
-    Ok(BetSizeCandidates { bet, raise })
 }
 
 fn bet_size_from_str(s: &str, allow_last_bet_rel: bool) -> Result<BetSize, String> {
@@ -166,13 +170,13 @@ mod tests {
         ];
 
         for (bet, raise, expected) in tests {
-            assert_eq!(bet_sizes_from_str(bet, raise), Ok(expected));
+            assert_eq!((bet, raise).try_into(), Ok(expected));
         }
 
         let error_tests = [("2.5x", ""), (",", "")];
 
         for (bet, raise) in error_tests {
-            assert!(bet_sizes_from_str(bet, raise).is_err());
+            assert!(BetSizeCandidates::try_from((bet, raise)).is_err());
         }
     }
 }

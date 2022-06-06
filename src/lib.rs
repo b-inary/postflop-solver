@@ -6,7 +6,7 @@
 //! // configure game specification
 //! let oop_range = "22+,A2s+,A8o+,K7s+,K9o+,Q8s+,Q9o+,J8s+,J9o+,T8+,97+,86+,75+,64s+,65o,54,43s";
 //! let ip_range = "22+,A4s+,A9o+,K9s+,KTo+,Q9s+,QTo+,J9+,T9,98s,87s,76s,65s";
-//! let bet_sizes = bet_sizes_from_str("50%", "50%").unwrap();
+//! let bet_sizes = BetSizeCandidates::try_from(("50%", "50%")).unwrap();
 //! let config = GameConfig {
 //!     flop: flop_from_str("Td9d6h").unwrap(),
 //!     starting_pot: 180,

@@ -78,7 +78,7 @@ unsafe impl Sync for PostFlopNode {}
 /// ```
 /// use postflop_solver::*;
 ///
-/// let bet_sizes = bet_sizes_from_str("50%", "50%").unwrap();
+/// let bet_sizes = BetSizeCandidates::try_from(("50%", "50%")).unwrap();
 ///
 /// let config = GameConfig {
 ///     flop: flop_from_str("Td9d6h").unwrap(),
@@ -1552,7 +1552,7 @@ mod tests {
             starting_pot: 60,
             effective_stack: 970,
             range: [Range::ones(); 2],
-            river_bet_sizes: [bet_sizes_from_str("50%", "").unwrap(), Default::default()],
+            river_bet_sizes: [("50%", "").try_into().unwrap(), Default::default()],
             ..Default::default()
         };
         let mut game = PostFlopGame::with_config(&config).unwrap();
@@ -1572,7 +1572,7 @@ mod tests {
             starting_pot: 60,
             effective_stack: 970,
             range: [Range::ones(); 2],
-            river_bet_sizes: [bet_sizes_from_str("50%", "").unwrap(), Default::default()],
+            river_bet_sizes: [("50%", "").try_into().unwrap(), Default::default()],
             ..Default::default()
         };
         let mut game = PostFlopGame::with_config(&config).unwrap();
@@ -1630,16 +1630,23 @@ mod tests {
         // top-25% range
         let ip_range = "22+,A4s+,A9o+,K9s+,KTo+,Q9s+,QTo+,J9+,T9,98s,87s,76s,65s";
 
-        let bet_sizes = bet_sizes_from_str("50%", "50%").unwrap();
-
         let config = GameConfig {
             flop: flop_from_str("Td9d6h").unwrap(),
             starting_pot: 60,
             effective_stack: 770,
             range: [oop_range.parse().unwrap(), ip_range.parse().unwrap()],
-            flop_bet_sizes: [bet_sizes.clone(), bet_sizes.clone()],
-            turn_bet_sizes: [bet_sizes.clone(), bet_sizes.clone()],
-            river_bet_sizes: [bet_sizes.clone(), bet_sizes],
+            flop_bet_sizes: [
+                ("50%", "50%").try_into().unwrap(),
+                ("50%", "50%").try_into().unwrap(),
+            ],
+            turn_bet_sizes: [
+                ("50%", "50%").try_into().unwrap(),
+                ("50%", "50%").try_into().unwrap(),
+            ],
+            river_bet_sizes: [
+                ("50%", "50%").try_into().unwrap(),
+                ("50%", "50%").try_into().unwrap(),
+            ],
             add_all_in_threshold: 0.0,
             replace_all_in_threshold: 0.0,
             adjust_last_two_bet_sizes: false,
@@ -1668,18 +1675,23 @@ mod tests {
         let oop_range = "88+,A8s+,A5s-A2s:0.5,AJo+,ATo:0.75,K9s+,KQo,KJo:0.75,KTo:0.25,Q9s+,QJo:0.5,J8s+,JTo:0.25,T8s+,T7s:0.45,97s+,96s:0.45,87s,86s:0.75,85s:0.45,75s+:0.75,74s:0.45,65s:0.75,64s:0.5,63s:0.45,54s:0.75,53s:0.5,52s:0.45,43s:0.5,42s:0.45,32s:0.45";
         let ip_range = "AA:0.25,99-22,AJs-A2s,AQo-A8o,K2s+,K9o+,Q2s+,Q9o+,J6s+,J9o+,T6s+,T9o,96s+,95s:0.5,98o,86s+,85s:0.5,75s+,74s:0.5,64s+,63s:0.5,54s,53s:0.5,43s";
 
-        let flop_bet_sizes = bet_sizes_from_str("52%", "45%").unwrap();
-        let turn_bet_sizes = bet_sizes_from_str("55%", "45%").unwrap();
-        let river_bet_sizes = bet_sizes_from_str("70%", "45%").unwrap();
-
         let config = GameConfig {
             flop: flop_from_str("QsJh2h").unwrap(),
             starting_pot: 180,
             effective_stack: 910,
             range: [oop_range.parse().unwrap(), ip_range.parse().unwrap()],
-            flop_bet_sizes: [flop_bet_sizes.clone(), flop_bet_sizes],
-            turn_bet_sizes: [turn_bet_sizes.clone(), turn_bet_sizes],
-            river_bet_sizes: [river_bet_sizes.clone(), river_bet_sizes],
+            flop_bet_sizes: [
+                ("52%", "45%").try_into().unwrap(),
+                ("52%", "45%").try_into().unwrap(),
+            ],
+            turn_bet_sizes: [
+                ("55%", "45%").try_into().unwrap(),
+                ("55%", "45%").try_into().unwrap(),
+            ],
+            river_bet_sizes: [
+                ("70%", "45%").try_into().unwrap(),
+                ("70%", "45%").try_into().unwrap(),
+            ],
             add_all_in_threshold: 5.0,
             replace_all_in_threshold: 0.1,
             adjust_last_two_bet_sizes: false,
