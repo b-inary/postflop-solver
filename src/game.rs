@@ -1622,56 +1622,7 @@ mod tests {
 
     #[test]
     #[ignore]
-    fn cfr_solve1() {
-        // top-40% range
-        let oop_range =
-            "22+,A2s+,A8o+,K7s+,K9o+,Q8s+,Q9o+,J8s+,J9o+,T8+,97+,86+,75+,64s+,65o,54,43s";
-
-        // top-25% range
-        let ip_range = "22+,A4s+,A9o+,K9s+,KTo+,Q9s+,QTo+,J9+,T9,98s,87s,76s,65s";
-
-        let config = GameConfig {
-            flop: flop_from_str("Td9d6h").unwrap(),
-            starting_pot: 60,
-            effective_stack: 770,
-            range: [oop_range.parse().unwrap(), ip_range.parse().unwrap()],
-            flop_bet_sizes: [
-                ("50%", "50%").try_into().unwrap(),
-                ("50%", "50%").try_into().unwrap(),
-            ],
-            turn_bet_sizes: [
-                ("50%", "50%").try_into().unwrap(),
-                ("50%", "50%").try_into().unwrap(),
-            ],
-            river_bet_sizes: [
-                ("50%", "50%").try_into().unwrap(),
-                ("50%", "50%").try_into().unwrap(),
-            ],
-            add_all_in_threshold: 0.0,
-            replace_all_in_threshold: 0.0,
-            adjust_last_two_bet_sizes: false,
-        };
-
-        let mut game = PostFlopGame::with_config(&config).unwrap();
-        println!(
-            "memory usage: {:.2}GB",
-            game.memory_usage().0 as f64 / (1024.0 * 1024.0 * 1024.0)
-        );
-        game.allocate_memory(false);
-
-        solve(&game, 1000, 60.0 * 0.005, true);
-        compute_ev_and_equity(&game);
-        let ev0 = get_root_ev(&game) + 30.0;
-        let ev1 = 60.0 - ev0;
-
-        // verified by GTO+
-        assert!((ev0 - 26.24).abs() < 0.5);
-        assert!((ev1 - 33.76).abs() < 0.5);
-    }
-
-    #[test]
-    #[ignore]
-    fn cfr_solve2() {
+    fn solve_pio_preset() {
         let oop_range = "88+,A8s+,A5s-A2s:0.5,AJo+,ATo:0.75,K9s+,KQo,KJo:0.75,KTo:0.25,Q9s+,QJo:0.5,J8s+,JTo:0.25,T8s+,T7s:0.45,97s+,96s:0.45,87s,86s:0.75,85s:0.45,75s+:0.75,74s:0.45,65s:0.75,64s:0.5,63s:0.45,54s:0.75,53s:0.5,52s:0.45,43s:0.5,42s:0.45,32s:0.45";
         let ip_range = "AA:0.25,99-22,AJs-A2s,AQo-A8o,K2s+,K9o+,Q2s+,Q9o+,J6s+,J9o+,T6s+,T9o,96s+,95s:0.5,98o,86s+,85s:0.5,75s+,74s:0.5,64s+,63s:0.5,54s,53s:0.5,43s";
 
@@ -1692,8 +1643,8 @@ mod tests {
                 ("70%", "45%").try_into().unwrap(),
                 ("70%", "45%").try_into().unwrap(),
             ],
-            add_all_in_threshold: 5.0,
-            replace_all_in_threshold: 0.1,
+            add_all_in_threshold: 0.0,
+            replace_all_in_threshold: 0.0,
             adjust_last_two_bet_sizes: false,
         };
 
@@ -1704,13 +1655,13 @@ mod tests {
         );
         game.allocate_memory(false);
 
-        solve(&game, 1000, 180.0 * 0.0035, true);
+        solve(&game, 1000, 180.0 * 0.001, true);
         compute_ev_and_equity(&game);
-        let ev0 = get_root_ev(&game) + 90.0;
-        let ev1 = 180.0 - ev0;
+        let ev = get_root_ev(&game) + 90.0;
+        let equity = get_root_equity(&game) + 0.5;
 
-        // verified by PioSolver
-        assert!((ev0 - 105.0).abs() < 0.5);
-        assert!((ev1 - 75.0).abs() < 0.5);
+        // verified by PioSOLVER Free
+        assert!((ev - 105.11).abs() < 0.2);
+        assert!((equity - 0.55347).abs() < 0.00001);
     }
 }

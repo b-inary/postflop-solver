@@ -149,7 +149,7 @@ pub fn get_root_ev<T: Game>(game: &T) -> f32 {
     let num_private_hands = game.num_private_hands(root.player());
     let get_sum = |evs: &[f32]| evs.iter().fold(0.0, |sum, v| sum + *v as f64) as f32;
     if game.is_compression_enabled() {
-        let slice = &root.cum_regret_compressed()[..num_private_hands];
+        let slice = row(root.cum_regret_compressed(), 0, num_private_hands);
         let decoder = root.cum_regret_scale() / i16::MAX as f32;
         let vec = slice
             .iter()
@@ -157,7 +157,38 @@ pub fn get_root_ev<T: Game>(game: &T) -> f32 {
             .collect::<Vec<_>>();
         get_sum(&vec)
     } else {
-        get_sum(&root.cum_regret()[..num_private_hands])
+        get_sum(row(root.cum_regret(), 0, num_private_hands))
+    }
+}
+
+/// Computes the equity of the root node.
+#[inline]
+pub fn get_root_equity<T: Game>(game: &T) -> f32 {
+    if !game.is_ready() {
+        panic!("the game is not ready");
+    }
+    let root = game.root();
+    let num_actions = root.num_actions();
+    let num_private_hands = game.num_private_hands(root.player());
+    let get_sum = |eqs: &[f32]| eqs.iter().fold(0.0, |sum, v| sum + *v as f64) as f32;
+    if game.is_compression_enabled() {
+        let decoder = root.equity_scale() / i16::MAX as f32;
+        let vec = if num_actions == 1 {
+            root.strategy_compressed()
+                .iter()
+                .map(|&v| v as i16 as f32 * decoder)
+                .collect::<Vec<_>>()
+        } else {
+            row(root.cum_regret_compressed(), 1, num_private_hands)
+                .iter()
+                .map(|&v| v as f32 * decoder)
+                .collect::<Vec<_>>()
+        };
+        get_sum(&vec)
+    } else if num_actions == 1 {
+        get_sum(root.strategy())
+    } else {
+        get_sum(row(root.cum_regret(), 1, num_private_hands))
     }
 }
 
