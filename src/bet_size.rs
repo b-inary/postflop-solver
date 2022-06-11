@@ -7,7 +7,7 @@ static SIZE_REGEX: Lazy<Regex> =
     Lazy::new(|| Regex::new(&format!(r"^({FLOAT_PAT}[%x]?)$")).unwrap());
 static TRIM_REGEX: Lazy<Regex> = Lazy::new(|| Regex::new(r"\s*(,)\s*").unwrap());
 
-/// Bet size candidates for first bet and raise.
+/// Bet size candidates for the first bet and raise.
 ///
 /// # Examples
 /// ```

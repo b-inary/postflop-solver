@@ -1539,10 +1539,10 @@ mod tests {
         game.allocate_memory(false);
         normalize_strategy(&game);
         compute_ev_and_equity(&game);
-        let ev0 = get_root_ev(&game) + 30.0;
-        let ev1 = 60.0 - ev0;
-        assert!((ev0 - 30.0).abs() < 1e-4);
-        assert!((ev1 - 30.0).abs() < 1e-4);
+        let ev = get_root_ev(&game) + 30.0;
+        let equity = get_root_equity(&game) + 0.5;
+        assert!((ev - 30.0).abs() < 1e-4);
+        assert!((equity - 0.5).abs() < 1e-5);
     }
 
     #[test]
@@ -1559,10 +1559,10 @@ mod tests {
         game.allocate_memory(false);
         normalize_strategy(&game);
         compute_ev_and_equity(&game);
-        let ev0 = get_root_ev(&game) + 30.0;
-        let ev1 = 60.0 - ev0;
-        assert!((ev0 - 37.5).abs() < 1e-4);
-        assert!((ev1 - 22.5).abs() < 1e-4);
+        let ev = get_root_ev(&game) + 30.0;
+        let equity = get_root_equity(&game) + 0.5;
+        assert!((ev - 37.5).abs() < 1e-4);
+        assert!((equity - 0.5).abs() < 1e-5);
     }
 
     #[test]
@@ -1579,11 +1579,10 @@ mod tests {
         game.allocate_memory(true);
         normalize_strategy(&game);
         compute_ev_and_equity(&game);
-        let ev0 = get_root_ev(&game) + 30.0;
-        let ev1 = 60.0 - ev0;
-        println!("EV: {:.3} vs {:.3}", ev0, ev1);
-        assert!((ev0 - 37.5).abs() < 1e-2);
-        assert!((ev1 - 22.5).abs() < 1e-2);
+        let ev = get_root_ev(&game) + 30.0;
+        let equity = get_root_equity(&game) + 0.5;
+        assert!((ev - 37.5).abs() < 1e-2);
+        assert!((equity - 0.5).abs() < 1e-4);
     }
 
     #[test]
@@ -1601,10 +1600,10 @@ mod tests {
         game.allocate_memory(false);
         normalize_strategy(&game);
         compute_ev_and_equity(&game);
-        let ev0 = get_root_ev(&game) + 30.0;
-        let ev1 = 60.0 - ev0;
-        assert!((ev0 - 60.0).abs() < 1e-4);
-        assert!((ev1 - 0.0).abs() < 1e-4);
+        let ev = get_root_ev(&game) + 30.0;
+        let equity = get_root_equity(&game) + 0.5;
+        assert!((ev - 60.0).abs() < 1e-4);
+        assert!((equity - 1.0).abs() < 1e-5);
     }
 
     #[test]
@@ -1662,6 +1661,6 @@ mod tests {
 
         // verified by PioSOLVER Free
         assert!((ev - 105.11).abs() < 0.2);
-        assert!((equity - 0.55347).abs() < 0.00001);
+        assert!((equity - 0.55347).abs() < 1e-5);
     }
 }
