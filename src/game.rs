@@ -22,10 +22,10 @@ struct StrengthItem {
 
 type SwapList = Vec<(usize, usize)>;
 
-/// A struct representing a post-flop game.
+/// A struct representing a postflop game.
 #[derive(Default)]
 pub struct PostFlopGame {
-    // Post-flop game configuration.
+    // Postflop game configuration.
     config: GameConfig,
 
     // computed from `config`
@@ -54,7 +54,7 @@ pub struct PostFlopGame {
     strategy_compressed: MutexLike<Vec<u16>>,
 }
 
-/// A struct representing a node in post-flop game tree.
+/// A struct representing a node in postflop game tree.
 pub struct PostFlopNode {
     player: u16,
     turn: u8,
@@ -72,7 +72,7 @@ pub struct PostFlopNode {
 unsafe impl Send for PostFlopNode {}
 unsafe impl Sync for PostFlopNode {}
 
-/// A struct for post-flop game configuration.
+/// A struct for postflop game configuration.
 ///
 /// # Examples
 /// ```
@@ -93,13 +93,19 @@ unsafe impl Sync for PostFlopNode {}
 /// ```
 #[derive(Debug, Clone, PartialEq)]
 pub struct GameConfig {
-    /// Flop cards: each card must be unique and in range [0, 51].
+    /// Flop cards: each card must be unique and in range [`0`, `52`).
     pub flop: [u8; 3],
 
-    /// Initial pot size: must be greater than 0.
+    /// Turn card: must be in range [`0`, `52`) or `NOT_DEALT`.
+    pub turn: u8,
+
+    /// River card: must be in range [`0`, `52`) or `NOT_DEALT`.
+    pub river: u8,
+
+    /// Initial pot size: must be greater than `0`.
     pub starting_pot: i32,
 
-    /// Initial effective stack size: must be greater than 0.
+    /// Initial effective stack size: must be greater than `0`.
     pub effective_stack: i32,
 
     /// Initial range of each player.
@@ -114,18 +120,18 @@ pub struct GameConfig {
     /// Bet size candidates of each player in river.
     pub river_bet_sizes: [BetSizeCandidates; 2],
 
-    /// Add all-in action when SPR is below this value (set 0 to disable).
+    /// Add all-in action when SPR is below this value (set `0.0` to disable).
     pub add_all_in_threshold: f32,
 
-    /// Replace bet action with all-in action when the ratio of opponent's next bet size to the pot
-    /// size will be less than this value (set 0 to disable).
-    pub replace_all_in_threshold: f32,
+    /// Force all-in action when the ratio of opponent's next raise size to the pot size will be
+    /// less than this value (set `0.0` to disable).
+    pub force_all_in_threshold: f32,
 
     /// Enable bet size adjustment of last two bets.
     pub adjust_last_two_bet_sizes: bool,
 }
 
-/// Possible actions in a post-flop game.
+/// Possible actions in a postflop game.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Action {
     None,
@@ -160,7 +166,8 @@ const PLAYER_MASK: u16 = 0xff;
 const PLAYER_TERMINAL_FLAG: u16 = 0x100;
 const PLAYER_FOLD_FLAG: u16 = 0x300;
 
-const NOT_DEALT: u8 = 0xff;
+/// Constant representing the card not dealt.
+pub const NOT_DEALT: u8 = 0xff;
 
 #[cfg(not(feature = "custom_alloc"))]
 #[inline]
@@ -290,7 +297,8 @@ impl Game for PostFlopGame {
             #[cfg(not(feature = "custom_alloc"))]
             let mut result_tmp = vec![0.0; num_private_hands];
 
-            let flop_mask: u64 = self.config.flop.iter().fold(0, |m, &c| m | 1 << c);
+            let flop = &self.config.flop;
+            let flop_mask: u64 = (1 << flop[0]) | (1 << flop[1]) | (1 << flop[2]);
 
             if node.turn != NOT_DEALT {
                 let board_mask = flop_mask | 1 << node.turn;
@@ -518,9 +526,9 @@ impl PostFlopGame {
 
     /// Checks the configuration for errors.
     fn check_config(&mut self) -> Result<(), String> {
-        let flop = self.config.flop;
+        let flop = &self.config.flop;
 
-        if flop.iter().any(|&c| c == NOT_DEALT) {
+        if flop.contains(&NOT_DEALT) {
             return Err("Flop cards not initialized".to_string());
         }
 
@@ -530,6 +538,52 @@ impl PostFlopGame {
 
         if flop[0] == flop[1] || flop[0] == flop[2] || flop[1] == flop[2] {
             return Err(format!("Flop cards must be unique: flop = {:?}", flop));
+        }
+
+        if self.config.turn != NOT_DEALT {
+            if 52 <= self.config.turn {
+                return Err(format!(
+                    "Turn card must be in [0, 52): turn = {}",
+                    self.config.turn
+                ));
+            }
+
+            if flop.contains(&self.config.turn) {
+                return Err(format!(
+                    "Turn card must be different from flop cards: turn = {}",
+                    self.config.turn
+                ));
+            }
+        }
+
+        if self.config.river != NOT_DEALT {
+            if 52 <= self.config.river {
+                return Err(format!(
+                    "River card must be in [0, 52): river = {}",
+                    self.config.river
+                ));
+            }
+
+            if flop.contains(&self.config.river) {
+                return Err(format!(
+                    "River card must be different from flop cards: river = {}",
+                    self.config.river
+                ));
+            }
+
+            if self.config.turn == self.config.river {
+                return Err(format!(
+                    "River card must be different from turn card: river = {}",
+                    self.config.river
+                ));
+            }
+
+            if self.config.turn == NOT_DEALT {
+                return Err(format!(
+                    "River card specified without turn card: river = {}",
+                    self.config.river
+                ));
+            }
         }
 
         if self.config.starting_pot <= 0 {
@@ -554,18 +608,25 @@ impl PostFlopGame {
             return Err("IP range is empty".to_string());
         }
 
+        let mut board_mask: u64 = (1 << flop[0]) | (1 << flop[1]) | (1 << flop[2]);
+        if self.config.turn != NOT_DEALT {
+            board_mask |= 1 << self.config.turn;
+        }
+        if self.config.river != NOT_DEALT {
+            board_mask |= 1 << self.config.river;
+        }
+
         let mut num_combinations = 0.0;
-        let flop_mask: u64 = (1 << flop[0]) | (1 << flop[1]) | (1 << flop[2]);
         for c1 in 0..52 {
             for c2 in c1 + 1..52 {
                 let oop_mask: u64 = (1 << c1) | (1 << c2);
                 let oop_weight = self.config.range[0].get_weight_by_cards(c1, c2);
-                if oop_mask & flop_mask == 0 && oop_weight > 0.0 {
+                if oop_mask & board_mask == 0 && oop_weight > 0.0 {
                     for c3 in 0..52 {
                         for c4 in c3 + 1..52 {
                             let ip_mask: u64 = (1 << c3) | (1 << c4);
                             let ip_weight = self.config.range[1].get_weight_by_cards(c3, c4);
-                            if ip_mask & (flop_mask | oop_mask) == 0 {
+                            if ip_mask & (board_mask | oop_mask) == 0 {
                                 num_combinations += oop_weight as f64 * ip_weight as f64;
                             }
                         }
@@ -594,8 +655,15 @@ impl PostFlopGame {
 
     /// Initializes fields `initial_weight`, `private_hand_cards` and `same_hand_index`.
     fn init_range(&mut self) {
-        let flop = self.config.flop;
-        let flop_mask: u64 = (1 << flop[0]) | (1 << flop[1]) | (1 << flop[2]);
+        let flop = &self.config.flop;
+        let mut board_mask: u64 = (1 << flop[0]) | (1 << flop[1]) | (1 << flop[2]);
+        if self.config.turn != NOT_DEALT {
+            board_mask |= 1 << self.config.turn;
+        }
+        if self.config.river != NOT_DEALT {
+            board_mask |= 1 << self.config.river;
+        }
+
         let range = &self.config.range;
 
         for player in 0..2 {
@@ -609,7 +677,7 @@ impl PostFlopGame {
                 for card2 in card1 + 1..52 {
                     let hand_mask: u64 = (1 << card1) | (1 << card2);
                     let weight = range.get_weight_by_cards(card1, card2);
-                    if weight > 0.0 && hand_mask & flop_mask == 0 {
+                    if weight > 0.0 && hand_mask & board_mask == 0 {
                         initial_weight.push(weight);
                         private_hand_cards.push((card1, card2));
                     }
@@ -647,11 +715,11 @@ impl PostFlopGame {
             next_index += 1;
         }
 
-        let flop = self.config.flop;
+        let flop = &self.config.flop;
         let flop_mask: u64 = (1 << flop[0]) | (1 << flop[1]) | (1 << flop[2]);
 
         let mut flop_rankset = [0; 4];
-        for card in flop {
+        for &card in flop {
             let rank = card >> 2;
             let suit = card & 3;
             flop_rankset[suit as usize] |= 1 << rank;
@@ -668,98 +736,13 @@ impl PostFlopGame {
         let mut reverse_table = [usize::MAX; 52 * 51 / 2];
 
         // turn isomorphism
-        for suit1 in 1..4 {
-            for suit2 in 0..suit1 {
-                if flop_rankset[suit1 as usize] == flop_rankset[suit2 as usize]
-                    && suit_isomorphism[suit1 as usize] == suit_isomorphism[suit2 as usize]
-                {
-                    isomorphic_suit[suit1 as usize] = Some(suit2);
-
-                    let replacer = |card: u8| {
-                        if card & 3 == suit1 {
-                            card - suit1 + suit2
-                        } else if card & 3 == suit2 {
-                            card + suit1 - suit2
-                        } else {
-                            card
-                        }
-                    };
-
-                    let swap_list = &mut self.turn_isomorphism_swap[suit1 as usize];
-
-                    for player in 0..2 {
-                        reverse_table.fill(usize::MAX);
-                        let cards = &self.private_hand_cards[player];
-                        for i in 0..cards.len() {
-                            reverse_table[card_pair_index(cards[i].0, cards[i].1)] = i;
-                        }
-
-                        for i in 0..cards.len() {
-                            let c1 = replacer(cards[i].0);
-                            let c2 = replacer(cards[i].1);
-                            let index = reverse_table[card_pair_index(c1, c2)];
-                            if index != usize::MAX && i < index {
-                                swap_list[player].push((i, index));
-                            }
-                        }
-                    }
-
-                    break;
-                }
-            }
-        }
-
-        let mut counter = 0;
-        let mut indices = [0; 52];
-
-        for card in 0..52 {
-            if (1 << card) & flop_mask != 0 {
-                continue;
-            }
-
-            let suit = card & 3;
-
-            if let Some(replace_suit) = isomorphic_suit[suit as usize] {
-                let replace_card = card - suit + replace_suit;
-                self.turn_isomorphism.push(indices[replace_card as usize]);
-                self.turn_isomorphism_card.push(card);
-            } else {
-                indices[card as usize] = counter;
-                counter += 1;
-            }
-        }
-
-        self.river_isomorphism.clear();
-        self.river_isomorphism_card.clear();
-        self.river_isomorphism_swap.clear();
-
-        // river isomorphism
-        for turn in 0..52 {
-            self.river_isomorphism.push(Vec::new());
-            self.river_isomorphism_card.push(Vec::new());
-            self.river_isomorphism_swap.push(Default::default());
-
-            if (1 << turn) & flop_mask != 0 {
-                continue;
-            }
-
-            let river_isomorphism = self.river_isomorphism.last_mut().unwrap();
-            let river_isomorphism_card = self.river_isomorphism_card.last_mut().unwrap();
-            let river_isomorphism_swap = self.river_isomorphism_swap.last_mut().unwrap();
-
-            let turn_mask = flop_mask | (1 << turn);
-            let mut turn_rankset = flop_rankset;
-            turn_rankset[turn as usize & 3] |= 1 << (turn >> 2);
-
-            isomorphic_suit.fill(None);
-
+        if self.config.turn == NOT_DEALT {
             for suit1 in 1..4 {
                 for suit2 in 0..suit1 {
                     if flop_rankset[suit1 as usize] == flop_rankset[suit2 as usize]
-                        && turn_rankset[suit1 as usize] == turn_rankset[suit2 as usize]
                         && suit_isomorphism[suit1 as usize] == suit_isomorphism[suit2 as usize]
                     {
-                        isomorphic_suit[suit1 as usize] = Some(suit2 as u8);
+                        isomorphic_suit[suit1 as usize] = Some(suit2);
 
                         let replacer = |card: u8| {
                             if card & 3 == suit1 {
@@ -771,7 +754,7 @@ impl PostFlopGame {
                             }
                         };
 
-                        let swap_list = &mut river_isomorphism_swap[suit1 as usize];
+                        let swap_list = &mut self.turn_isomorphism_swap[suit1 as usize];
 
                         for player in 0..2 {
                             reverse_table.fill(usize::MAX);
@@ -795,11 +778,11 @@ impl PostFlopGame {
                 }
             }
 
-            counter = 0;
-            indices.fill(0);
+            let mut counter = 0;
+            let mut indices = [0; 52];
 
             for card in 0..52 {
-                if (1 << card) & turn_mask != 0 {
+                if (1 << card) & flop_mask != 0 {
                     continue;
                 }
 
@@ -807,11 +790,103 @@ impl PostFlopGame {
 
                 if let Some(replace_suit) = isomorphic_suit[suit as usize] {
                     let replace_card = card - suit + replace_suit;
-                    river_isomorphism.push(indices[replace_card as usize]);
-                    river_isomorphism_card.push(card);
+                    self.turn_isomorphism.push(indices[replace_card as usize]);
+                    self.turn_isomorphism_card.push(card);
                 } else {
                     indices[card as usize] = counter;
                     counter += 1;
+                }
+            }
+        }
+
+        self.river_isomorphism.clear();
+        self.river_isomorphism_card.clear();
+        self.river_isomorphism_swap.clear();
+
+        // river isomorphism
+        if self.config.river == NOT_DEALT {
+            for turn in 0..52 {
+                self.river_isomorphism.push(Vec::new());
+                self.river_isomorphism_card.push(Vec::new());
+                self.river_isomorphism_swap.push(Default::default());
+
+                if (1 << turn) & flop_mask != 0
+                    || (self.config.turn != NOT_DEALT && turn != self.config.turn)
+                {
+                    continue;
+                }
+
+                let river_isomorphism = self.river_isomorphism.last_mut().unwrap();
+                let river_isomorphism_card = self.river_isomorphism_card.last_mut().unwrap();
+                let river_isomorphism_swap = self.river_isomorphism_swap.last_mut().unwrap();
+
+                let turn_mask = flop_mask | (1 << turn);
+                let mut turn_rankset = flop_rankset;
+                turn_rankset[turn as usize & 3] |= 1 << (turn >> 2);
+
+                isomorphic_suit.fill(None);
+
+                for suit1 in 1..4 {
+                    for suit2 in 0..suit1 {
+                        if (flop_rankset[suit1 as usize] == flop_rankset[suit2 as usize]
+                            || self.config.turn != NOT_DEALT)
+                            && turn_rankset[suit1 as usize] == turn_rankset[suit2 as usize]
+                            && suit_isomorphism[suit1 as usize] == suit_isomorphism[suit2 as usize]
+                        {
+                            isomorphic_suit[suit1 as usize] = Some(suit2);
+
+                            let replacer = |card: u8| {
+                                if card & 3 == suit1 {
+                                    card - suit1 + suit2
+                                } else if card & 3 == suit2 {
+                                    card + suit1 - suit2
+                                } else {
+                                    card
+                                }
+                            };
+
+                            let swap_list = &mut river_isomorphism_swap[suit1 as usize];
+
+                            for player in 0..2 {
+                                reverse_table.fill(usize::MAX);
+                                let cards = &self.private_hand_cards[player];
+                                for i in 0..cards.len() {
+                                    reverse_table[card_pair_index(cards[i].0, cards[i].1)] = i;
+                                }
+
+                                for i in 0..cards.len() {
+                                    let c1 = replacer(cards[i].0);
+                                    let c2 = replacer(cards[i].1);
+                                    let index = reverse_table[card_pair_index(c1, c2)];
+                                    if index != usize::MAX && i < index {
+                                        swap_list[player].push((i, index));
+                                    }
+                                }
+                            }
+
+                            break;
+                        }
+                    }
+                }
+
+                let mut counter = 0;
+                let mut indices = [0; 52];
+
+                for card in 0..52 {
+                    if (1 << card) & turn_mask != 0 {
+                        continue;
+                    }
+
+                    let suit = card & 3;
+
+                    if let Some(replace_suit) = isomorphic_suit[suit as usize] {
+                        let replace_card = card - suit + replace_suit;
+                        river_isomorphism.push(indices[replace_card as usize]);
+                        river_isomorphism_card.push(card);
+                    } else {
+                        indices[card as usize] = counter;
+                        counter += 1;
+                    }
                 }
             }
         }
@@ -820,8 +895,8 @@ impl PostFlopGame {
     /// Initializes a field `hand_strength`.
     fn init_hand_strength(&mut self) {
         let mut flop = Hand::new();
-        for card in &self.config.flop {
-            flop = flop.add_card(*card as usize);
+        for &card in &self.config.flop {
+            flop = flop.add_card(card as usize);
         }
 
         self.hand_strength = vec![Default::default(); 52 * 51 / 2];
@@ -829,7 +904,16 @@ impl PostFlopGame {
 
         for board1 in 0..52 {
             for board2 in board1 + 1..52 {
-                if !flop.contains(board1 as usize) && !flop.contains(board2 as usize) {
+                let mut is_possible =
+                    !flop.contains(board1 as usize) && !flop.contains(board2 as usize);
+                if self.config.river != NOT_DEALT {
+                    is_possible &= (self.config.turn == board1 && self.config.river == board2)
+                        || (self.config.turn == board2 && self.config.river == board1);
+                } else if self.config.turn != NOT_DEALT {
+                    is_possible &= self.config.turn == board1 || self.config.turn == board2;
+                }
+
+                if is_possible {
                     let board = flop.add_card(board1 as usize).add_card(board2 as usize);
                     let mut strength = [
                         Vec::with_capacity(private_hand_cards[0].len()),
@@ -880,8 +964,12 @@ impl PostFlopGame {
             max_stack_size: &max_stack_size,
         };
 
-        self.root().children.clear();
-        self.build_tree_recursive(&mut self.root(), &info);
+        let mut root = self.root();
+        *root = PostFlopNode::default();
+        root.turn = self.config.turn;
+        root.river = self.config.river;
+
+        self.build_tree_recursive(&mut root, &info);
 
         let stack_size = cmp::max(
             max_stack_size[0].load(Ordering::Relaxed),
@@ -1165,7 +1253,7 @@ impl PostFlopGame {
             let new_bet_diff = size - opponent_bet;
             let new_pot = pot + 2 * new_bet_diff;
 
-            if max_bet <= size + (new_pot as f32 * self.config.replace_all_in_threshold) as i32 {
+            if max_bet <= size + (new_pot as f32 * self.config.force_all_in_threshold) as i32 {
                 return max_bet;
             }
 
@@ -1191,7 +1279,7 @@ impl PostFlopGame {
             let next_pot = new_pot + 2 * next_bet_diff;
 
             // next opponent bet will be always all-in
-            let threshold = (next_pot as f32 * self.config.replace_all_in_threshold) as i32;
+            let threshold = (next_pot as f32 * self.config.force_all_in_threshold) as i32;
             if max_bet <= min_opponent_bet + threshold {
                 let ratio = new_bet_diff as f32 / pot as f32;
                 let a = 2.0 * pot as f32 * ratio * min_opponent_ratio;
@@ -1437,6 +1525,8 @@ impl Default for GameConfig {
     fn default() -> Self {
         Self {
             flop: [NOT_DEALT; 3],
+            turn: NOT_DEALT,
+            river: NOT_DEALT,
             starting_pot: 0,
             effective_stack: 0,
             range: Default::default(),
@@ -1444,7 +1534,7 @@ impl Default for GameConfig {
             turn_bet_sizes: Default::default(),
             river_bet_sizes: Default::default(),
             add_all_in_threshold: 1.5,
-            replace_all_in_threshold: 0.1,
+            force_all_in_threshold: 0.1,
             adjust_last_two_bet_sizes: true,
         }
     }
@@ -1465,13 +1555,14 @@ fn vec_memory_usage<T>(vec: &Vec<T>) -> u64 {
 ///
 /// assert_eq!(flop, Ok([0, 5, 10]));
 /// ```
+#[inline]
 pub fn flop_from_str(s: &str) -> Result<[u8; 3], String> {
     let mut result = [0; 3];
     let mut chars = s.chars();
 
-    result[0] = card_from_str(&mut chars)?;
-    result[1] = card_from_str(&mut chars.by_ref().skip_while(|c| c.is_whitespace()))?;
-    result[2] = card_from_str(&mut chars.by_ref().skip_while(|c| c.is_whitespace()))?;
+    result[0] = card_from_chars(&mut chars)?;
+    result[1] = card_from_chars(&mut chars.by_ref().skip_while(|c| c.is_whitespace()))?;
+    result[2] = card_from_chars(&mut chars.by_ref().skip_while(|c| c.is_whitespace()))?;
 
     if chars.next().is_some() {
         return Err("expected three cards".to_string());
@@ -1486,8 +1577,31 @@ pub fn flop_from_str(s: &str) -> Result<[u8; 3], String> {
     Ok(result)
 }
 
+/// Attempts to convert a string into a card.
+///
+/// # Examples
+/// ```
+/// use postflop_solver::card_from_str;
+///
+/// assert_eq!(card_from_str("2c"), Ok(0));
+/// assert_eq!(card_from_str("3d"), Ok(5));
+/// assert_eq!(card_from_str("4h"), Ok(10));
+/// assert_eq!(card_from_str("As"), Ok(51));
+/// ```
 #[inline]
-fn card_from_str<T: Iterator<Item = char>>(chars: &mut T) -> Result<u8, String> {
+pub fn card_from_str(s: &str) -> Result<u8, String> {
+    let mut chars = s.chars();
+    let result = card_from_chars(&mut chars)?;
+
+    if chars.next().is_some() {
+        return Err("expected two characters".to_string());
+    }
+
+    Ok(result)
+}
+
+#[inline]
+fn card_from_chars<T: Iterator<Item = char>>(chars: &mut T) -> Result<u8, String> {
     let rank_char = chars.next().ok_or_else(|| "parse failed".to_string())?;
     let suit_char = chars.next().ok_or_else(|| "parse failed".to_string())?;
 
@@ -1586,6 +1700,49 @@ mod tests {
     }
 
     #[test]
+    fn one_raise_all_range_with_turn() {
+        let config = GameConfig {
+            flop: flop_from_str("Td9d6h").unwrap(),
+            turn: card_from_str("Qc").unwrap(),
+            starting_pot: 60,
+            effective_stack: 970,
+            range: [Range::ones(); 2],
+            river_bet_sizes: [("50%", "").try_into().unwrap(), Default::default()],
+            ..Default::default()
+        };
+        let mut game = PostFlopGame::with_config(&config).unwrap();
+        game.allocate_memory(false);
+        normalize_strategy(&game);
+        compute_ev_and_equity(&game);
+        let ev = get_root_ev(&game) + 30.0;
+        let equity = get_root_equity(&game) + 0.5;
+        assert!((ev - 37.5).abs() < 1e-4);
+        assert!((equity - 0.5).abs() < 1e-5);
+    }
+
+    #[test]
+    fn one_raise_all_range_with_river() {
+        let config = GameConfig {
+            flop: flop_from_str("Td9d6h").unwrap(),
+            turn: card_from_str("Qc").unwrap(),
+            river: card_from_str("7s").unwrap(),
+            starting_pot: 60,
+            effective_stack: 970,
+            range: [Range::ones(); 2],
+            river_bet_sizes: [("50%", "").try_into().unwrap(), Default::default()],
+            ..Default::default()
+        };
+        let mut game = PostFlopGame::with_config(&config).unwrap();
+        game.allocate_memory(false);
+        normalize_strategy(&game);
+        compute_ev_and_equity(&game);
+        let ev = get_root_ev(&game) + 30.0;
+        let equity = get_root_equity(&game) + 0.5;
+        assert!((ev - 37.5).abs() < 1e-4);
+        assert!((equity - 0.5).abs() < 1e-5);
+    }
+
+    #[test]
     fn always_win() {
         // be careful for straight flushes
         let lose_range_str = "22+,A2+,K9-K2,Q8-Q2,J8-J2,T8-T2,92+,82+,72+,62+";
@@ -1627,6 +1784,8 @@ mod tests {
 
         let config = GameConfig {
             flop: flop_from_str("QsJh2h").unwrap(),
+            turn: NOT_DEALT,
+            river: NOT_DEALT,
             starting_pot: 180,
             effective_stack: 910,
             range: [oop_range.parse().unwrap(), ip_range.parse().unwrap()],
@@ -1643,7 +1802,7 @@ mod tests {
                 ("70%", "45%").try_into().unwrap(),
             ],
             add_all_in_threshold: 0.0,
-            replace_all_in_threshold: 0.0,
+            force_all_in_threshold: 0.0,
             adjust_last_two_bet_sizes: false,
         };
 
