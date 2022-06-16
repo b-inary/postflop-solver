@@ -64,6 +64,9 @@ mod utility;
 #[cfg(feature = "custom_alloc")]
 mod alloc;
 
+#[cfg(not(feature = "holdem-hand-evaluator"))]
+mod hand;
+
 pub use bet_size::*;
 pub use game::*;
 pub use interface::*;
@@ -75,3 +78,6 @@ pub use utility::*;
 
 #[cfg(feature = "custom_alloc")]
 pub use alloc::*;
+
+#[cfg(not(feature = "holdem-hand-evaluator"))]
+pub use hand::*;

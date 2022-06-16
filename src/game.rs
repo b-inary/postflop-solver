@@ -2,7 +2,6 @@ use crate::bet_size::*;
 use crate::interface::*;
 use crate::mutex_like::*;
 use crate::range::*;
-use holdem_hand_evaluator::Hand;
 use std::cmp;
 use std::mem;
 use std::ptr;
@@ -13,6 +12,11 @@ use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use crate::alloc::*;
 #[cfg(feature = "custom_alloc")]
 use std::vec;
+
+#[cfg(not(feature = "holdem-hand-evaluator"))]
+use crate::hand::Hand;
+#[cfg(feature = "holdem-hand-evaluator")]
+use holdem_hand_evaluator::Hand;
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 struct StrengthItem {
