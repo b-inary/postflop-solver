@@ -1177,7 +1177,7 @@ impl PostFlopGame {
         let pot = self.config.starting_pot + 2 * (node.amount + bet_diff);
 
         let max_bet = self.config.effective_stack - node.amount + player_bet;
-        let min_bet = max_bet.min(opponent_bet + bet_diff);
+        let min_bet = (opponent_bet + bet_diff).clamp(1, max_bet);
 
         let (candidates, is_river) = if node.turn == NOT_DEALT {
             (&self.config.flop_bet_sizes, false)
