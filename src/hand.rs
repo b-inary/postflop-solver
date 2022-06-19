@@ -1,7 +1,7 @@
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 pub struct Hand {
-    cards: [i32; 7],
-    num_cards: i32,
+    cards: [usize; 7],
+    num_cards: usize,
 }
 
 fn keep_n_msb(mut x: i32, n: i32) -> i32 {
@@ -15,7 +15,7 @@ fn keep_n_msb(mut x: i32, n: i32) -> i32 {
 }
 
 fn find_straight(rankset: i32) -> i32 {
-    static WHEEL: i32 = 0b1_0000_0000_1111;
+    const WHEEL: i32 = 0b1_0000_0000_1111;
     let is_straight = rankset & (rankset << 1) & (rankset << 2) & (rankset << 3) & (rankset << 4);
     if is_straight != 0 {
         keep_n_msb(is_straight, 1)
@@ -29,23 +29,20 @@ fn find_straight(rankset: i32) -> i32 {
 impl Hand {
     #[inline]
     pub fn new() -> Hand {
-        Hand {
-            cards: [0; 7],
-            num_cards: 0,
-        }
+        Hand::default()
     }
 
     #[inline]
     pub fn add_card(&self, card: usize) -> Hand {
-        let mut hand = self.clone();
-        hand.cards[hand.num_cards as usize] = card as i32;
+        let mut hand = *self;
+        hand.cards[hand.num_cards] = card;
         hand.num_cards += 1;
         hand
     }
 
     #[inline]
     pub fn contains(&self, card: usize) -> bool {
-        self.cards[0..self.num_cards as usize].contains(&(card as i32))
+        self.cards[0..self.num_cards].contains(&card)
     }
 
     pub fn evaluate(&self) -> i32 {
@@ -54,12 +51,12 @@ impl Hand {
         let mut rankset_of_count = [0i32; 5];
         let mut rank_count = [0i32; 13];
 
-        for i in 0..7 {
-            let rank = self.cards[i] / 4;
-            let suit = self.cards[i] % 4;
+        for &card in &self.cards {
+            let rank = card / 4;
+            let suit = card % 4;
             rankset |= 1 << rank;
-            rankset_suit[suit as usize] |= 1 << rank;
-            rank_count[rank as usize] += 1;
+            rankset_suit[suit] |= 1 << rank;
+            rank_count[rank] += 1;
         }
 
         for rank in 0..13 {
@@ -115,7 +112,7 @@ impl Hand {
             (1 << 26) | (rankset_of_count[2] << 13) | remaining
         } else {
             // high card
-            (0 << 26) | keep_n_msb(rankset, 5)
+            keep_n_msb(rankset, 5)
         }
     }
 }
