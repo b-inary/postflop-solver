@@ -19,18 +19,22 @@ postflop-solver = { git = "https://github.com/b-inary/postflop-solver" }
 use postflop_solver::*;
 
 // configure game specification
-let oop_range = "22+,A2s+,A8o+,K7s+,K9o+,Q8s+,Q9o+,J8s+,J9o+,T8+,97+,86+,75+,64s+,65o,54,43s";
-let ip_range = "22+,A4s+,A9o+,K9s+,KTo+,Q9s+,QTo+,J9+,T9,98s,87s,76s,65s";
+let oop_range = "66+,A8s+,A5s-A4s,AJo+,K9s+,KQo,QTs+,JTs,96s+,85s+,75s+,65s,54s";
+let ip_range = "QQ-22,AQs-A2s,ATo+,K5s+,KJo+,Q8s+,J8s+,T7s+,96s+,86s+,75s+,64s+,53s+";
 let bet_sizes = BetSizeCandidates::try_from(("50%", "50%")).unwrap();
 let config = GameConfig {
     flop: flop_from_str("Td9d6h").unwrap(),
-    starting_pot: 180,
-    effective_stack: 910,
+    turn: NOT_DEALT, // or `card_from_str("As").unwrap()`
+    river: NOT_DEALT,
+    starting_pot: 200,
+    effective_stack: 900,
     range: [oop_range.parse().unwrap(), ip_range.parse().unwrap()],
     flop_bet_sizes: [bet_sizes.clone(), bet_sizes.clone()],
     turn_bet_sizes: [bet_sizes.clone(), bet_sizes.clone()],
     river_bet_sizes: [bet_sizes.clone(), bet_sizes.clone()],
-    ..Default::default()
+    add_all_in_threshold: 1.2,
+    force_all_in_threshold: 0.1,
+    adjust_last_two_bet_sizes: true,
 };
 
 // build game tree

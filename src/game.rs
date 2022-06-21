@@ -1537,9 +1537,9 @@ impl Default for GameConfig {
             flop_bet_sizes: Default::default(),
             turn_bet_sizes: Default::default(),
             river_bet_sizes: Default::default(),
-            add_all_in_threshold: 1.5,
-            force_all_in_threshold: 0.1,
-            adjust_last_two_bet_sizes: true,
+            add_all_in_threshold: 0.0,
+            force_all_in_threshold: 0.0,
+            adjust_last_two_bet_sizes: false,
         }
     }
 }
@@ -1805,9 +1805,7 @@ mod tests {
                 ("70%", "45%").try_into().unwrap(),
                 ("70%", "45%").try_into().unwrap(),
             ],
-            add_all_in_threshold: 0.0,
-            force_all_in_threshold: 0.0,
-            adjust_last_two_bet_sizes: false,
+            ..Default::default()
         };
 
         let mut game = PostFlopGame::with_config(&config).unwrap();
