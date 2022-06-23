@@ -103,26 +103,25 @@ pub fn encode_signed_slice(dst: &mut [i16], slice: &[f32]) -> f32 {
     scale
 }
 
-/// Normalizes the cumulative strategy.
+/// Finalizes the solving process.
 #[inline]
-pub fn normalize_strategy<T: Game>(game: &T) {
+pub fn finalize<T: Game>(game: &mut T) {
     if !game.is_ready() {
         panic!("the game is not ready");
     }
+
+    if game.is_solved() {
+        panic!("the game is already solved");
+    }
+
+    // normalizes the strategy
     if game.is_compression_enabled() {
         normalize_strategy_compressed_recursive::<T::Node>(&mut game.root());
     } else {
         normalize_strategy_recursive::<T::Node>(&mut game.root());
     }
-}
 
-/// Computes the expected values and equity and save them to `cum_regret` field.
-/// If the number of actions is equal to `1`, the equity is saved to `strategy` field.
-#[inline]
-pub fn compute_ev_and_equity<T: Game>(game: &T) {
-    if !game.is_ready() {
-        panic!("the game is not ready");
-    }
+    // computes the expected values and the equity, and save them
     let reach = [game.initial_weight(0), game.initial_weight(1)];
     for player in 0..2 {
         let mut ev = vec![0.0; game.num_private_hands(player)];
@@ -137,6 +136,9 @@ pub fn compute_ev_and_equity<T: Game>(game: &T) {
             reach[player ^ 1],
         );
     }
+
+    // sets the game is solved
+    game.set_solved();
 }
 
 /// Computes the expected value of the root node.
@@ -145,9 +147,15 @@ pub fn get_root_ev<T: Game>(game: &T) -> f32 {
     if !game.is_ready() {
         panic!("the game is not ready");
     }
+
+    if !game.is_solved() {
+        panic!("the game is not solved");
+    }
+
     let root = game.root();
     let num_private_hands = game.num_private_hands(root.player());
     let get_sum = |evs: &[f32]| evs.iter().fold(0.0, |sum, v| sum + *v as f64) as f32;
+
     if game.is_compression_enabled() {
         let slice = row(root.cum_regret_compressed(), 0, num_private_hands);
         let decoder = root.cum_regret_scale() / i16::MAX as f32;
@@ -167,10 +175,16 @@ pub fn get_root_equity<T: Game>(game: &T) -> f32 {
     if !game.is_ready() {
         panic!("the game is not ready");
     }
+
+    if !game.is_solved() {
+        panic!("the game is not solved");
+    }
+
     let root = game.root();
     let num_actions = root.num_actions();
     let num_private_hands = game.num_private_hands(root.player());
     let get_sum = |eqs: &[f32]| eqs.iter().fold(0.0, |sum, v| sum + *v as f64) as f32;
+
     if game.is_compression_enabled() {
         let decoder = root.equity_scale() / i16::MAX as f32;
         let vec = if num_actions == 1 {
@@ -194,15 +208,22 @@ pub fn get_root_equity<T: Game>(game: &T) -> f32 {
 
 /// Computes the exploitability of the strategy.
 #[inline]
-pub fn compute_exploitability<T: Game>(game: &T, is_normalized: bool) -> f32 {
+pub fn compute_exploitability<T: Game>(game: &T) -> f32 {
     if !game.is_ready() {
         panic!("the game is not ready");
     }
+
+    if !game.is_solved() {
+        panic!("the game is not solved");
+    }
+
     let mut cfv = [
         vec![0.0; game.num_private_hands(0)],
         vec![0.0; game.num_private_hands(1)],
     ];
+
     let reach = [game.initial_weight(0), game.initial_weight(1)];
+
     for player in 0..2 {
         compute_best_cfv_recursive(
             &mut cfv[player],
@@ -210,15 +231,16 @@ pub fn compute_exploitability<T: Game>(game: &T, is_normalized: bool) -> f32 {
             &game.root(),
             player,
             reach[player ^ 1],
-            is_normalized,
         );
     }
+
     let get_sum = |player: usize| {
         cfv[player]
             .iter()
             .zip(reach[player])
             .fold(0.0, |sum, (&cfv, &reach)| sum + cfv as f64 * reach as f64)
     };
+
     (get_sum(0) + get_sum(1)) as f32 / 2.0
 }
 
@@ -543,7 +565,6 @@ fn compute_best_cfv_recursive<T: Game>(
     node: &T::Node,
     player: usize,
     cfreach: &[f32],
-    is_normalized: bool,
 ) {
     // terminal node
     if node.is_terminal() {
@@ -587,7 +608,6 @@ fn compute_best_cfv_recursive<T: Game>(
                 &node.play(action),
                 player,
                 &cfreach,
-                is_normalized,
             )
         });
 
@@ -630,7 +650,6 @@ fn compute_best_cfv_recursive<T: Game>(
                 &node.play(action),
                 player,
                 cfreach,
-                is_normalized,
             )
         });
 
@@ -662,21 +681,19 @@ fn compute_best_cfv_recursive<T: Game>(
 
         let row_size = cfreach_actions.len() / node.num_actions();
 
-        // if the strategy is not normalized, we need to normalize it
-        if !is_normalized {
-            #[cfg(feature = "custom_alloc")]
-            let mut denom = vec::from_elem_in(0.0, row_size, StackAlloc);
-            #[cfg(not(feature = "custom_alloc"))]
-            let mut denom = vec![0.0; row_size];
-            cfreach_actions.chunks(row_size).for_each(|row| {
-                add_slice(&mut denom, row);
-            });
+        // normalizes the reach probabilities
+        #[cfg(feature = "custom_alloc")]
+        let mut denom = vec::from_elem_in(0.0, row_size, StackAlloc);
+        #[cfg(not(feature = "custom_alloc"))]
+        let mut denom = vec![0.0; row_size];
+        cfreach_actions.chunks(row_size).for_each(|row| {
+            add_slice(&mut denom, row);
+        });
 
-            let default = 1.0 / node.num_actions() as f32;
-            cfreach_actions.chunks_mut(row_size).for_each(|row| {
-                div_slice(row, &denom, default);
-            });
-        }
+        let default = 1.0 / node.num_actions() as f32;
+        cfreach_actions.chunks_mut(row_size).for_each(|row| {
+            div_slice(row, &denom, default);
+        });
 
         // updates the reach probabilities
         cfreach_actions.chunks_mut(row_size).for_each(|row| {
@@ -693,7 +710,6 @@ fn compute_best_cfv_recursive<T: Game>(
                     &node.play(action),
                     player,
                     cfreach,
-                    is_normalized,
                 );
             }
         });

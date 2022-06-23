@@ -7,6 +7,7 @@ use std::sync::atomic::Ordering;
 struct KuhnGame {
     root: MutexLike<KuhnNode>,
     initial_weight: Vec<f32>,
+    is_solved: bool,
 }
 
 struct KuhnNode {
@@ -97,6 +98,16 @@ impl Game for KuhnGame {
             }
         }
     }
+
+    #[inline]
+    fn is_solved(&self) -> bool {
+        self.is_solved
+    }
+
+    #[inline]
+    fn set_solved(&mut self) {
+        self.is_solved = true;
+    }
 }
 
 impl KuhnGame {
@@ -105,6 +116,7 @@ impl KuhnGame {
         Self {
             root: Self::build_tree(),
             initial_weight: vec![1.0; NUM_PRIVATE_HANDS],
+            is_solved: false,
         }
     }
 
@@ -231,9 +243,8 @@ impl GameNode for KuhnNode {
 #[test]
 fn kuhn() {
     let target = 1e-4;
-    let game = KuhnGame::new();
-    solve(&game, 10000, target, false);
-    compute_ev_and_equity(&game);
+    let mut game = KuhnGame::new();
+    solve(&mut game, 10000, target, false);
 
     let ev = get_root_ev(&game);
     let expected_ev = -1.0 / 18.0;

@@ -45,10 +45,9 @@
 //! // solve game
 //! let max_num_iterations = 1000;
 //! let target_exploitability = config.starting_pot as f32 * 0.005;
-//! let exploitability = solve(&game, max_num_iterations, target_exploitability, true);
+//! let exploitability = solve(&mut game, max_num_iterations, target_exploitability, true);
 //!
 //! // compute OOP's EV and equity
-//! compute_ev_and_equity(&game);
 //! let bias = config.starting_pot as f32 * 0.5;
 //! let ev = get_root_ev(&game) + bias;
 //! let equity = get_root_equity(&game) + 0.5;

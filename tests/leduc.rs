@@ -9,6 +9,7 @@ struct LeducGame {
     initial_weight: Vec<f32>,
     isomorphism: Vec<usize>,
     isomorphism_swap: [Vec<(usize, usize)>; 2],
+    is_solved: bool,
 }
 
 struct LeducNode {
@@ -125,6 +126,16 @@ impl Game for LeducGame {
     fn isomorphic_swap(&self, _node: &Self::Node, _index: usize) -> &[Vec<(usize, usize)>; 2] {
         &self.isomorphism_swap
     }
+
+    #[inline]
+    fn is_solved(&self) -> bool {
+        self.is_solved
+    }
+
+    #[inline]
+    fn set_solved(&mut self) {
+        self.is_solved = true;
+    }
 }
 
 impl LeducGame {
@@ -135,6 +146,7 @@ impl LeducGame {
             initial_weight: vec![1.0; NUM_PRIVATE_HANDS],
             isomorphism: vec![0, 1, 2],
             isomorphism_swap: [vec![(0, 1), (2, 3), (4, 5)], vec![(0, 1), (2, 3), (4, 5)]],
+            is_solved: false,
         }
     }
 
@@ -340,9 +352,8 @@ impl GameNode for LeducNode {
 #[test]
 fn leduc() {
     let target = 1e-4;
-    let game = LeducGame::new();
-    solve(&game, 10000, target, false);
-    compute_ev_and_equity(&game);
+    let mut game = LeducGame::new();
+    solve(&mut game, 10000, target, false);
 
     let ev = get_root_ev(&game);
     let expected_ev = -0.0856; // verified by OpenSpiel

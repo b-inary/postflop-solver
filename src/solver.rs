@@ -36,7 +36,7 @@ impl DiscountParams {
 /// Performs CFR until the given number of iterations or exploitability is satisfied, and returns
 /// the exploitability.
 pub fn solve<T: Game>(
-    game: &T,
+    game: &mut T,
     num_iterations: u32,
     target_exploitability: f32,
     print_progress: bool,
@@ -45,15 +45,20 @@ pub fn solve<T: Game>(
         panic!("the game is not ready");
     }
 
+    if game.is_solved() {
+        panic!("the game is already solved");
+    }
+
     let mut root = game.root();
     let reach = [game.initial_weight(0), game.initial_weight(1)];
 
+    let mut exploitability = f32::INFINITY;
+
     if print_progress {
         print!("iteration: 0 / {}", num_iterations);
+        print!("(exploitability = {:.4e}[bb])", exploitability);
         io::stdout().flush().unwrap();
     }
-
-    let mut exploitability = f32::INFINITY;
 
     for t in 0..num_iterations {
         let params = DiscountParams::new(t);
@@ -73,7 +78,7 @@ pub fn solve<T: Game>(
         }
 
         if (t + 1) % 10 == 0 || t + 1 == num_iterations {
-            exploitability = compute_exploitability(game, false);
+            exploitability = compute_exploitability(game);
         }
 
         if print_progress {
@@ -92,13 +97,13 @@ pub fn solve<T: Game>(
         io::stdout().flush().unwrap();
     }
 
-    normalize_strategy(game);
-
-    if num_iterations > 0 {
-        exploitability
-    } else {
-        compute_exploitability(game, true)
+    if exploitability.is_infinite() {
+        exploitability = compute_exploitability(game);
     }
+
+    finalize(game);
+
+    exploitability
 }
 
 /// Proceeds CFR iteration for one step.
@@ -106,6 +111,10 @@ pub fn solve<T: Game>(
 pub fn solve_step<T: Game>(game: &T, current_iteration: u32) {
     if !game.is_ready() {
         panic!("the game is not ready");
+    }
+
+    if game.is_solved() {
+        panic!("the game is already solved");
     }
 
     let mut root = game.root();

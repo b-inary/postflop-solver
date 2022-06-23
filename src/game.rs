@@ -52,10 +52,12 @@ pub struct PostFlopGame {
     memory_usage_compressed: u64,
 
     // global storage
-    cum_regret: MutexLike<Vec<f32>>,
-    strategy: MutexLike<Vec<f32>>,
-    cum_regret_compressed: MutexLike<Vec<i16>>,
-    strategy_compressed: MutexLike<Vec<u16>>,
+    storage1: MutexLike<Vec<f32>>,
+    storage2: MutexLike<Vec<f32>>,
+    storage1_compressed: MutexLike<Vec<i16>>,
+    storage2_compressed: MutexLike<Vec<u16>>,
+
+    is_solved: bool,
 }
 
 /// A struct representing a node in postflop game tree.
@@ -65,11 +67,11 @@ pub struct PostFlopNode {
     river: u8,
     amount: i32,
     children: Vec<(Action, MutexLike<PostFlopNode>)>,
-    cum_regret: *mut u8,
-    strategy: *mut u8,
-    cum_regret_scale: f32,
-    strategy_scale: f32,
-    equity_scale: f32,
+    storage1: *mut u8,
+    storage2: *mut u8,
+    scale1: f32,
+    scale2: f32,
+    scale3: f32,
     num_elements: usize,
 }
 
@@ -377,6 +379,16 @@ impl Game for PostFlopGame {
     }
 
     #[inline]
+    fn is_solved(&self) -> bool {
+        self.is_solved
+    }
+
+    #[inline]
+    fn set_solved(&mut self) {
+        self.is_solved = true;
+    }
+
+    #[inline]
     fn is_compression_enabled(&self) -> bool {
         self.is_compression_enabled
     }
@@ -437,11 +449,11 @@ impl PostFlopGame {
 
         let num_elems = self.num_storage_elements as usize;
         if enable_compression {
-            self.cum_regret_compressed = MutexLike::new(vec![0; num_elems]);
-            self.strategy_compressed = MutexLike::new(vec![0; num_elems]);
+            self.storage1_compressed = MutexLike::new(vec![0; num_elems]);
+            self.storage2_compressed = MutexLike::new(vec![0; num_elems]);
         } else {
-            self.cum_regret = MutexLike::new(vec![0.0; num_elems]);
-            self.strategy = MutexLike::new(vec![0.0; num_elems]);
+            self.storage1 = MutexLike::new(vec![0.0; num_elems]);
+            self.storage2 = MutexLike::new(vec![0.0; num_elems]);
         }
 
         let counter = AtomicUsize::new(0);
@@ -1014,14 +1026,14 @@ impl PostFlopGame {
     /// Clears the storage.
     #[inline]
     fn clear_storage(&mut self) {
-        self.cum_regret.lock().clear();
-        self.cum_regret.lock().shrink_to_fit();
-        self.strategy.lock().clear();
-        self.strategy.lock().shrink_to_fit();
-        self.cum_regret_compressed.lock().clear();
-        self.cum_regret_compressed.lock().shrink_to_fit();
-        self.strategy_compressed.lock().clear();
-        self.strategy_compressed.lock().shrink_to_fit();
+        self.storage1.lock().clear();
+        self.storage2.lock().clear();
+        self.storage1.lock().shrink_to_fit();
+        self.storage2.lock().shrink_to_fit();
+        self.storage1_compressed.lock().clear();
+        self.storage2_compressed.lock().clear();
+        self.storage1_compressed.lock().shrink_to_fit();
+        self.storage2_compressed.lock().shrink_to_fit();
     }
 
     /// Builds the game tree recursively.
@@ -1365,15 +1377,15 @@ impl PostFlopGame {
             let index = counter.fetch_add(node.num_elements, Ordering::SeqCst);
             unsafe {
                 if self.is_compression_enabled() {
-                    let cum_regret_ptr = self.cum_regret_compressed.lock().as_mut_ptr();
-                    let strategy_ptr = self.strategy_compressed.lock().as_mut_ptr();
-                    node.cum_regret = cum_regret_ptr.add(index) as *mut u8;
-                    node.strategy = strategy_ptr.add(index) as *mut u8;
+                    let storage1_ptr = self.storage1_compressed.lock().as_mut_ptr();
+                    let storage2_ptr = self.storage2_compressed.lock().as_mut_ptr();
+                    node.storage1 = storage1_ptr.add(index) as *mut u8;
+                    node.storage2 = storage2_ptr.add(index) as *mut u8;
                 } else {
-                    let cum_regret_ptr = self.cum_regret.lock().as_mut_ptr();
-                    let strategy_ptr = self.strategy.lock().as_mut_ptr();
-                    node.cum_regret = cum_regret_ptr.add(index) as *mut u8;
-                    node.strategy = strategy_ptr.add(index) as *mut u8;
+                    let storage1_ptr = self.storage1.lock().as_mut_ptr();
+                    let storage2_ptr = self.storage2.lock().as_mut_ptr();
+                    node.storage1 = storage1_ptr.add(index) as *mut u8;
+                    node.storage2 = storage2_ptr.add(index) as *mut u8;
                 }
             }
         }
@@ -1417,72 +1429,72 @@ impl GameNode for PostFlopNode {
 
     #[inline]
     fn cum_regret(&self) -> &[f32] {
-        unsafe { slice::from_raw_parts(self.cum_regret as *const f32, self.num_elements) }
+        unsafe { slice::from_raw_parts(self.storage1 as *const f32, self.num_elements) }
     }
 
     #[inline]
     fn cum_regret_mut(&mut self) -> &mut [f32] {
-        unsafe { slice::from_raw_parts_mut(self.cum_regret as *mut f32, self.num_elements) }
+        unsafe { slice::from_raw_parts_mut(self.storage1 as *mut f32, self.num_elements) }
     }
 
     #[inline]
     fn strategy(&self) -> &[f32] {
-        unsafe { slice::from_raw_parts(self.strategy as *const f32, self.num_elements) }
+        unsafe { slice::from_raw_parts(self.storage2 as *const f32, self.num_elements) }
     }
 
     #[inline]
     fn strategy_mut(&mut self) -> &mut [f32] {
-        unsafe { slice::from_raw_parts_mut(self.strategy as *mut f32, self.num_elements) }
+        unsafe { slice::from_raw_parts_mut(self.storage2 as *mut f32, self.num_elements) }
     }
 
     #[inline]
     fn cum_regret_compressed(&self) -> &[i16] {
-        unsafe { slice::from_raw_parts(self.cum_regret as *const i16, self.num_elements) }
+        unsafe { slice::from_raw_parts(self.storage1 as *const i16, self.num_elements) }
     }
 
     #[inline]
     fn cum_regret_compressed_mut(&mut self) -> &mut [i16] {
-        unsafe { slice::from_raw_parts_mut(self.cum_regret as *mut i16, self.num_elements) }
+        unsafe { slice::from_raw_parts_mut(self.storage1 as *mut i16, self.num_elements) }
     }
 
     #[inline]
     fn strategy_compressed(&self) -> &[u16] {
-        unsafe { slice::from_raw_parts(self.strategy as *const u16, self.num_elements) }
+        unsafe { slice::from_raw_parts(self.storage2 as *const u16, self.num_elements) }
     }
 
     #[inline]
     fn strategy_compressed_mut(&mut self) -> &mut [u16] {
-        unsafe { slice::from_raw_parts_mut(self.strategy as *mut u16, self.num_elements) }
+        unsafe { slice::from_raw_parts_mut(self.storage2 as *mut u16, self.num_elements) }
     }
 
     #[inline]
     fn cum_regret_scale(&self) -> f32 {
-        self.cum_regret_scale
+        self.scale1
     }
 
     #[inline]
     fn set_cum_regret_scale(&mut self, scale: f32) {
-        self.cum_regret_scale = scale;
+        self.scale1 = scale;
     }
 
     #[inline]
     fn strategy_scale(&self) -> f32 {
-        self.strategy_scale
+        self.scale2
     }
 
     #[inline]
     fn set_strategy_scale(&mut self, scale: f32) {
-        self.strategy_scale = scale;
+        self.scale2 = scale;
     }
 
     #[inline]
     fn equity_scale(&self) -> f32 {
-        self.equity_scale
+        self.scale3
     }
 
     #[inline]
     fn set_equity_scale(&mut self, scale: f32) {
-        self.equity_scale = scale;
+        self.scale3 = scale;
     }
 
     #[inline]
@@ -1514,11 +1526,11 @@ impl Default for PostFlopNode {
             river: NOT_DEALT,
             amount: 0,
             children: Vec::new(),
-            cum_regret: ptr::null_mut(),
-            strategy: ptr::null_mut(),
-            cum_regret_scale: 0.0,
-            strategy_scale: 0.0,
-            equity_scale: 0.0,
+            storage1: ptr::null_mut(),
+            storage2: ptr::null_mut(),
+            scale1: 0.0,
+            scale2: 0.0,
+            scale3: 0.0,
             num_elements: 0,
         }
     }
@@ -1655,8 +1667,7 @@ mod tests {
         };
         let mut game = PostFlopGame::with_config(&config).unwrap();
         game.allocate_memory(false);
-        normalize_strategy(&game);
-        compute_ev_and_equity(&game);
+        finalize(&mut game);
         let ev = get_root_ev(&game) + 30.0;
         let equity = get_root_equity(&game) + 0.5;
         assert!((ev - 30.0).abs() < 1e-4);
@@ -1675,8 +1686,7 @@ mod tests {
         };
         let mut game = PostFlopGame::with_config(&config).unwrap();
         game.allocate_memory(false);
-        normalize_strategy(&game);
-        compute_ev_and_equity(&game);
+        finalize(&mut game);
         let ev = get_root_ev(&game) + 30.0;
         let equity = get_root_equity(&game) + 0.5;
         assert!((ev - 37.5).abs() < 1e-4);
@@ -1695,8 +1705,7 @@ mod tests {
         };
         let mut game = PostFlopGame::with_config(&config).unwrap();
         game.allocate_memory(true);
-        normalize_strategy(&game);
-        compute_ev_and_equity(&game);
+        finalize(&mut game);
         let ev = get_root_ev(&game) + 30.0;
         let equity = get_root_equity(&game) + 0.5;
         assert!((ev - 37.5).abs() < 1e-2);
@@ -1716,8 +1725,7 @@ mod tests {
         };
         let mut game = PostFlopGame::with_config(&config).unwrap();
         game.allocate_memory(false);
-        normalize_strategy(&game);
-        compute_ev_and_equity(&game);
+        finalize(&mut game);
         let ev = get_root_ev(&game) + 30.0;
         let equity = get_root_equity(&game) + 0.5;
         assert!((ev - 37.5).abs() < 1e-4);
@@ -1738,8 +1746,7 @@ mod tests {
         };
         let mut game = PostFlopGame::with_config(&config).unwrap();
         game.allocate_memory(false);
-        normalize_strategy(&game);
-        compute_ev_and_equity(&game);
+        finalize(&mut game);
         let ev = get_root_ev(&game) + 30.0;
         let equity = get_root_equity(&game) + 0.5;
         assert!((ev - 37.5).abs() < 1e-4);
@@ -1759,8 +1766,7 @@ mod tests {
         };
         let mut game = PostFlopGame::with_config(&config).unwrap();
         game.allocate_memory(false);
-        normalize_strategy(&game);
-        compute_ev_and_equity(&game);
+        finalize(&mut game);
         let ev = get_root_ev(&game) + 30.0;
         let equity = get_root_equity(&game) + 0.5;
         assert!((ev - 60.0).abs() < 1e-4);
@@ -1815,8 +1821,7 @@ mod tests {
         );
         game.allocate_memory(false);
 
-        solve(&game, 1000, 180.0 * 0.001, true);
-        compute_ev_and_equity(&game);
+        solve(&mut game, 1000, 180.0 * 0.001, true);
         let ev = get_root_ev(&game) + 90.0;
         let equity = get_root_equity(&game) + 0.5;
 

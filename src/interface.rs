@@ -40,6 +40,12 @@ pub trait Game: Sync {
         true
     }
 
+    /// Returns whether the instance is solved.
+    fn is_solved(&self) -> bool;
+
+    /// Sets the instance to be solved.
+    fn set_solved(&mut self);
+
     /// Returns whether the compression is enabled.
     fn is_compression_enabled(&self) -> bool {
         false
