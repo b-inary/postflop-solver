@@ -8,9 +8,9 @@ use std::ptr;
 use std::slice;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
-#[cfg(feature = "custom_alloc")]
+#[cfg(feature = "custom-alloc")]
 use crate::alloc::*;
-#[cfg(feature = "custom_alloc")]
+#[cfg(feature = "custom-alloc")]
 use std::vec;
 
 #[cfg(not(feature = "holdem-hand-evaluator"))]
@@ -171,7 +171,6 @@ pub enum Action {
     Chance(u8),
 }
 
-#[derive(Clone)]
 struct BuildTreeInfo<'a> {
     last_action: Action,
     last_bet: [i32; 2],
@@ -182,12 +181,7 @@ struct BuildTreeInfo<'a> {
     max_stack_size: &'a [AtomicUsize; 2],
 }
 
-/// The index of player who is out of position.
 const PLAYER_OOP: u16 = 0;
-
-/// The index of player who is in position.
-const PLAYER_IP: u16 = 1;
-
 const PLAYER_CHANCE: u16 = 0xff;
 const PLAYER_MASK: u16 = 0xff;
 const PLAYER_TERMINAL_FLAG: u16 = 0x100;
@@ -196,7 +190,7 @@ const PLAYER_FOLD_FLAG: u16 = 0x300;
 /// Constant representing that the card is not yet dealt.
 pub const NOT_DEALT: u8 = 0xff;
 
-#[cfg(not(feature = "custom_alloc"))]
+#[cfg(not(feature = "custom-alloc"))]
 #[inline]
 fn align_up(size: usize) -> usize {
     size
@@ -315,13 +309,13 @@ impl Game for PostFlopGame {
         else {
             // use 64-bit floating point values
             let num_private_hands = self.num_private_hands(player);
-            #[cfg(feature = "custom_alloc")]
+            #[cfg(feature = "custom-alloc")]
             let mut result_f64 = vec::from_elem_in(0.0, num_private_hands, StackAlloc);
-            #[cfg(feature = "custom_alloc")]
+            #[cfg(feature = "custom-alloc")]
             let mut result_tmp = vec::from_elem_in(0.0, num_private_hands, StackAlloc);
-            #[cfg(not(feature = "custom_alloc"))]
+            #[cfg(not(feature = "custom-alloc"))]
             let mut result_f64 = vec![0.0; num_private_hands];
-            #[cfg(not(feature = "custom_alloc"))]
+            #[cfg(not(feature = "custom-alloc"))]
             let mut result_tmp = vec![0.0; num_private_hands];
 
             let flop = &self.config.flop;
@@ -643,11 +637,11 @@ impl PostFlopGame {
             ));
         }
 
-        if self.config.range[PLAYER_OOP as usize].is_empty() {
+        if self.config.range[0].is_empty() {
             return Err("OOP range is empty".to_string());
         }
 
-        if self.config.range[PLAYER_IP as usize].is_empty() {
+        if self.config.range[1].is_empty() {
             return Err("IP range is empty".to_string());
         }
 
@@ -747,8 +741,8 @@ impl PostFlopGame {
         let mut next_index = 1;
         'outer: for suit2 in 1..4 {
             for suit1 in 0..suit2 {
-                if range[PLAYER_OOP as usize].is_suit_isomorphic(suit1, suit2)
-                    && range[PLAYER_IP as usize].is_suit_isomorphic(suit1, suit2)
+                if range[0].is_suit_isomorphic(suit1, suit2)
+                    && range[1].is_suit_isomorphic(suit1, suit2)
                 {
                     suit_isomorphism[suit2 as usize] = suit_isomorphism[suit1 as usize];
                     continue 'outer;
@@ -1019,7 +1013,7 @@ impl PostFlopGame {
             max_stack_size[1].load(Ordering::Relaxed),
         );
 
-        #[cfg(feature = "custom_alloc")]
+        #[cfg(feature = "custom-alloc")]
         STACK_UNIT_SIZE.store(4 * stack_size, Ordering::Relaxed);
 
         let current_memory_usage = current_memory_usage.load(Ordering::Relaxed);
@@ -1684,13 +1678,14 @@ fn vec_memory_usage<T>(vec: &Vec<T>) -> u64 {
 
 /// Attempts to convert an optionally space-separated string into a sorted flop array.
 ///
+/// Card ID: `"2c"` => `0`, `"2d"` => `1`, `"2h"` => `2`, ..., `"As"` => `51`.
+///
 /// # Examples
 /// ```
 /// use postflop_solver::flop_from_str;
 ///
-/// let flop = flop_from_str("2c 3d 4h");
-///
-/// assert_eq!(flop, Ok([0, 5, 10]));
+/// assert_eq!(flop_from_str("2c3d4h"), Ok([0, 5, 10]));
+/// assert_eq!(flop_from_str("As Ah Ks"), Ok([47, 50, 51]));
 /// ```
 #[inline]
 pub fn flop_from_str(s: &str) -> Result<[u8; 3], String> {
@@ -1715,6 +1710,8 @@ pub fn flop_from_str(s: &str) -> Result<[u8; 3], String> {
 }
 
 /// Attempts to convert a string into a card.
+///
+/// Card ID: `"2c"` => `0`, `"2d"` => `1`, `"2h"` => `2`, ..., `"As"` => `51`.
 ///
 /// # Examples
 /// ```

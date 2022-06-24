@@ -17,7 +17,7 @@ regex = "1.5"
 
 [features]
 default = ["holdem-hand-evaluator", "rayon"]
-custom_alloc = []
+custom-alloc = []
 
 [profile.release]
 lto = "thin"

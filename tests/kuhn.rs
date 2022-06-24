@@ -1,7 +1,7 @@
 extern crate postflop_solver;
 use postflop_solver::*;
 
-#[cfg(feature = "custom_alloc")]
+#[cfg(feature = "custom-alloc")]
 use std::sync::atomic::Ordering;
 
 struct KuhnGame {
@@ -130,7 +130,7 @@ impl KuhnGame {
         };
         Self::build_tree_recursive(&mut root, Action::None);
         Self::allocate_memory_recursive(&mut root);
-        #[cfg(feature = "custom_alloc")]
+        #[cfg(feature = "custom-alloc")]
         STACK_UNIT_SIZE.store(1 << 20, Ordering::Relaxed);
         MutexLike::new(root)
     }

@@ -5,6 +5,7 @@ use crate::sliceop::*;
 type SwapList = [Vec<(usize, usize)>; 2];
 
 /// A solved result interpreter of [`PostFlopGame`] struct.
+#[derive(Clone)]
 pub struct Interpreter<'a> {
     game: &'a PostFlopGame,
     node: *const PostFlopNode,
@@ -72,7 +73,7 @@ impl<'a> Interpreter<'a> {
     /// Creates a new interpreter for the given solved game.
     /// - `ignore_threshold`: the threshold of weight to ignore.
     ///   For example, if `ignore_threshold` is set to 0.001, the hands with weights less than 0.1%
-    ///   are treated as weights of 0.
+    ///   are treated as weights of 0. This value affects the `possible_cards()` method.
     #[inline]
     pub fn new(game: &'a PostFlopGame, ignore_threshold: f32) -> Self {
         if !game.is_solved() {
@@ -152,7 +153,7 @@ impl<'a> Interpreter<'a> {
     /// The returned value is a 64-bit integer.
     /// The `i`-th bit is set to 1 if the card of ID `i` may be dealt.
     ///
-    /// Card ID: 2c2d2h2s => `0-3`, 3c3d3h3s => `4-7`, ..., AcAdAhAs => `48-51`.
+    /// Card ID: `"2c"` => `0`, `"2d"` => `1`, `"2h"` => `2`, ..., `"As"` => `51`.
     pub fn possible_cards(&self) -> u64 {
         if !self.node().is_chance() {
             return 0;
@@ -321,10 +322,8 @@ impl<'a> Interpreter<'a> {
         self.weights_normalized[0].fill(0.0);
         self.weights_normalized[1].fill(0.0);
 
-        let private_hand_cards = [
-            self.game.private_hand_cards(0),
-            self.game.private_hand_cards(1),
-        ];
+        let oop_hands = self.game.private_hand_cards(0);
+        let ip_hands = self.game.private_hand_cards(1);
 
         let mut board_mask: u64 = 0;
         if self.turn != NOT_DEALT {
@@ -334,11 +333,11 @@ impl<'a> Interpreter<'a> {
             board_mask |= 1 << self.river;
         }
 
-        for (i, &(c1, c2)) in private_hand_cards[0].iter().enumerate() {
+        for (i, &(c1, c2)) in oop_hands.iter().enumerate() {
             let oop_mask: u64 = (1 << c1) | (1 << c2);
             let oop_weight = self.weights[0][i];
             if board_mask & oop_mask == 0 && oop_weight > 0.0 {
-                for (j, &(c3, c4)) in private_hand_cards[1].iter().enumerate() {
+                for (j, &(c3, c4)) in ip_hands.iter().enumerate() {
                     let ip_mask: u64 = (1 << c3) | (1 << c4);
                     let ip_weight = self.weights[1][j];
                     if (board_mask | oop_mask) & ip_mask == 0 && ip_weight > 0.0 {
@@ -376,9 +375,15 @@ impl<'a> Interpreter<'a> {
 
     /// Returns the expected values of each private hand of the current player.
     ///
+    /// Panics if the current node is a chance node.
+    ///
     /// After calling the `play()` method, you must call the `cache_normalized_weights()` method
     /// before calling this method.
     pub fn expected_values(&self) -> Vec<f32> {
+        if self.is_chance_node() {
+            panic!("chance node is not allowed");
+        }
+
         if !self.weights_normalized_cached {
             panic!("normalized weights are not cached");
         }
@@ -405,9 +410,15 @@ impl<'a> Interpreter<'a> {
 
     /// Returns the equity of each private hand of the current player.
     ///
+    /// Panics if the current node is a chance node.
+    ///
     /// After calling the `play()` method, you must call the `cache_normalized_weights()` method
     /// before calling this method.
     pub fn equity(&self) -> Vec<f32> {
+        if self.is_chance_node() {
+            panic!("chance node is not allowed");
+        }
+
         if !self.weights_normalized_cached {
             panic!("normalized weights are not cached");
         }
@@ -434,10 +445,16 @@ impl<'a> Interpreter<'a> {
 
     /// Returns the strategy of the current player.
     ///
+    /// Panics if the current node is a chance node.
+    ///
     /// The strategy is a vector of the length of `#(actions) * #(private hands)`.
     /// The probability of `i`-th action with `j`-th private hand is stored in the
     /// `i * #(private hands) + j`-th element.
     pub fn strategy(&mut self) -> Vec<f32> {
+        if self.is_chance_node() {
+            panic!("chance node is not allowed");
+        }
+
         let player = self.current_player();
         let num_actions = self.node().num_actions();
         let num_private_hands = self.game.num_private_hands(player);

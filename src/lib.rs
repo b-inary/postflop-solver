@@ -113,7 +113,7 @@
 //! ```
 //!
 //! # Features
-//! - `custom_alloc`: Uses custom memory allocator in solving process.
+//! - `custom-alloc`: Uses custom memory allocator in solving process.
 //!   It significantly reduces the number of calls of the default allocator,
 //!   so it is recommended to use this feature when the default allocator is not so efficient.
 //!   Disabled by default.
@@ -126,7 +126,7 @@
 //! [holdem-hand-evaluator]: https://github.com/b-inary/holdem-hand-evaluator
 //! [rayon]: https://github.com/rayon-rs/rayon
 
-#![cfg_attr(feature = "custom_alloc", feature(allocator_api))]
+#![cfg_attr(feature = "custom-alloc", feature(allocator_api))]
 
 mod bet_size;
 mod game;
@@ -138,7 +138,7 @@ mod sliceop;
 mod solver;
 mod utility;
 
-#[cfg(feature = "custom_alloc")]
+#[cfg(feature = "custom-alloc")]
 mod alloc;
 
 #[cfg(not(feature = "holdem-hand-evaluator"))]
@@ -153,5 +153,5 @@ pub use range::*;
 pub use solver::*;
 pub use utility::*;
 
-#[cfg(feature = "custom_alloc")]
+#[cfg(feature = "custom-alloc")]
 pub use alloc::*;

@@ -4,9 +4,9 @@ use crate::sliceop::*;
 use crate::utility::*;
 use std::io::{self, Write};
 
-#[cfg(feature = "custom_alloc")]
+#[cfg(feature = "custom-alloc")]
 use crate::alloc::*;
-#[cfg(feature = "custom_alloc")]
+#[cfg(feature = "custom-alloc")]
 use std::{mem, vec};
 
 struct DiscountParams {
@@ -158,27 +158,27 @@ fn solve_recursive<T: Game>(
     let num_private_hands = game.num_private_hands(player);
 
     // allocates memory for storing the counterfactual values
-    #[cfg(feature = "custom_alloc")]
+    #[cfg(feature = "custom-alloc")]
     let cfv_actions = MutexLike::new(vec::from_elem_in(
         0.0,
         num_actions * num_private_hands,
         StackAlloc,
     ));
-    #[cfg(not(feature = "custom_alloc"))]
+    #[cfg(not(feature = "custom-alloc"))]
     let cfv_actions = MutexLike::new(vec![0.0; num_actions * num_private_hands]);
 
     // if the `node` is chance
     if node.is_chance() {
         // use 64-bit floating point values
-        #[cfg(feature = "custom_alloc")]
+        #[cfg(feature = "custom-alloc")]
         let mut result_f64 = vec::from_elem_in(0.0, num_private_hands, StackAlloc);
-        #[cfg(not(feature = "custom_alloc"))]
+        #[cfg(not(feature = "custom-alloc"))]
         let mut result_f64 = vec![0.0; num_private_hands];
 
         // updates the reach probabilities
-        #[cfg(feature = "custom_alloc")]
+        #[cfg(feature = "custom-alloc")]
         let mut cfreach = cfreach.to_vec_in(StackAlloc);
-        #[cfg(not(feature = "custom_alloc"))]
+        #[cfg(not(feature = "custom-alloc"))]
         let mut cfreach = cfreach.to_vec();
         mul_slice_scalar(&mut cfreach, node.chance_factor());
 
@@ -238,13 +238,13 @@ fn solve_recursive<T: Game>(
         };
 
         // updates the reach probabilities
-        #[cfg(feature = "custom_alloc")]
+        #[cfg(feature = "custom-alloc")]
         let mut reach_actions = {
             let mut tmp = Vec::with_capacity_in(strategy.len(), StackAlloc);
             tmp.extend_from_slice(&strategy);
             tmp
         };
-        #[cfg(not(feature = "custom_alloc"))]
+        #[cfg(not(feature = "custom-alloc"))]
         let mut reach_actions = strategy.clone();
         reach_actions.chunks_mut(num_private_hands).for_each(|row| {
             mul_slice(row, reach);
@@ -330,7 +330,7 @@ fn solve_recursive<T: Game>(
             }
         }
 
-        #[cfg(feature = "custom_alloc")]
+        #[cfg(feature = "custom-alloc")]
         {
             // drop in reverse order
             mem::drop(reach_actions);
@@ -379,7 +379,7 @@ fn solve_recursive<T: Game>(
 }
 
 /// Computes the strategy by regret-mathcing algorithm.
-#[cfg(feature = "custom_alloc")]
+#[cfg(feature = "custom-alloc")]
 #[inline]
 fn regret_matching(regret: &[f32], num_actions: usize) -> Vec<f32, StackAlloc> {
     let mut strategy = regret.to_vec_in(StackAlloc);
@@ -401,7 +401,7 @@ fn regret_matching(regret: &[f32], num_actions: usize) -> Vec<f32, StackAlloc> {
 }
 
 /// Computes the strategy by regret-mathcing algorithm.
-#[cfg(not(feature = "custom_alloc"))]
+#[cfg(not(feature = "custom-alloc"))]
 #[inline]
 fn regret_matching(regret: &[f32], num_actions: usize) -> Vec<f32> {
     let mut strategy = regret.to_vec();
@@ -423,7 +423,7 @@ fn regret_matching(regret: &[f32], num_actions: usize) -> Vec<f32> {
 }
 
 /// Computes the strategy by regret-mathcing algorithm.
-#[cfg(feature = "custom_alloc")]
+#[cfg(feature = "custom-alloc")]
 #[inline]
 fn regret_matching_compressed(
     regret: &[i16],
@@ -447,7 +447,7 @@ fn regret_matching_compressed(
 }
 
 /// Computes the strategy by regret-mathcing algorithm.
-#[cfg(not(feature = "custom_alloc"))]
+#[cfg(not(feature = "custom-alloc"))]
 #[inline]
 fn regret_matching_compressed(regret: &[i16], scale: f32, num_actions: usize) -> Vec<f32> {
     let mut strategy = decode_signed_slice_nonnegative(regret, scale);
@@ -467,7 +467,7 @@ fn regret_matching_compressed(regret: &[i16], scale: f32, num_actions: usize) ->
 }
 
 /// Decodes the encoded `i16` slice to the non-negative `f32` slice.
-#[cfg(feature = "custom_alloc")]
+#[cfg(feature = "custom-alloc")]
 #[inline]
 fn decode_signed_slice_nonnegative(slice: &[i16], scale: f32) -> Vec<f32, StackAlloc> {
     let decoder = scale / i16::MAX as f32;
@@ -483,7 +483,7 @@ fn decode_signed_slice_nonnegative(slice: &[i16], scale: f32) -> Vec<f32, StackA
 }
 
 /// Decodes the encoded `i16` slice to the non-negative `f32` slice.
-#[cfg(not(feature = "custom_alloc"))]
+#[cfg(not(feature = "custom-alloc"))]
 #[inline]
 fn decode_signed_slice_nonnegative(slice: &[i16], scale: f32) -> Vec<f32> {
     let decoder = scale / i16::MAX as f32;

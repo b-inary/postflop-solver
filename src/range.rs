@@ -191,13 +191,15 @@ fn suit_to_char(suit: u8) -> Result<char, String> {
 
 /// Attempts to convert a card into a string.
 ///
+/// Card ID: `"2c"` => `0`, `"2d"` => `1`, `"2h"` => `2`, ..., `"As"` => `51`.
+///
 /// # Examples
 /// ```
 /// use postflop_solver::card_to_string;
 ///
 /// assert_eq!(card_to_string(0), Ok("2c".to_string()));
-/// assert_eq!(card_to_string(1), Ok("2d".to_string()));
-/// assert_eq!(card_to_string(2), Ok("2h".to_string()));
+/// assert_eq!(card_to_string(5), Ok("3d".to_string()));
+/// assert_eq!(card_to_string(10), Ok("4h".to_string()));
 /// assert_eq!(card_to_string(51), Ok("As".to_string()));
 /// ```
 #[inline]
@@ -353,7 +355,7 @@ impl Range {
 
     /// Obtains the weight by card indices.
     ///
-    /// Input card ID: 2c2d2h2s => `0-3`, 3c3d3h3s => `4-7`, ..., AcAdAhAs => `48-51`.
+    /// Card ID: `"2c"` => `0`, `"2d"` => `1`, `"2h"` => `2`, ..., `"As"` => `51`.
     #[inline]
     pub fn get_weight_by_cards(&self, card1: u8, card2: u8) -> f32 {
         self.data[card_pair_index(card1, card2)]
@@ -379,7 +381,7 @@ impl Range {
 
     /// Sets the weight by card indices.
     ///
-    /// Input card ID: 2c2d2h2s => `0-3`, 3c3d3h3s => `4-7`, ..., AcAdAhAs => `48-51`.
+    /// Card ID: `"2c"` => `0`, `"2d"` => `1`, `"2h"` => `2`, ..., `"As"` => `51`.
     #[inline]
     pub fn set_weight_by_cards(&mut self, card1: u8, card2: u8, weight: f32) -> Result<(), String> {
         check_card(card1)?;

@@ -18,15 +18,15 @@ jobs:
     - name: Build
       run: |
         cargo build --release
-        cargo +nightly build --release --features custom_alloc
+        cargo +nightly build --release --features custom-alloc
     - name: Run tests
       run: |
         cargo test --release
-        cargo +nightly test --release --features custom_alloc -- --test-threads 1
+        cargo +nightly test --release --features custom-alloc -- --test-threads 1
     - name: Clippy
       run: |
         cargo clippy --release -- -A clippy::needless_range_loop
-        cargo +nightly clippy --release --features custom_alloc -- -A clippy::needless_range_loop
+        cargo +nightly clippy --release --features custom-alloc -- -A clippy::needless_range_loop
     - name: Check formatting
       run: cargo fmt --all --check
     - name: Check documentation

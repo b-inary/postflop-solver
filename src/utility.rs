@@ -2,9 +2,9 @@ use crate::interface::*;
 use crate::mutex_like::*;
 use crate::sliceop::*;
 
-#[cfg(feature = "custom_alloc")]
+#[cfg(feature = "custom-alloc")]
 use crate::alloc::*;
-#[cfg(feature = "custom_alloc")]
+#[cfg(feature = "custom-alloc")]
 use std::vec;
 
 #[cfg(feature = "rayon")]
@@ -29,7 +29,7 @@ pub(crate) fn for_each_child<T: GameNode, OP: Fn(usize) + Sync + Send>(node: &T,
 }
 
 /// Decodes the encoded `u16` slice to the `f32` slice.
-#[cfg(feature = "custom_alloc")]
+#[cfg(feature = "custom-alloc")]
 #[inline]
 fn decode_unsigned_slice(slice: &[u16], scale: f32) -> Vec<f32, StackAlloc> {
     let decoder = scale / u16::MAX as f32;
@@ -45,7 +45,7 @@ fn decode_unsigned_slice(slice: &[u16], scale: f32) -> Vec<f32, StackAlloc> {
 }
 
 /// Decodes the encoded `u16` slice to the `f32` slice.
-#[cfg(not(feature = "custom_alloc"))]
+#[cfg(not(feature = "custom-alloc"))]
 #[inline]
 fn decode_unsigned_slice(slice: &[u16], scale: f32) -> Vec<f32> {
     let decoder = scale / u16::MAX as f32;
@@ -158,9 +158,9 @@ fn normalize_strategy_recursive<T: GameNode>(node: &mut T) {
         let strategy = node.strategy_mut();
         let row_size = strategy.len() / num_actions;
 
-        #[cfg(feature = "custom_alloc")]
+        #[cfg(feature = "custom-alloc")]
         let mut denom = vec::from_elem_in(0.0, row_size, StackAlloc);
-        #[cfg(not(feature = "custom_alloc"))]
+        #[cfg(not(feature = "custom-alloc"))]
         let mut denom = vec![0.0; row_size];
         strategy.chunks(row_size).for_each(|row| {
             add_slice(&mut denom, row);
@@ -188,9 +188,9 @@ fn normalize_strategy_compressed_recursive<T: GameNode>(node: &mut T) {
         let strategy = node.strategy_compressed_mut();
         let row_size = strategy.len() / num_actions;
 
-        #[cfg(feature = "custom_alloc")]
+        #[cfg(feature = "custom-alloc")]
         let mut denom = vec::from_elem_in(0, row_size, StackAlloc);
-        #[cfg(not(feature = "custom_alloc"))]
+        #[cfg(not(feature = "custom-alloc"))]
         let mut denom = vec![0; row_size];
         strategy.chunks(row_size).for_each(|row| {
             denom.iter_mut().zip(row).for_each(|(d, v)| {
@@ -240,39 +240,39 @@ fn compute_ev_and_equity_recursive<T: Game>(
     let num_private_hands = game.num_private_hands(player);
 
     // allocates memory for storing the expected values and equity
-    #[cfg(feature = "custom_alloc")]
+    #[cfg(feature = "custom-alloc")]
     let ev_actions = MutexLike::new(vec::from_elem_in(
         0.0,
         num_actions * num_private_hands,
         StackAlloc,
     ));
-    #[cfg(feature = "custom_alloc")]
+    #[cfg(feature = "custom-alloc")]
     let eq_actions = MutexLike::new(vec::from_elem_in(
         0.0,
         num_actions * num_private_hands,
         StackAlloc,
     ));
-    #[cfg(not(feature = "custom_alloc"))]
+    #[cfg(not(feature = "custom-alloc"))]
     let ev_actions = MutexLike::new(vec![0.0; num_actions * num_private_hands]);
-    #[cfg(not(feature = "custom_alloc"))]
+    #[cfg(not(feature = "custom-alloc"))]
     let eq_actions = MutexLike::new(vec![0.0; num_actions * num_private_hands]);
 
     // chance node
     if node.is_chance() {
         // use 64-bit floating point values
-        #[cfg(feature = "custom_alloc")]
+        #[cfg(feature = "custom-alloc")]
         let mut ev_f64 = vec::from_elem_in(0.0, num_private_hands, StackAlloc);
-        #[cfg(feature = "custom_alloc")]
+        #[cfg(feature = "custom-alloc")]
         let mut eq_f64 = vec::from_elem_in(0.0, num_private_hands, StackAlloc);
-        #[cfg(not(feature = "custom_alloc"))]
+        #[cfg(not(feature = "custom-alloc"))]
         let mut ev_f64 = vec![0.0; num_private_hands];
-        #[cfg(not(feature = "custom_alloc"))]
+        #[cfg(not(feature = "custom-alloc"))]
         let mut eq_f64 = vec![0.0; num_private_hands];
 
         // updates the reach probabilities
-        #[cfg(feature = "custom_alloc")]
+        #[cfg(feature = "custom-alloc")]
         let mut cfreach = cfreach.to_vec_in(StackAlloc);
-        #[cfg(not(feature = "custom_alloc"))]
+        #[cfg(not(feature = "custom-alloc"))]
         let mut cfreach = cfreach.to_vec();
         mul_slice_scalar(&mut cfreach, node.chance_factor());
 
@@ -341,11 +341,11 @@ fn compute_ev_and_equity_recursive<T: Game>(
             let scale = node.strategy_scale();
             decode_unsigned_slice(strategy, scale)
         } else {
-            #[cfg(feature = "custom_alloc")]
+            #[cfg(feature = "custom-alloc")]
             {
                 node.strategy().to_vec_in(StackAlloc)
             }
-            #[cfg(not(feature = "custom_alloc"))]
+            #[cfg(not(feature = "custom-alloc"))]
             {
                 node.strategy().to_vec()
             }
@@ -401,11 +401,11 @@ fn compute_ev_and_equity_recursive<T: Game>(
             let scale = node.strategy_scale();
             decode_unsigned_slice(strategy, scale)
         } else {
-            #[cfg(feature = "custom_alloc")]
+            #[cfg(feature = "custom-alloc")]
             {
                 node.strategy().to_vec_in(StackAlloc)
             }
-            #[cfg(not(feature = "custom_alloc"))]
+            #[cfg(not(feature = "custom-alloc"))]
             {
                 node.strategy().to_vec()
             }
@@ -460,27 +460,27 @@ fn compute_best_cfv_recursive<T: Game>(
     let num_private_hands = game.num_private_hands(player);
 
     // allocates memory for storing the counterfactual values
-    #[cfg(feature = "custom_alloc")]
+    #[cfg(feature = "custom-alloc")]
     let cfv_actions = MutexLike::new(vec::from_elem_in(
         0.0,
         num_actions * num_private_hands,
         StackAlloc,
     ));
-    #[cfg(not(feature = "custom_alloc"))]
+    #[cfg(not(feature = "custom-alloc"))]
     let cfv_actions = MutexLike::new(vec![0.0; num_actions * num_private_hands]);
 
     // chance node
     if node.is_chance() {
         // use 64-bit floating point values
-        #[cfg(feature = "custom_alloc")]
+        #[cfg(feature = "custom-alloc")]
         let mut result_f64 = vec::from_elem_in(0.0, num_private_hands, StackAlloc);
-        #[cfg(not(feature = "custom_alloc"))]
+        #[cfg(not(feature = "custom-alloc"))]
         let mut result_f64 = vec![0.0; num_private_hands];
 
         // updates the reach probabilities
-        #[cfg(feature = "custom_alloc")]
+        #[cfg(feature = "custom-alloc")]
         let mut cfreach = cfreach.to_vec_in(StackAlloc);
-        #[cfg(not(feature = "custom_alloc"))]
+        #[cfg(not(feature = "custom-alloc"))]
         let mut cfreach = cfreach.to_vec();
         mul_slice_scalar(&mut cfreach, node.chance_factor());
 
@@ -553,11 +553,11 @@ fn compute_best_cfv_recursive<T: Game>(
             let scale = node.strategy_scale();
             decode_unsigned_slice(strategy, scale)
         } else {
-            #[cfg(feature = "custom_alloc")]
+            #[cfg(feature = "custom-alloc")]
             {
                 node.strategy().to_vec_in(StackAlloc)
             }
-            #[cfg(not(feature = "custom_alloc"))]
+            #[cfg(not(feature = "custom-alloc"))]
             {
                 node.strategy().to_vec()
             }
@@ -566,9 +566,9 @@ fn compute_best_cfv_recursive<T: Game>(
         let row_size = cfreach_actions.len() / node.num_actions();
 
         // normalizes the reach probabilities
-        #[cfg(feature = "custom_alloc")]
+        #[cfg(feature = "custom-alloc")]
         let mut denom = vec::from_elem_in(0.0, row_size, StackAlloc);
-        #[cfg(not(feature = "custom_alloc"))]
+        #[cfg(not(feature = "custom-alloc"))]
         let mut denom = vec![0.0; row_size];
         cfreach_actions.chunks(row_size).for_each(|row| {
             add_slice(&mut denom, row);
