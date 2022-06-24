@@ -4,6 +4,8 @@ An open-source postflop solver written in Rust
 
 Web interface repository: https://github.com/b-inary/wasm-postflop
 
+Documentation: https://b-inary.github.io/postflop_solver/postflop_solver/
+
 ## Usage
 
 `Cargo.toml`
