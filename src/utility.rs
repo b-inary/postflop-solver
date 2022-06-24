@@ -13,7 +13,7 @@ use rayon::prelude::*;
 /// Executes `op` for each child potentially in parallel.
 #[cfg(feature = "rayon")]
 #[inline]
-pub fn for_each_child<T: GameNode, OP: Fn(usize) + Sync + Send>(node: &T, op: OP) {
+pub(crate) fn for_each_child<T: GameNode, OP: Fn(usize) + Sync + Send>(node: &T, op: OP) {
     if node.enable_parallelization() {
         node.actions().into_par_iter().for_each(op);
     } else {
@@ -24,14 +24,14 @@ pub fn for_each_child<T: GameNode, OP: Fn(usize) + Sync + Send>(node: &T, op: OP
 /// Executes `op` for each child.
 #[cfg(not(feature = "rayon"))]
 #[inline]
-pub fn for_each_child<T: GameNode, OP: Fn(usize) + Sync + Send>(node: &T, op: OP) {
+pub(crate) fn for_each_child<T: GameNode, OP: Fn(usize) + Sync + Send>(node: &T, op: OP) {
     node.actions().into_iter().for_each(op);
 }
 
 /// Decodes the encoded `u16` slice to the `f32` slice.
 #[cfg(feature = "custom_alloc")]
 #[inline]
-pub fn decode_unsigned_slice(slice: &[u16], scale: f32) -> Vec<f32, StackAlloc> {
+fn decode_unsigned_slice(slice: &[u16], scale: f32) -> Vec<f32, StackAlloc> {
     let decoder = scale / u16::MAX as f32;
     let mut result = Vec::<f32, StackAlloc>::with_capacity_in(slice.len(), StackAlloc);
     let ptr = result.as_mut_ptr();
@@ -47,7 +47,7 @@ pub fn decode_unsigned_slice(slice: &[u16], scale: f32) -> Vec<f32, StackAlloc> 
 /// Decodes the encoded `u16` slice to the `f32` slice.
 #[cfg(not(feature = "custom_alloc"))]
 #[inline]
-pub fn decode_unsigned_slice(slice: &[u16], scale: f32) -> Vec<f32> {
+fn decode_unsigned_slice(slice: &[u16], scale: f32) -> Vec<f32> {
     let decoder = scale / u16::MAX as f32;
     let mut result = Vec::<f32>::with_capacity(slice.len());
     let ptr = result.as_mut_ptr();
@@ -60,41 +60,9 @@ pub fn decode_unsigned_slice(slice: &[u16], scale: f32) -> Vec<f32> {
     result
 }
 
-/// Decodes the encoded `i16` slice to the non-negative `f32` slice.
-#[cfg(feature = "custom_alloc")]
+/// Encodes the `f32` slice to the `i16` slice, and returns the scale.
 #[inline]
-pub fn decode_signed_slice(slice: &[i16], scale: f32) -> Vec<f32, StackAlloc> {
-    let decoder = scale / i16::MAX as f32;
-    let mut result = Vec::<f32, StackAlloc>::with_capacity_in(slice.len(), StackAlloc);
-    let ptr = result.as_mut_ptr();
-    unsafe {
-        for i in 0..slice.len() {
-            *ptr.add(i) = (*slice.get_unchecked(i)).max(0) as f32 * decoder;
-        }
-        result.set_len(slice.len());
-    }
-    result
-}
-
-/// Decodes the encoded `i16` slice to the non-negative `f32` slice.
-#[cfg(not(feature = "custom_alloc"))]
-#[inline]
-pub fn decode_signed_slice(slice: &[i16], scale: f32) -> Vec<f32> {
-    let decoder = scale / i16::MAX as f32;
-    let mut result = Vec::<f32>::with_capacity(slice.len());
-    let ptr = result.as_mut_ptr();
-    unsafe {
-        for i in 0..slice.len() {
-            *ptr.add(i) = (*slice.get_unchecked(i)).max(0) as f32 * decoder;
-        }
-        result.set_len(slice.len());
-    }
-    result
-}
-
-/// Encodes the `f32` slice to the `i16` slice.
-#[inline]
-pub fn encode_signed_slice(dst: &mut [i16], slice: &[f32]) -> f32 {
+fn encode_signed_slice(dst: &mut [i16], slice: &[f32]) -> f32 {
     let scale = slice.iter().fold(0.0f32, |m, v| v.abs().max(m));
     let encoder = i16::MAX as f32 / scale;
     dst.iter_mut()
@@ -141,80 +109,15 @@ pub fn finalize<T: Game>(game: &mut T) {
     game.set_solved();
 }
 
-/// Computes the expected value of the root node.
-#[inline]
-pub fn get_root_ev<T: Game>(game: &T) -> f32 {
-    if !game.is_ready() {
-        panic!("the game is not ready");
-    }
-
-    if !game.is_solved() {
-        panic!("the game is not solved");
-    }
-
-    let root = game.root();
-    let num_private_hands = game.num_private_hands(root.player());
-    let get_sum = |evs: &[f32]| evs.iter().fold(0.0, |sum, v| sum + *v as f64) as f32;
-
-    if game.is_compression_enabled() {
-        let slice = row(root.cum_regret_compressed(), 0, num_private_hands);
-        let decoder = root.cum_regret_scale() / i16::MAX as f32;
-        let vec = slice
-            .iter()
-            .map(|&v| v as f32 * decoder)
-            .collect::<Vec<_>>();
-        get_sum(&vec)
-    } else {
-        get_sum(row(root.cum_regret(), 0, num_private_hands))
-    }
-}
-
-/// Computes the equity of the root node.
-#[inline]
-pub fn get_root_equity<T: Game>(game: &T) -> f32 {
-    if !game.is_ready() {
-        panic!("the game is not ready");
-    }
-
-    if !game.is_solved() {
-        panic!("the game is not solved");
-    }
-
-    let root = game.root();
-    let num_actions = root.num_actions();
-    let num_private_hands = game.num_private_hands(root.player());
-    let get_sum = |eqs: &[f32]| eqs.iter().fold(0.0, |sum, v| sum + *v as f64) as f32;
-
-    if game.is_compression_enabled() {
-        let decoder = root.equity_scale() / i16::MAX as f32;
-        let vec = if num_actions == 1 {
-            root.strategy_compressed()
-                .iter()
-                .map(|&v| v as i16 as f32 * decoder)
-                .collect::<Vec<_>>()
-        } else {
-            row(root.cum_regret_compressed(), 1, num_private_hands)
-                .iter()
-                .map(|&v| v as f32 * decoder)
-                .collect::<Vec<_>>()
-        };
-        get_sum(&vec)
-    } else if num_actions == 1 {
-        get_sum(root.strategy())
-    } else {
-        get_sum(row(root.cum_regret(), 1, num_private_hands))
-    }
-}
-
-/// Computes the exploitability of the strategy.
+/// Computes the exploitability of the current strategy.
 #[inline]
 pub fn compute_exploitability<T: Game>(game: &T) -> f32 {
     if !game.is_ready() {
         panic!("the game is not ready");
     }
 
-    if !game.is_solved() {
-        panic!("the game is not solved");
+    if game.is_solved() {
+        panic!("the game is already solved");
     }
 
     let mut cfv = [
@@ -476,40 +379,21 @@ fn compute_ev_and_equity_recursive<T: Game>(
             add_slice(eq, row);
         });
 
-        // save to `cum_regret` field (and `strategy` field if there is only one action)
+        // save the expected values and equity
         if game.is_compression_enabled() {
-            let ev_scale = encode_signed_slice(node.cum_regret_compressed_mut(), ev);
-            let eq_scale = if num_actions == 1 {
-                let eq_scale = eq.iter().fold(0.0f32, |m, v| v.abs().max(m));
-                let encoder = i16::MAX as f32 / eq_scale;
-                node.strategy_compressed_mut()
-                    .iter_mut()
-                    .zip(eq)
-                    .for_each(|(l, r)| {
-                        *l = (*r * encoder).round() as i16 as u16;
-                    });
-                eq_scale
-            } else {
-                encode_signed_slice(
-                    row_mut(node.cum_regret_compressed_mut(), 1, num_private_hands),
-                    eq,
-                )
-            };
+            let ev_scale = encode_signed_slice(node.expected_values_compressed_mut(), ev);
+            let eq_scale = encode_signed_slice(node.equity_compressed_mut(), eq);
             node.set_cum_regret_scale(ev_scale);
             node.set_equity_scale(eq_scale);
         } else {
-            row_mut(node.cum_regret_mut(), 0, num_private_hands).clone_from_slice(ev);
-            if num_actions == 1 {
-                node.strategy_mut().clone_from_slice(eq)
-            } else {
-                row_mut(node.cum_regret_mut(), 1, num_private_hands).clone_from_slice(eq);
-            }
+            node.expected_values_mut().copy_from_slice(ev);
+            node.equity_mut().copy_from_slice(eq);
         }
     }
     // opponent node
     else if num_actions == 1 {
         // do not use `strategy` field when there is only one action
-        // (because it may be overwritten to the equity)
+        // (because the equity and the strategy may share the same storage)
         compute_ev_and_equity_recursive(ev, eq, game, &mut node.play(0), player, reach, cfreach);
     } else {
         let mut cfreach_actions = if game.is_compression_enabled() {

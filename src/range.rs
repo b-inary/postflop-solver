@@ -4,7 +4,7 @@ use std::fmt::Write;
 use std::mem;
 use std::str::FromStr;
 
-/// A struct representing a player's 13x13 range.
+/// A struct representing a player's range.
 ///
 /// # Examples
 /// ```
@@ -29,7 +29,7 @@ pub struct Range {
     data: [f32; 52 * 51 / 2],
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum Suitedness {
     Suited,
     Offsuit,
@@ -51,17 +51,9 @@ static TRIM_REGEX: Lazy<Regex> = Lazy::new(|| Regex::new(r"\s*([-:,])\s*").unwra
 
 /// Returns an index of the given card pair.
 ///
-/// Input card ID: 2c2d2h2s => `0-3`, 3c3d3h3s => `4-7`, ..., AcAdAhAs => `48-51`.
-///
-/// # Examples
-/// ```
-/// use postflop_solver::*;
-///
-/// assert_eq!(card_pair_index(0, 1), 0);       // '2c2d' is the first card pair
-/// assert_eq!(card_pair_index(50, 51), 1325);  // 'AhAs' is the last card pair
-/// ```
+/// `"2d2c"` => `0`, `"2h2c"` => `1`, ..., `"AsAh"` => `1325`.
 #[inline]
-pub fn card_pair_index(mut card1: u8, mut card2: u8) -> usize {
+pub(crate) fn card_pair_index(mut card1: u8, mut card2: u8) -> usize {
     if card1 > card2 {
         mem::swap(&mut card1, &mut card2);
     }
@@ -141,7 +133,7 @@ fn indices_with_suitedness(rank1: u8, rank2: u8, suitedness: Suitedness) -> Vec<
 ///
 /// `'A'` => `12`, `'K'` => `11`, ..., `'2'` => `0`.
 #[inline]
-pub fn char_to_rank(c: char) -> Result<u8, String> {
+fn char_to_rank(c: char) -> Result<u8, String> {
     match c {
         'A' => Ok(12),
         'K' => Ok(11),
@@ -157,7 +149,7 @@ pub fn char_to_rank(c: char) -> Result<u8, String> {
 ///
 /// `'c'` => `0`, `'d'` => `1`, `'h'` => `2`, `'s'` => `3`.
 #[inline]
-pub fn char_to_suit(c: char) -> Result<u8, String> {
+fn char_to_suit(c: char) -> Result<u8, String> {
     match c {
         'c' => Ok(0),
         'd' => Ok(1),
@@ -171,7 +163,7 @@ pub fn char_to_suit(c: char) -> Result<u8, String> {
 ///
 /// `12` => `'A'`, `11` => `'K'`, ..., `0` => `'2'`.
 #[inline]
-pub fn rank_to_char(rank: u8) -> Result<char, String> {
+fn rank_to_char(rank: u8) -> Result<char, String> {
     match rank {
         12 => Ok('A'),
         11 => Ok('K'),
@@ -187,7 +179,7 @@ pub fn rank_to_char(rank: u8) -> Result<char, String> {
 ///
 /// `0` => `'c'`, `1` => `'d'`, `2` => `'h'`, `3` => `'s'`.
 #[inline]
-pub fn suit_to_char(suit: u8) -> Result<char, String> {
+fn suit_to_char(suit: u8) -> Result<char, String> {
     match suit {
         0 => Ok('c'),
         1 => Ok('d'),
@@ -195,6 +187,24 @@ pub fn suit_to_char(suit: u8) -> Result<char, String> {
         3 => Ok('s'),
         _ => Err(format!("invalid input: {suit}")),
     }
+}
+
+/// Attempts to convert a card into a string.
+///
+/// # Examples
+/// ```
+/// use postflop_solver::card_to_string;
+///
+/// assert_eq!(card_to_string(0), Ok("2c".to_string()));
+/// assert_eq!(card_to_string(1), Ok("2d".to_string()));
+/// assert_eq!(card_to_string(2), Ok("2h".to_string()));
+/// assert_eq!(card_to_string(51), Ok("As".to_string()));
+/// ```
+#[inline]
+pub fn card_to_string(card: u8) -> Result<String, String> {
+    let rank = card >> 2;
+    let suit = card & 3;
+    Ok(format!("{}{}", rank_to_char(rank)?, suit_to_char(suit)?))
 }
 
 #[inline]

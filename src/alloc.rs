@@ -7,14 +7,14 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 const ALIGNMENT: usize = 16;
 
 #[inline]
-pub fn align_up(size: usize) -> usize {
+pub(crate) fn align_up(size: usize) -> usize {
     let mask = ALIGNMENT - 1;
     (size + mask) & !mask
 }
 
 pub static STACK_UNIT_SIZE: AtomicUsize = AtomicUsize::new(0);
 
-pub struct StackAlloc;
+pub(crate) struct StackAlloc;
 
 struct StackAllocData {
     unit_capacity: usize,
@@ -49,6 +49,9 @@ impl StackAllocData {
 
     #[inline]
     fn free(&mut self) {
+        if self.index != 0 || self.base.first() != self.current.first() {
+            panic!("freeing error");
+        }
         let layout = Layout::from_size_align(self.unit_capacity, ALIGNMENT).unwrap();
         for b in &self.base {
             unsafe { alloc::dealloc(*b as *mut u8, layout) };

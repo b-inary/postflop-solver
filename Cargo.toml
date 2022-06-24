@@ -3,6 +3,8 @@ name = "postflop-solver"
 version = "0.1.0"
 authors = ["Wataru Inariba"]
 edition = "2021"
+description = "An open-source postflop solver for Texas hold'em poker"
+repository = "https://github.com/b-inary/postflop-solver"
 license = "AGPL-3.0-or-later"
 
 [dependencies]

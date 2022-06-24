@@ -24,7 +24,7 @@ struct StrengthItem {
     index: usize,
 }
 
-type SwapList = Vec<(usize, usize)>;
+type SwapList = [Vec<(usize, usize)>; 2];
 
 /// A struct representing a postflop game.
 #[derive(Default)]
@@ -40,11 +40,11 @@ pub struct PostFlopGame {
     same_hand_index: [Vec<Option<usize>>; 2],
     hand_strength: Vec<[Vec<StrengthItem>; 2]>,
     turn_isomorphism: Vec<usize>,
-    turn_isomorphism_card: Vec<u8>,
-    turn_isomorphism_swap: [[SwapList; 2]; 4],
+    turn_isomorphism_cards: Vec<u8>,
+    turn_isomorphism_swap: [SwapList; 4],
     river_isomorphism: Vec<Vec<usize>>,
-    river_isomorphism_card: Vec<Vec<u8>>,
-    river_isomorphism_swap: Vec<[[SwapList; 2]; 4]>,
+    river_isomorphism_cards: Vec<Vec<u8>>,
+    river_isomorphism_swap: Vec<[SwapList; 4]>,
     is_memory_allocated: bool,
     is_compression_enabled: bool,
     num_storage_elements: u64,
@@ -84,20 +84,26 @@ unsafe impl Sync for PostFlopNode {}
 /// ```
 /// use postflop_solver::*;
 ///
+/// let oop_range = "66+,A8s+,A5s-A4s,AJo+,K9s+,KQo,QTs+,JTs,96s+,85s+,75s+,65s,54s";
+/// let ip_range = "QQ-22,AQs-A2s,ATo+,K5s+,KJo+,Q8s+,J8s+,T7s+,96s+,86s+,75s+,64s+,53s+";
 /// let bet_sizes = BetSizeCandidates::try_from(("50%", "50%")).unwrap();
 ///
 /// let config = GameConfig {
 ///     flop: flop_from_str("Td9d6h").unwrap(),
-///     starting_pot: 60,
-///     effective_stack: 970,
-///     range: [Range::ones(), Range::ones()],
+///     turn: NOT_DEALT, // or `card_from_str("As").unwrap()`
+///     river: NOT_DEALT,
+///     starting_pot: 200,
+///     effective_stack: 900,
+///     range: [oop_range.parse().unwrap(), ip_range.parse().unwrap()],
 ///     flop_bet_sizes: [bet_sizes.clone(), bet_sizes.clone()],
 ///     turn_bet_sizes: [bet_sizes.clone(), bet_sizes.clone()],
 ///     river_bet_sizes: [bet_sizes.clone(), bet_sizes.clone()],
-///     ..Default::default()
+///     add_all_in_threshold: 1.2,
+///     force_all_in_threshold: 0.1,
+///     adjust_last_two_bet_sizes: true,
 /// };
 /// ```
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct GameConfig {
     /// Flop cards: each card must be unique and in range [`0`, `52`).
     pub flop: [u8; 3],
@@ -137,20 +143,35 @@ pub struct GameConfig {
     pub adjust_last_two_bet_sizes: bool,
 }
 
-/// Possible actions in a postflop game.
+/// Available actions in a postflop game.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Action {
+    /// Only used for the previous action of the root node.
     None,
+
+    /// Fold action.
     Fold,
+
+    /// Check action.
     Check,
+
+    /// Call action.
     Call,
+
+    /// Bet action with a specified amount.
     Bet(i32),
+
+    /// Raise action with a specified amount.
     Raise(i32),
+
+    /// All-in action with a specified amount.
     AllIn(i32),
+
+    /// Chance action with a card ID (in range [`0`, `52`)).
     Chance(u8),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 struct BuildTreeInfo<'a> {
     last_action: Action,
     last_bet: [i32; 2],
@@ -172,7 +193,7 @@ const PLAYER_MASK: u16 = 0xff;
 const PLAYER_TERMINAL_FLAG: u16 = 0x100;
 const PLAYER_FOLD_FLAG: u16 = 0x300;
 
-/// Constant representing the card not dealt.
+/// Constant representing that the card is not yet dealt.
 pub const NOT_DEALT: u8 = 0xff;
 
 #[cfg(not(feature = "custom_alloc"))]
@@ -366,10 +387,10 @@ impl Game for PostFlopGame {
     #[inline]
     fn isomorphic_swap(&self, node: &Self::Node, index: usize) -> &[Vec<(usize, usize)>; 2] {
         if node.turn == NOT_DEALT {
-            &self.turn_isomorphism_swap[self.turn_isomorphism_card[index] as usize & 3]
+            &self.turn_isomorphism_swap[self.turn_isomorphism_cards[index] as usize & 3]
         } else {
             &self.river_isomorphism_swap[node.turn as usize]
-                [self.river_isomorphism_card[node.turn as usize][index] as usize & 3]
+                [self.river_isomorphism_cards[node.turn as usize][index] as usize & 3]
         }
     }
 
@@ -395,7 +416,7 @@ impl Game for PostFlopGame {
 }
 
 impl PostFlopGame {
-    /// Constructs a new empty [`PostFlopGame`] (needs `update_config`).
+    /// Constructs a new empty [`PostFlopGame`] (needs `update_config()` before solving).
     #[inline]
     pub fn new() -> Self {
         Self::default()
@@ -460,14 +481,20 @@ impl PostFlopGame {
         self.allocate_memory_recursive(&mut self.root(), &counter);
     }
 
-    /// Returns card list of isomorphic chances.
+    /// Returns a card list of isomorphic chances.
     #[inline]
-    pub fn isomorphic_card(&self, node: &PostFlopNode) -> &[u8] {
+    pub(crate) fn isomorphic_cards(&self, node: &PostFlopNode) -> &[u8] {
         if node.turn == NOT_DEALT {
-            &self.turn_isomorphism_card
+            &self.turn_isomorphism_cards
         } else {
-            &self.river_isomorphism_card[node.turn as usize]
+            &self.river_isomorphism_cards[node.turn as usize]
         }
+    }
+
+    /// Returns the number of combinations of possible private hands.
+    #[inline]
+    pub(crate) fn num_combinations(&self) -> f64 {
+        1.0 / self.num_combinations_inv
     }
 
     /// Computes the counterfactual values of the showdown.
@@ -742,7 +769,7 @@ impl PostFlopGame {
         }
 
         self.turn_isomorphism.clear();
-        self.turn_isomorphism_card.clear();
+        self.turn_isomorphism_cards.clear();
         self.turn_isomorphism_swap.iter_mut().for_each(|x| {
             x[0].clear();
             x[1].clear();
@@ -807,7 +834,7 @@ impl PostFlopGame {
                 if let Some(replace_suit) = isomorphic_suit[suit as usize] {
                     let replace_card = card - suit + replace_suit;
                     self.turn_isomorphism.push(indices[replace_card as usize]);
-                    self.turn_isomorphism_card.push(card);
+                    self.turn_isomorphism_cards.push(card);
                 } else {
                     indices[card as usize] = counter;
                     counter += 1;
@@ -816,14 +843,14 @@ impl PostFlopGame {
         }
 
         self.river_isomorphism.clear();
-        self.river_isomorphism_card.clear();
+        self.river_isomorphism_cards.clear();
         self.river_isomorphism_swap.clear();
 
         // river isomorphism
         if self.config.river == NOT_DEALT {
             for turn in 0..52 {
                 self.river_isomorphism.push(Vec::new());
-                self.river_isomorphism_card.push(Vec::new());
+                self.river_isomorphism_cards.push(Vec::new());
                 self.river_isomorphism_swap.push(Default::default());
 
                 if (1 << turn) & flop_mask != 0
@@ -833,7 +860,7 @@ impl PostFlopGame {
                 }
 
                 let river_isomorphism = self.river_isomorphism.last_mut().unwrap();
-                let river_isomorphism_card = self.river_isomorphism_card.last_mut().unwrap();
+                let river_isomorphism_cards = self.river_isomorphism_cards.last_mut().unwrap();
                 let river_isomorphism_swap = self.river_isomorphism_swap.last_mut().unwrap();
 
                 let turn_mask = flop_mask | (1 << turn);
@@ -898,7 +925,7 @@ impl PostFlopGame {
                     if let Some(replace_suit) = isomorphic_suit[suit as usize] {
                         let replace_card = card - suit + replace_suit;
                         river_isomorphism.push(indices[replace_card as usize]);
-                        river_isomorphism_card.push(card);
+                        river_isomorphism_cards.push(card);
                     } else {
                         indices[card as usize] = counter;
                         counter += 1;
@@ -1129,7 +1156,7 @@ impl PostFlopGame {
             node.children.reserve(49);
 
             for card in 0..52 {
-                if (1 << card) & flop_mask == 0 && !self.turn_isomorphism_card.contains(&card) {
+                if (1 << card) & flop_mask == 0 && !self.turn_isomorphism_cards.contains(&card) {
                     node.children.push((
                         Action::Chance(card),
                         MutexLike::new(PostFlopNode {
@@ -1156,7 +1183,7 @@ impl PostFlopGame {
 
             for card in 0..52 {
                 if (1 << card) & turn_mask == 0
-                    && !self.river_isomorphism_card[node.turn as usize].contains(&card)
+                    && !self.river_isomorphism_cards[node.turn as usize].contains(&card)
                 {
                     node.children.push((
                         Action::Chance(card),
@@ -1448,6 +1475,48 @@ impl GameNode for PostFlopNode {
     }
 
     #[inline]
+    fn expected_values(&self) -> &[f32] {
+        let num_private_hands = self.num_elements / self.num_actions();
+        unsafe { slice::from_raw_parts(self.storage1 as *const f32, num_private_hands) }
+    }
+
+    #[inline]
+    fn expected_values_mut(&mut self) -> &mut [f32] {
+        let num_private_hands = self.num_elements / self.num_actions();
+        unsafe { slice::from_raw_parts_mut(self.storage1 as *mut f32, num_private_hands) }
+    }
+
+    #[inline]
+    fn equity(&self) -> &[f32] {
+        let num_private_hands = self.num_elements / self.num_actions();
+        if self.num_actions() == 1 {
+            unsafe { slice::from_raw_parts(self.storage2 as *const f32, num_private_hands) }
+        } else {
+            unsafe {
+                slice::from_raw_parts(
+                    (self.storage1 as *const f32).add(num_private_hands),
+                    num_private_hands,
+                )
+            }
+        }
+    }
+
+    #[inline]
+    fn equity_mut(&mut self) -> &mut [f32] {
+        let num_private_hands = self.num_elements / self.num_actions();
+        if self.num_actions() == 1 {
+            unsafe { slice::from_raw_parts_mut(self.storage2 as *mut f32, num_private_hands) }
+        } else {
+            unsafe {
+                slice::from_raw_parts_mut(
+                    (self.storage1 as *mut f32).add(num_private_hands),
+                    num_private_hands,
+                )
+            }
+        }
+    }
+
+    #[inline]
     fn cum_regret_compressed(&self) -> &[i16] {
         unsafe { slice::from_raw_parts(self.storage1 as *const i16, self.num_elements) }
     }
@@ -1465,6 +1534,48 @@ impl GameNode for PostFlopNode {
     #[inline]
     fn strategy_compressed_mut(&mut self) -> &mut [u16] {
         unsafe { slice::from_raw_parts_mut(self.storage2 as *mut u16, self.num_elements) }
+    }
+
+    #[inline]
+    fn expected_values_compressed(&self) -> &[i16] {
+        let num_private_hands = self.num_elements / self.num_actions();
+        unsafe { slice::from_raw_parts(self.storage1 as *const i16, num_private_hands) }
+    }
+
+    #[inline]
+    fn expected_values_compressed_mut(&mut self) -> &mut [i16] {
+        let num_private_hands = self.num_elements / self.num_actions();
+        unsafe { slice::from_raw_parts_mut(self.storage1 as *mut i16, num_private_hands) }
+    }
+
+    #[inline]
+    fn equity_compressed(&self) -> &[i16] {
+        let num_private_hands = self.num_elements / self.num_actions();
+        if self.num_actions() == 1 {
+            unsafe { slice::from_raw_parts(self.storage2 as *const i16, num_private_hands) }
+        } else {
+            unsafe {
+                slice::from_raw_parts(
+                    (self.storage1 as *const i16).add(num_private_hands),
+                    num_private_hands,
+                )
+            }
+        }
+    }
+
+    #[inline]
+    fn equity_compressed_mut(&mut self) -> &mut [i16] {
+        let num_private_hands = self.num_elements / self.num_actions();
+        if self.num_actions() == 1 {
+            unsafe { slice::from_raw_parts_mut(self.storage2 as *mut i16, num_private_hands) }
+        } else {
+            unsafe {
+                slice::from_raw_parts_mut(
+                    (self.storage1 as *mut i16).add(num_private_hands),
+                    num_private_hands,
+                )
+            }
+        }
     }
 
     #[inline]
@@ -1488,6 +1599,16 @@ impl GameNode for PostFlopNode {
     }
 
     #[inline]
+    fn expected_value_scale(&self) -> f32 {
+        self.scale1
+    }
+
+    #[inline]
+    fn set_expected_value_scale(&mut self, scale: f32) {
+        self.scale1 = scale;
+    }
+
+    #[inline]
     fn equity_scale(&self) -> f32 {
         self.scale3
     }
@@ -1504,15 +1625,15 @@ impl GameNode for PostFlopNode {
 }
 
 impl PostFlopNode {
-    /// Returns the betted amount.
+    /// Returns the betted amount of the current round.
     #[inline]
-    pub fn amount(&self) -> i32 {
+    pub(crate) fn amount(&self) -> i32 {
         self.amount
     }
 
-    /// Returns the possible actions for the current player.
+    /// Returns the available actions.
     #[inline]
-    pub fn get_actions(&self) -> Vec<Action> {
+    pub(crate) fn available_actions(&self) -> Vec<Action> {
         self.children.iter().map(|(action, _)| *action).collect()
     }
 }
@@ -1645,6 +1766,7 @@ fn card_from_chars<T: Iterator<Item = char>>(chars: &mut T) -> Result<u8, String
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::interpreter::*;
     use crate::solver::*;
     use crate::utility::*;
 
@@ -1665,13 +1787,20 @@ mod tests {
             range: [Range::ones(); 2],
             ..Default::default()
         };
+
         let mut game = PostFlopGame::with_config(&config).unwrap();
         game.allocate_memory(false);
         finalize(&mut game);
-        let ev = get_root_ev(&game) + 30.0;
-        let equity = get_root_equity(&game) + 0.5;
-        assert!((ev - 30.0).abs() < 1e-4);
-        assert!((equity - 0.5).abs() < 1e-5);
+
+        let mut interpreter = Interpreter::new(&game, 0.0);
+        interpreter.cache_normalized_weights();
+
+        let weights = interpreter.normalized_weights(interpreter.current_player());
+        let root_ev = compute_average(&interpreter.expected_values(), weights);
+        let root_equity = compute_average(&interpreter.equity(), weights);
+
+        assert!((root_ev - 30.0).abs() < 1e-4);
+        assert!((root_equity - 0.5).abs() < 1e-5);
     }
 
     #[test]
@@ -1684,13 +1813,20 @@ mod tests {
             river_bet_sizes: [("50%", "").try_into().unwrap(), Default::default()],
             ..Default::default()
         };
+
         let mut game = PostFlopGame::with_config(&config).unwrap();
         game.allocate_memory(false);
         finalize(&mut game);
-        let ev = get_root_ev(&game) + 30.0;
-        let equity = get_root_equity(&game) + 0.5;
-        assert!((ev - 37.5).abs() < 1e-4);
-        assert!((equity - 0.5).abs() < 1e-5);
+
+        let mut interpreter = Interpreter::new(&game, 0.0);
+        interpreter.cache_normalized_weights();
+
+        let weights = interpreter.normalized_weights(interpreter.current_player());
+        let root_ev = compute_average(&interpreter.expected_values(), weights);
+        let root_equity = compute_average(&interpreter.equity(), weights);
+
+        assert!((root_ev - 37.5).abs() < 1e-4);
+        assert!((root_equity - 0.5).abs() < 1e-5);
     }
 
     #[test]
@@ -1703,13 +1839,20 @@ mod tests {
             river_bet_sizes: [("50%", "").try_into().unwrap(), Default::default()],
             ..Default::default()
         };
+
         let mut game = PostFlopGame::with_config(&config).unwrap();
         game.allocate_memory(true);
         finalize(&mut game);
-        let ev = get_root_ev(&game) + 30.0;
-        let equity = get_root_equity(&game) + 0.5;
-        assert!((ev - 37.5).abs() < 1e-2);
-        assert!((equity - 0.5).abs() < 1e-4);
+
+        let mut interpreter = Interpreter::new(&game, 0.0);
+        interpreter.cache_normalized_weights();
+
+        let weights = interpreter.normalized_weights(interpreter.current_player());
+        let root_ev = compute_average(&interpreter.expected_values(), weights);
+        let root_equity = compute_average(&interpreter.equity(), weights);
+
+        assert!((root_ev - 37.5).abs() < 1e-2);
+        assert!((root_equity - 0.5).abs() < 1e-4);
     }
 
     #[test]
@@ -1723,13 +1866,20 @@ mod tests {
             river_bet_sizes: [("50%", "").try_into().unwrap(), Default::default()],
             ..Default::default()
         };
+
         let mut game = PostFlopGame::with_config(&config).unwrap();
         game.allocate_memory(false);
         finalize(&mut game);
-        let ev = get_root_ev(&game) + 30.0;
-        let equity = get_root_equity(&game) + 0.5;
-        assert!((ev - 37.5).abs() < 1e-4);
-        assert!((equity - 0.5).abs() < 1e-5);
+
+        let mut interpreter = Interpreter::new(&game, 0.0);
+        interpreter.cache_normalized_weights();
+
+        let weights = interpreter.normalized_weights(interpreter.current_player());
+        let root_ev = compute_average(&interpreter.expected_values(), weights);
+        let root_equity = compute_average(&interpreter.equity(), weights);
+
+        assert!((root_ev - 37.5).abs() < 1e-4);
+        assert!((root_equity - 0.5).abs() < 1e-5);
     }
 
     #[test]
@@ -1744,13 +1894,20 @@ mod tests {
             river_bet_sizes: [("50%", "").try_into().unwrap(), Default::default()],
             ..Default::default()
         };
+
         let mut game = PostFlopGame::with_config(&config).unwrap();
         game.allocate_memory(false);
         finalize(&mut game);
-        let ev = get_root_ev(&game) + 30.0;
-        let equity = get_root_equity(&game) + 0.5;
-        assert!((ev - 37.5).abs() < 1e-4);
-        assert!((equity - 0.5).abs() < 1e-5);
+
+        let mut interpreter = Interpreter::new(&game, 0.0);
+        interpreter.cache_normalized_weights();
+
+        let weights = interpreter.normalized_weights(interpreter.current_player());
+        let root_ev = compute_average(&interpreter.expected_values(), weights);
+        let root_equity = compute_average(&interpreter.equity(), weights);
+
+        assert!((root_ev - 37.5).abs() < 1e-4);
+        assert!((root_equity - 0.5).abs() < 1e-5);
     }
 
     #[test]
@@ -1764,13 +1921,20 @@ mod tests {
             range: ["AA".parse().unwrap(), lose_range_str.parse().unwrap()],
             ..Default::default()
         };
+
         let mut game = PostFlopGame::with_config(&config).unwrap();
         game.allocate_memory(false);
         finalize(&mut game);
-        let ev = get_root_ev(&game) + 30.0;
-        let equity = get_root_equity(&game) + 0.5;
-        assert!((ev - 60.0).abs() < 1e-4);
-        assert!((equity - 1.0).abs() < 1e-5);
+
+        let mut interpreter = Interpreter::new(&game, 0.0);
+        interpreter.cache_normalized_weights();
+
+        let weights = interpreter.normalized_weights(interpreter.current_player());
+        let root_ev = compute_average(&interpreter.expected_values(), weights);
+        let root_equity = compute_average(&interpreter.equity(), weights);
+
+        assert!((root_ev - 60.0).abs() < 1e-4);
+        assert!((root_equity - 1.0).abs() < 1e-5);
     }
 
     #[test]
@@ -1822,11 +1986,16 @@ mod tests {
         game.allocate_memory(false);
 
         solve(&mut game, 1000, 180.0 * 0.001, true);
-        let ev = get_root_ev(&game) + 90.0;
-        let equity = get_root_equity(&game) + 0.5;
+
+        let mut interpreter = Interpreter::new(&game, 0.0);
+        interpreter.cache_normalized_weights();
+
+        let weights = interpreter.normalized_weights(interpreter.current_player());
+        let root_ev = compute_average(&interpreter.expected_values(), weights);
+        let root_equity = compute_average(&interpreter.equity(), weights);
 
         // verified by PioSOLVER Free
-        assert!((ev - 105.11).abs() < 0.2);
-        assert!((equity - 0.55347).abs() < 1e-5);
+        assert!((root_ev - 105.11).abs() < 0.2);
+        assert!((root_equity - 0.55347).abs() < 1e-5);
     }
 }

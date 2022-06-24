@@ -33,8 +33,10 @@ impl DiscountParams {
     }
 }
 
-/// Performs CFR until the given number of iterations or exploitability is satisfied, and returns
-/// the exploitability.
+/// Performs Discounted CFR algorithm until the given number of iterations or exploitability is
+/// satisfied.
+///
+/// This method returns the exploitability of the obtained strategy.
 pub fn solve<T: Game>(
     game: &mut T,
     num_iterations: u32,
@@ -106,7 +108,7 @@ pub fn solve<T: Game>(
     exploitability
 }
 
-/// Proceeds CFR iteration for one step.
+/// Proceeds Discounted CFR algorithm for one iteration.
 #[inline]
 pub fn solve_step<T: Game>(game: &T, current_iteration: u32) {
     if !game.is_ready() {
@@ -428,7 +430,7 @@ fn regret_matching_compressed(
     scale: f32,
     num_actions: usize,
 ) -> Vec<f32, StackAlloc> {
-    let mut strategy = decode_signed_slice(regret, scale);
+    let mut strategy = decode_signed_slice_nonnegative(regret, scale);
     let row_size = strategy.len() / num_actions;
 
     let mut denom = vec::from_elem_in(0.0, row_size, StackAlloc);
@@ -448,7 +450,7 @@ fn regret_matching_compressed(
 #[cfg(not(feature = "custom_alloc"))]
 #[inline]
 fn regret_matching_compressed(regret: &[i16], scale: f32, num_actions: usize) -> Vec<f32> {
-    let mut strategy = decode_signed_slice(regret, scale);
+    let mut strategy = decode_signed_slice_nonnegative(regret, scale);
     let row_size = strategy.len() / num_actions;
 
     let mut denom = vec![0.0; row_size];
@@ -462,4 +464,36 @@ fn regret_matching_compressed(regret: &[i16], scale: f32, num_actions: usize) ->
     });
 
     strategy
+}
+
+/// Decodes the encoded `i16` slice to the non-negative `f32` slice.
+#[cfg(feature = "custom_alloc")]
+#[inline]
+fn decode_signed_slice_nonnegative(slice: &[i16], scale: f32) -> Vec<f32, StackAlloc> {
+    let decoder = scale / i16::MAX as f32;
+    let mut result = Vec::<f32, StackAlloc>::with_capacity_in(slice.len(), StackAlloc);
+    let ptr = result.as_mut_ptr();
+    unsafe {
+        for i in 0..slice.len() {
+            *ptr.add(i) = (*slice.get_unchecked(i)).max(0) as f32 * decoder;
+        }
+        result.set_len(slice.len());
+    }
+    result
+}
+
+/// Decodes the encoded `i16` slice to the non-negative `f32` slice.
+#[cfg(not(feature = "custom_alloc"))]
+#[inline]
+fn decode_signed_slice_nonnegative(slice: &[i16], scale: f32) -> Vec<f32> {
+    let decoder = scale / i16::MAX as f32;
+    let mut result = Vec::<f32>::with_capacity(slice.len());
+    let ptr = result.as_mut_ptr();
+    unsafe {
+        for i in 0..slice.len() {
+            *ptr.add(i) = (*slice.get_unchecked(i)).max(0) as f32 * decoder;
+        }
+        result.set_len(slice.len());
+    }
+    result
 }

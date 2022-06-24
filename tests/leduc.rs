@@ -17,7 +17,7 @@ struct LeducNode {
     board: usize,
     amount: i32,
     children: Vec<(Action, MutexLike<LeducNode>)>,
-    cum_regret: Vec<f32>,
+    storage: Vec<f32>,
     strategy: Vec<f32>,
 }
 
@@ -83,7 +83,7 @@ impl Game for LeducGame {
         };
         let amount_normalized = amount * num_hands_inv;
 
-        if node.player & PLAYER_FOLD_FLAG == PLAYER_FOLD_FLAG {
+        if !compute_equity && node.player & PLAYER_FOLD_FLAG == PLAYER_FOLD_FLAG {
             let folded_player = node.player & PLAYER_MASK;
             let sign = [1.0, -1.0][(player == folded_player) as usize];
             let payoff_normalized = amount_normalized * sign;
@@ -96,7 +96,7 @@ impl Game for LeducGame {
                     }
                 }
             }
-        } else {
+        } else if node.board != NOT_DEALT {
             for my_card in 0..NUM_PRIVATE_HANDS {
                 if my_card != node.board {
                     for opp_card in 0..NUM_PRIVATE_HANDS {
@@ -110,6 +110,26 @@ impl Game for LeducGame {
                             };
                             let payoff_normalized = amount_normalized * sign;
                             result[my_card] += payoff_normalized * cfreach[opp_card];
+                        }
+                    }
+                }
+            }
+        } else {
+            for board in 0..NUM_PRIVATE_HANDS {
+                for my_card in 0..NUM_PRIVATE_HANDS {
+                    if my_card != board {
+                        for opp_card in 0..NUM_PRIVATE_HANDS {
+                            if my_card != opp_card && opp_card != board {
+                                let sign = match () {
+                                    _ if my_card / 2 == board / 2 => 1.0,
+                                    _ if opp_card / 2 == board / 2 => -1.0,
+                                    _ if my_card / 2 == opp_card / 2 => 0.0,
+                                    _ if my_card > opp_card => 1.0,
+                                    _ => -1.0,
+                                };
+                                let payoff_normalized = amount_normalized * sign / 4.0;
+                                result[my_card] += payoff_normalized * cfreach[opp_card];
+                            }
                         }
                     }
                 }
@@ -156,7 +176,7 @@ impl LeducGame {
             board: NOT_DEALT,
             amount: 1,
             children: Vec::new(),
-            cum_regret: Default::default(),
+            storage: Default::default(),
             strategy: Default::default(),
         };
         Self::build_tree_recursive(&mut root, Action::None, [0, 0]);
@@ -173,9 +193,9 @@ impl LeducGame {
 
         if node.is_chance() {
             Self::push_chance_actions(node);
-            for_each_child(node, |action| {
+            for action in node.actions() {
                 Self::build_tree_recursive(&mut node.play(action), Action::Chance(action), [0, 0]);
-            });
+            }
             return;
         }
 
@@ -205,19 +225,19 @@ impl LeducGame {
                     board: node.board,
                     amount: node.amount + bet_diff,
                     children: Vec::new(),
-                    cum_regret: Default::default(),
+                    storage: Default::default(),
                     strategy: Default::default(),
                 }),
             ));
         }
 
-        for_each_child(node, |action| {
+        for action in node.actions() {
             Self::build_tree_recursive(
                 &mut node.play(action),
                 actions[action].0,
                 last_bets[action],
             );
-        });
+        }
     }
 
     fn push_chance_actions(node: &mut LeducNode) {
@@ -229,7 +249,7 @@ impl LeducGame {
                     board: index * 2,
                     amount: node.amount,
                     children: Vec::new(),
-                    cum_regret: Default::default(),
+                    storage: Default::default(),
                     strategy: Default::default(),
                 }),
             ));
@@ -287,13 +307,13 @@ impl LeducGame {
 
         if !node.is_chance() {
             let num_actions = node.num_actions();
-            node.cum_regret = vec![0.0; num_actions * NUM_PRIVATE_HANDS];
+            node.storage = vec![0.0; num_actions * NUM_PRIVATE_HANDS];
             node.strategy = vec![0.0; num_actions * NUM_PRIVATE_HANDS];
         }
 
-        for_each_child(node, |action| {
+        for action in node.actions() {
             Self::allocate_memory_recursive(&mut node.play(action));
-        });
+        }
     }
 }
 
@@ -330,12 +350,12 @@ impl GameNode for LeducNode {
 
     #[inline]
     fn cum_regret(&self) -> &[f32] {
-        &self.cum_regret
+        &self.storage
     }
 
     #[inline]
     fn cum_regret_mut(&mut self) -> &mut [f32] {
-        &mut self.cum_regret
+        &mut self.storage
     }
 
     #[inline]
@@ -347,6 +367,26 @@ impl GameNode for LeducNode {
     fn strategy_mut(&mut self) -> &mut [f32] {
         &mut self.strategy
     }
+
+    #[inline]
+    fn expected_values(&self) -> &[f32] {
+        &self.storage[..NUM_PRIVATE_HANDS]
+    }
+
+    #[inline]
+    fn expected_values_mut(&mut self) -> &mut [f32] {
+        &mut self.storage[..NUM_PRIVATE_HANDS]
+    }
+
+    #[inline]
+    fn equity(&self) -> &[f32] {
+        &self.storage[NUM_PRIVATE_HANDS..2 * NUM_PRIVATE_HANDS]
+    }
+
+    #[inline]
+    fn equity_mut(&mut self) -> &mut [f32] {
+        &mut self.storage[NUM_PRIVATE_HANDS..2 * NUM_PRIVATE_HANDS]
+    }
 }
 
 #[test]
@@ -355,7 +395,10 @@ fn leduc() {
     let mut game = LeducGame::new();
     solve(&mut game, 10000, target, false);
 
-    let ev = get_root_ev(&game);
+    let root_ev = game.root().expected_values().iter().sum::<f32>();
+    let root_equity = game.root().equity().iter().sum::<f32>();
+
     let expected_ev = -0.0856; // verified by OpenSpiel
-    assert!((ev - expected_ev).abs() <= 2.0 * target);
+    assert!((root_ev - expected_ev).abs() < 2.0 * target);
+    assert!(root_equity.abs() < 1e-5);
 }

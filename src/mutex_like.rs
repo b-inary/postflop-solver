@@ -1,12 +1,12 @@
 use std::cell::UnsafeCell;
 use std::ops::{Deref, DerefMut};
 
-/// Mutex-like wrapper, but it actually does not perform any locking
-/// (so there are no performance overheads).
+/// Mutex-like wrapper, but it actually does not perform any locking.
 ///
 /// Use this wrapper when:
-///   1. [`Send`], [`Sync`] and the interior mutability is needed, and
-///   2. it is (manually) guaranteed that data races will not occur.
+///   1. [`Send`], [`Sync`] and the interior mutability is needed,
+///   2. it is (manually) guaranteed that data races will not occur, and
+///   3. the performance is critical.
 #[derive(Debug)]
 pub struct MutexLike<T: ?Sized> {
     data: UnsafeCell<T>,

@@ -31,10 +31,10 @@ pub struct BetSizeCandidates {
 /// Bet size specification.
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
 pub enum BetSize {
-    /// Bet size is relative to the current pot size.
+    /// Bet size relative to the current pot size.
     PotRelative(f32),
 
-    /// Bet size is relative to the last bet size. This is only valid for raise actions.
+    /// Bet size relative to the last bet size. This is only valid for raise actions.
     LastBetRelative(f32),
 }
 

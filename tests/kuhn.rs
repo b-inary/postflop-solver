@@ -14,11 +14,11 @@ struct KuhnNode {
     player: usize,
     amount: i32,
     children: Vec<(Action, MutexLike<KuhnNode>)>,
-    cum_regret: Vec<f32>,
+    storage: Vec<f32>,
     strategy: Vec<f32>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum Action {
     None,
     Fold,
@@ -75,7 +75,7 @@ impl Game for KuhnGame {
         };
         let amount_normalized = amount * num_hands_inv;
 
-        if node.player & PLAYER_FOLD_FLAG == PLAYER_FOLD_FLAG {
+        if !compute_equity && node.player & PLAYER_FOLD_FLAG == PLAYER_FOLD_FLAG {
             let folded_player = node.player & PLAYER_MASK;
             let sign = [1.0, -1.0][(player == folded_player) as usize];
             let payoff_normalized = amount_normalized * sign;
@@ -125,7 +125,7 @@ impl KuhnGame {
             player: PLAYER_OOP,
             amount: 1,
             children: Vec::new(),
-            cum_regret: Default::default(),
+            storage: Default::default(),
             strategy: Default::default(),
         };
         Self::build_tree_recursive(&mut root, Action::None);
@@ -143,10 +143,7 @@ impl KuhnGame {
         let actions = match last_action {
             Action::None | Action::Check => vec![Action::Check, Action::Bet],
             Action::Bet => vec![Action::Fold, Action::Call],
-            _ => {
-                println!("{:?}", last_action);
-                unreachable!()
-            }
+            _ => unreachable!(),
         };
 
         for action in &actions {
@@ -162,15 +159,15 @@ impl KuhnGame {
                     player: next_player,
                     amount: node.amount + (*action == Action::Call) as i32,
                     children: Vec::new(),
-                    cum_regret: Default::default(),
+                    storage: Default::default(),
                     strategy: Default::default(),
                 }),
             ));
         }
 
-        for_each_child(node, |action| {
-            Self::build_tree_recursive(&mut node.play(action), actions[action]);
-        });
+        for (action, child) in &node.children {
+            Self::build_tree_recursive(&mut child.lock(), *action);
+        }
     }
 
     fn allocate_memory_recursive(node: &mut KuhnNode) {
@@ -179,12 +176,12 @@ impl KuhnGame {
         }
 
         let num_actions = node.num_actions();
-        node.cum_regret = vec![0.0; num_actions * NUM_PRIVATE_HANDS];
+        node.storage = vec![0.0; num_actions * NUM_PRIVATE_HANDS];
         node.strategy = vec![0.0; num_actions * NUM_PRIVATE_HANDS];
 
-        for_each_child(node, |action| {
+        for action in node.actions() {
             Self::allocate_memory_recursive(&mut node.play(action));
-        });
+        }
     }
 }
 
@@ -221,12 +218,12 @@ impl GameNode for KuhnNode {
 
     #[inline]
     fn cum_regret(&self) -> &[f32] {
-        &self.cum_regret
+        &self.storage
     }
 
     #[inline]
     fn cum_regret_mut(&mut self) -> &mut [f32] {
-        &mut self.cum_regret
+        &mut self.storage
     }
 
     #[inline]
@@ -238,6 +235,26 @@ impl GameNode for KuhnNode {
     fn strategy_mut(&mut self) -> &mut [f32] {
         &mut self.strategy
     }
+
+    #[inline]
+    fn expected_values(&self) -> &[f32] {
+        &self.storage[..NUM_PRIVATE_HANDS]
+    }
+
+    #[inline]
+    fn expected_values_mut(&mut self) -> &mut [f32] {
+        &mut self.storage[..NUM_PRIVATE_HANDS]
+    }
+
+    #[inline]
+    fn equity(&self) -> &[f32] {
+        &self.storage[NUM_PRIVATE_HANDS..2 * NUM_PRIVATE_HANDS]
+    }
+
+    #[inline]
+    fn equity_mut(&mut self) -> &mut [f32] {
+        &mut self.storage[NUM_PRIVATE_HANDS..2 * NUM_PRIVATE_HANDS]
+    }
 }
 
 #[test]
@@ -246,7 +263,10 @@ fn kuhn() {
     let mut game = KuhnGame::new();
     solve(&mut game, 10000, target, false);
 
-    let ev = get_root_ev(&game);
+    let root_ev = game.root().expected_values().iter().sum::<f32>();
+    let root_equity = game.root().equity().iter().sum::<f32>();
+
     let expected_ev = -1.0 / 18.0;
-    assert!((ev - expected_ev).abs() <= 2.0 * target);
+    assert!((root_ev - expected_ev).abs() < 2.0 * target);
+    assert!(root_equity.abs() < 1e-5);
 }
