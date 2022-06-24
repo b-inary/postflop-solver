@@ -298,10 +298,15 @@ impl<'a> Interpreter<'a> {
                 }
             }
 
-            // updates the state
+            // updates the node
             self.node = &*self.node().play(action);
-            self.weights_normalized_cached = false;
         }
+
+        if self.node().is_terminal() || self.node().amount() == self.game.config().effective_stack {
+            panic!("playing a terminal action is not allowed");
+        }
+
+        self.weights_normalized_cached = false;
     }
 
     /// Computes the normalized weights and caches them.

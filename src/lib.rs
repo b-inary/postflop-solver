@@ -57,6 +57,19 @@
 //! let exploitability = solve(&mut game, max_num_iterations, target_exploitability, true);
 //! println!("Exploitability: {:.2}", exploitability);
 //!
+//! // solve the game manually
+//! // for i in 0..max_num_iterations {
+//! //     solve_step(&game, i);
+//! //     if (i + 1) % 10 == 0 {
+//! //         let exploitability = compute_exploitability(&game);
+//! //         if exploitability <= target_exploitability {
+//! //             println!("Exploitability: {:.2}", exploitability);
+//! //             break;
+//! //         }
+//! //     }
+//! // }
+//! // finalize(&mut game);
+//!
 //! // create result interpreter
 //! let mut interpreter = Interpreter::new(&game, 0.0);
 //!

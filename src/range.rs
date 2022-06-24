@@ -441,7 +441,7 @@ impl Range {
 
     /// Returns whether the two suits are isomorphic.
     #[inline]
-    pub fn is_suit_isomorphic(&self, suit1: u8, suit2: u8) -> bool {
+    pub(crate) fn is_suit_isomorphic(&self, suit1: u8, suit2: u8) -> bool {
         let replace_suit = |suit| {
             if suit == suit1 {
                 suit2
