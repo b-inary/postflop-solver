@@ -2,6 +2,7 @@ use crate::bet_size::*;
 use crate::interface::*;
 use crate::mutex_like::*;
 use crate::range::*;
+use crate::sliceop::*;
 use std::cmp;
 use std::mem;
 use std::ptr;
@@ -27,13 +28,12 @@ struct StrengthItem {
 type SwapList = [Vec<(usize, usize)>; 2];
 
 /// A struct representing a postflop game.
-#[derive(Default)]
 pub struct PostFlopGame {
     // Postflop game configuration.
     config: GameConfig,
 
     // computed from `config`
-    root: MutexLike<PostFlopNode>,
+    root: Box<MutexLike<PostFlopNode>>,
     num_combinations_inv: f64,
     initial_weight: [Vec<f32>; 2],
     private_hand_cards: [Vec<(u8, u8)>; 2],
@@ -57,8 +57,22 @@ pub struct PostFlopGame {
     storage1_compressed: MutexLike<Vec<i16>>,
     storage2_compressed: MutexLike<Vec<u16>>,
 
+    // result interpreter
     is_solved: bool,
+    node: *const PostFlopNode,
+    turn: u8,
+    river: u8,
+    weights: [Vec<f32>; 2],
+    weights_normalized: [Vec<f64>; 2],
+    weights_normalized_cached: bool,
+    normalize_factor: f64,
+    turn_swapped_suit: Option<(u8, u8)>,
+    turn_swap: *const SwapList,
+    river_swap: *const SwapList,
 }
+
+unsafe impl Send for PostFlopGame {}
+unsafe impl Sync for PostFlopGame {}
 
 /// A struct representing a node in postflop game tree.
 pub struct PostFlopNode {
@@ -205,6 +219,51 @@ fn atomic_set_max(atomic: &AtomicUsize, value: usize) {
             Err(new_v) => v = new_v,
         }
     }
+}
+
+/// Decodes the encoded `i16` slice to the `f32` slice.
+#[inline]
+fn decode_signed_slice(slice: &[i16], scale: f32) -> Vec<f32> {
+    let decoder = scale / i16::MAX as f32;
+    let mut result = Vec::<f32>::with_capacity(slice.len());
+    let ptr = result.as_mut_ptr();
+    unsafe {
+        for i in 0..slice.len() {
+            *ptr.add(i) = (*slice.get_unchecked(i)) as f32 * decoder;
+        }
+        result.set_len(slice.len());
+    }
+    result
+}
+
+/// Decodes the encoded `u16` slice to the `f32` slice.
+#[inline]
+fn decode_unsigned_slice(slice: &[u16], scale: f32) -> Vec<f32> {
+    let decoder = scale / u16::MAX as f32;
+    let mut result = Vec::<f32>::with_capacity(slice.len());
+    let ptr = result.as_mut_ptr();
+    unsafe {
+        for i in 0..slice.len() {
+            *ptr.add(i) = *slice.get_unchecked(i) as f32 * decoder;
+        }
+        result.set_len(slice.len());
+    }
+    result
+}
+
+/// Computes the average with given weights.
+#[inline]
+pub fn compute_average<T: Copy + Into<f64>, U: Copy + Into<f64>>(
+    slice: &[T],
+    weights: &[U],
+) -> f64 {
+    let mut weight_sum = 0.0;
+    let mut product_sum = 0.0;
+    for (&v, &w) in slice.iter().zip(weights.iter()) {
+        weight_sum += w.into();
+        product_sum += v.into() * w.into();
+    }
+    product_sum / weight_sum
 }
 
 impl Game for PostFlopGame {
@@ -424,7 +483,7 @@ impl PostFlopGame {
         Ok(game)
     }
 
-    /// Updates the game configuration.
+    /// Updates the game configuration. The solved result will be lost.
     #[inline]
     pub fn update_config(&mut self, config: &GameConfig) -> Result<(), String> {
         self.config = config.clone();
@@ -477,18 +536,12 @@ impl PostFlopGame {
 
     /// Returns a card list of isomorphic chances.
     #[inline]
-    pub(crate) fn isomorphic_cards(&self, node: &PostFlopNode) -> &[u8] {
+    fn isomorphic_cards(&self, node: &PostFlopNode) -> &[u8] {
         if node.turn == NOT_DEALT {
             &self.turn_isomorphism_cards
         } else {
             &self.river_isomorphism_cards[node.turn as usize]
         }
-    }
-
-    /// Returns the number of combinations of possible private hands.
-    #[inline]
-    pub(crate) fn num_combinations(&self) -> f64 {
-        1.0 / self.num_combinations_inv
     }
 
     /// Computes the counterfactual values of the showdown.
@@ -688,6 +741,14 @@ impl PostFlopGame {
         self.init_isomorphism();
         self.init_hand_strength();
         self.init_root();
+
+        // interpreter
+        self.is_solved = false;
+        self.back_to_root();
+        self.weights_normalized = [
+            vec![0.0; self.num_private_hands(0)],
+            vec![0.0; self.num_private_hands(1)],
+        ];
     }
 
     /// Initializes fields `initial_weight`, `private_hand_cards` and `same_hand_index`.
@@ -1415,6 +1476,409 @@ impl PostFlopGame {
             self.allocate_memory_recursive(&mut node.play(action), counter);
         }
     }
+
+    /// Moves the current node back to the root node.
+    #[inline]
+    pub fn back_to_root(&mut self) {
+        self.node = &*self.root();
+        self.turn = self.config.turn;
+        self.river = self.config.river;
+        self.weights = self.initial_weight.clone();
+        self.weights_normalized_cached = false;
+        self.normalize_factor = 1.0 / self.num_combinations_inv;
+        self.turn_swapped_suit = None;
+        self.turn_swap = ptr::null();
+        self.river_swap = ptr::null();
+    }
+
+    /// Returns the available actions for the current node.
+    ///
+    /// Note: If the current node is a chance node, isomorphic chances are grouped together into
+    /// one representative action.
+    #[inline]
+    pub fn available_actions(&self) -> Vec<Action> {
+        self.node().available_actions()
+    }
+
+    /// Returns whether the available actions are terminal.
+    ///
+    /// Note that the call action after the all-in action is considered as terminal.
+    #[inline]
+    pub fn is_terminal_action(&self) -> Vec<bool> {
+        self.node()
+            .actions()
+            .map(|action| {
+                let child = self.node().play(action);
+                child.is_terminal() || child.amount == self.config.effective_stack
+            })
+            .collect()
+    }
+
+    /// Returns whether the current node is a chance node.
+    #[inline]
+    pub fn is_chance_node(&self) -> bool {
+        self.node().is_chance()
+    }
+
+    /// If the current node is a chance node, returns a list of cards that may be dealt.
+    ///
+    /// The returned value is a 64-bit integer.
+    /// The `i`-th bit is set to 1 if the card of ID `i` may be dealt.
+    /// If the current node is not a chance node, returns `0`.
+    ///
+    /// Card ID: `"2c"` => `0`, `"2d"` => `1`, `"2h"` => `2`, ..., `"As"` => `51`.
+    pub fn possible_cards(&self) -> u64 {
+        if !self.node().is_chance() {
+            return 0;
+        }
+
+        let flop = self.config.flop;
+        let mut board_mask: u64 = (1 << flop[0]) | (1 << flop[1]) | (1 << flop[2]);
+        if self.turn != NOT_DEALT {
+            board_mask |= 1 << self.turn;
+        }
+
+        let mut mask: u64 = (1 << 52) - 1;
+
+        for (i, &(c1, c2)) in self.private_hand_cards[0].iter().enumerate() {
+            let oop_mask: u64 = (1 << c1) | (1 << c2);
+            let oop_weight = self.weights[0][i];
+            if board_mask & oop_mask == 0 && oop_weight > 0.0 {
+                for (j, &(c3, c4)) in self.private_hand_cards[1].iter().enumerate() {
+                    let ip_mask: u64 = (1 << c3) | (1 << c4);
+                    let ip_weight = self.weights[1][j];
+                    if (board_mask | oop_mask) & ip_mask == 0 && ip_weight > 0.0 {
+                        mask &= board_mask | oop_mask | ip_mask;
+                    }
+                }
+                if mask == board_mask {
+                    break;
+                }
+            }
+        }
+
+        ((1 << 52) - 1) ^ mask
+    }
+
+    /// Returns the current player (0 = OOP, 1 = IP).
+    ///
+    /// If the current node is a chance node, returns an undefined value.
+    #[inline]
+    pub fn current_player(&self) -> usize {
+        self.node().player()
+    }
+
+    /// Plays the given action. Playing a terminal action is not allowed.
+    /// - `action`
+    ///   - If the current node is a chance node, `action` corresponds to the card ID of the dealt
+    ///     card.
+    ///   - If the current node is not a chance node, plays the `action`-th action of
+    ///     `available_actions()`.
+    pub fn play(&mut self, action: usize) {
+        if !self.is_solved {
+            panic!("game is not solved");
+        }
+
+        // chande node
+        if self.is_chance_node() {
+            let is_turn = self.turn == NOT_DEALT;
+            let actual_card = action as u8;
+
+            // swap the suit if swapping was performed in turn
+            let action_card = if let Some((suit1, suit2)) = self.turn_swapped_suit {
+                if actual_card & 3 == suit1 {
+                    actual_card - suit1 + suit2
+                } else if actual_card & 3 == suit2 {
+                    actual_card + suit1 - suit2
+                } else {
+                    actual_card
+                }
+            } else {
+                actual_card
+            };
+
+            let actions = self.available_actions();
+            let mut action_index = usize::MAX;
+
+            // finds the action index from available actions
+            for (i, &action) in actions.iter().enumerate() {
+                if action == Action::Chance(action_card) {
+                    action_index = i;
+                    break;
+                }
+            }
+
+            // finds the action index from isomorphic chances
+            if action_index == usize::MAX {
+                let isomorphism = self.isomorphic_chances(self.node());
+                let isomorphic_cards = self.isomorphic_cards(self.node());
+                for (i, &repr_index) in isomorphism.iter().enumerate() {
+                    if action_card == isomorphic_cards[i] {
+                        action_index = repr_index;
+                        if is_turn {
+                            self.turn_swap = self.isomorphic_swap(self.node(), i);
+                            if let Action::Chance(repr_card) = actions[repr_index] {
+                                self.turn_swapped_suit = Some((action_card & 3, repr_card & 3));
+                            }
+                        } else {
+                            self.river_swap = self.isomorphic_swap(self.node(), i);
+                        }
+                        break;
+                    }
+                }
+            }
+
+            // panics if the action is not found
+            if action_index == usize::MAX {
+                panic!("invalid action");
+            }
+
+            // updates the state
+            self.node = &*self.node().play(action_index);
+            if is_turn {
+                self.turn = actual_card;
+                self.normalize_factor *= 45.0;
+            } else {
+                self.river = actual_card;
+                self.normalize_factor *= 44.0;
+            }
+        }
+        // not chance node
+        else {
+            // panics if the action is invalid
+            if action >= self.node().num_actions() {
+                panic!("invalid action");
+            }
+
+            // updates the weights
+            if self.node().num_actions() > 1 {
+                let player = self.node().player();
+                let mut weights = if self.is_compression_enabled {
+                    let weights_raw = row(
+                        self.node().strategy_compressed(),
+                        action,
+                        self.num_private_hands(player),
+                    );
+                    let scale = self.node().strategy_scale();
+                    decode_unsigned_slice(weights_raw, scale)
+                } else {
+                    row(
+                        self.node().strategy(),
+                        action,
+                        self.num_private_hands(player),
+                    )
+                    .to_vec()
+                };
+                self.apply_swap(&mut weights, player);
+                mul_slice(&mut self.weights[player], &weights);
+            }
+
+            // updates the node
+            self.node = &*self.node().play(action);
+        }
+
+        if self.node().is_terminal() || self.node().amount == self.config.effective_stack {
+            panic!("playing a terminal action is not allowed");
+        }
+
+        self.weights_normalized_cached = false;
+    }
+
+    /// Computes the normalized weights and caches them.
+    ///
+    /// After mutating the current node, this method must be called before calling
+    /// `normalized_weights()`, `expected_values()`, or `equity()`.
+    pub fn cache_normalized_weights(&mut self) {
+        if self.weights_normalized_cached {
+            return;
+        }
+
+        self.weights_normalized[0].fill(0.0);
+        self.weights_normalized[1].fill(0.0);
+
+        let oop_hands = &self.private_hand_cards[0];
+        let ip_hands = &self.private_hand_cards[1];
+
+        let mut board_mask: u64 = 0;
+        if self.turn != NOT_DEALT {
+            board_mask |= 1 << self.turn;
+        }
+        if self.river != NOT_DEALT {
+            board_mask |= 1 << self.river;
+        }
+
+        for (i, &(c1, c2)) in oop_hands.iter().enumerate() {
+            let oop_mask: u64 = (1 << c1) | (1 << c2);
+            let oop_weight = self.weights[0][i];
+            if board_mask & oop_mask == 0 && oop_weight > 0.0 {
+                for (j, &(c3, c4)) in ip_hands.iter().enumerate() {
+                    let ip_mask: u64 = (1 << c3) | (1 << c4);
+                    let ip_weight = self.weights[1][j];
+                    if (board_mask | oop_mask) & ip_mask == 0 && ip_weight > 0.0 {
+                        let weight = oop_weight as f64 * ip_weight as f64;
+                        self.weights_normalized[0][i] += weight;
+                        self.weights_normalized[1][j] += weight;
+                    }
+                }
+            }
+        }
+
+        self.weights_normalized_cached = true;
+    }
+
+    /// Returns the weights of each private hand of the given player.
+    #[inline]
+    pub fn weights(&self, player: usize) -> &[f32] {
+        &self.weights[player]
+    }
+
+    /// Returns the normalized weights of each private hand of the given player.
+    ///
+    /// The "normalized weights" represent the actual number of combinations that the player is
+    /// holding each hand.
+    ///
+    /// After mutating the current node, you must call the `cache_normalized_weights()` method
+    /// before calling this method.
+    #[inline]
+    pub fn normalized_weights(&self, player: usize) -> &[f64] {
+        if !self.weights_normalized_cached {
+            panic!("normalized weights are not cached");
+        }
+        &self.weights_normalized[player]
+    }
+
+    /// Returns the expected values of each private hand of the current player.
+    ///
+    /// Panics if the current node is a chance node.
+    ///
+    /// After mutating the current node, you must call the `cache_normalized_weights()` method
+    /// before calling this method.
+    pub fn expected_values(&self) -> Vec<f32> {
+        if self.is_chance_node() {
+            panic!("chance node is not allowed");
+        }
+
+        if !self.is_solved {
+            panic!("game is not solved");
+        }
+
+        if !self.weights_normalized_cached {
+            panic!("normalized weights are not cached");
+        }
+
+        let player = self.current_player();
+
+        let mut ret = if self.is_compression_enabled {
+            let slice = self.node().expected_values_compressed();
+            let scale = self.node().expected_value_scale();
+            decode_signed_slice(slice, scale)
+        } else {
+            self.node().expected_values().to_vec()
+        };
+
+        self.apply_swap(&mut ret, player);
+
+        ret.iter_mut().enumerate().for_each(|(i, x)| {
+            *x *= (self.normalize_factor / self.weights_normalized[player][i]) as f32;
+            *x += self.config.starting_pot as f32 / 2.0 + self.node().amount as f32;
+        });
+
+        ret
+    }
+
+    /// Returns the equity of each private hand of the current player.
+    ///
+    /// Panics if the current node is a chance node.
+    ///
+    /// After mutating the current node, you must call the `cache_normalized_weights()` method
+    /// before calling this method.
+    pub fn equity(&self) -> Vec<f32> {
+        if self.is_chance_node() {
+            panic!("chance node is not allowed");
+        }
+
+        if !self.is_solved {
+            panic!("game is not solved");
+        }
+
+        if !self.weights_normalized_cached {
+            panic!("normalized weights are not cached");
+        }
+
+        let player = self.current_player();
+
+        let mut ret = if self.is_compression_enabled {
+            let slice = self.node().equity_compressed();
+            let scale = self.node().equity_scale();
+            decode_signed_slice(slice, scale)
+        } else {
+            self.node().equity().to_vec()
+        };
+
+        self.apply_swap(&mut ret, player);
+
+        ret.iter_mut().enumerate().for_each(|(i, x)| {
+            *x *= (self.normalize_factor / self.weights_normalized[player][i]) as f32;
+            *x += 0.5;
+        });
+
+        ret
+    }
+
+    /// Returns the strategy of the current player.
+    ///
+    /// Panics if the current node is a chance node.
+    ///
+    /// The strategy is a vector of the length of `#(actions) * #(private hands)`.
+    /// The probability of `i`-th action with `j`-th private hand is stored in the
+    /// `i * #(private hands) + j`-th element.
+    pub fn strategy(&self) -> Vec<f32> {
+        if self.is_chance_node() {
+            panic!("chance node is not allowed");
+        }
+
+        if !self.is_solved {
+            panic!("game is not solved");
+        }
+
+        let player = self.current_player();
+        let num_actions = self.node().num_actions();
+        let num_private_hands = self.num_private_hands(player);
+
+        let mut ret = if num_actions == 1 {
+            vec![1.0; num_private_hands]
+        } else if self.is_compression_enabled {
+            let slice = self.node().strategy_compressed();
+            let scale = self.node().strategy_scale();
+            decode_unsigned_slice(slice, scale)
+        } else {
+            self.node().strategy().to_vec()
+        };
+
+        for i in 0..num_actions {
+            self.apply_swap(row_mut(&mut ret, i, num_private_hands), player);
+        }
+
+        ret
+    }
+
+    /// Returns the reference to the current node.
+    #[inline]
+    fn node(&self) -> &PostFlopNode {
+        unsafe { &*self.node }
+    }
+
+    /// Applies the swap.
+    #[inline]
+    fn apply_swap(&self, slice: &mut [f32], player: usize) {
+        for swap in [self.river_swap, self.turn_swap] {
+            if !swap.is_null() {
+                for &(i, j) in unsafe { &(*swap)[player] } {
+                    slice.swap(i, j);
+                }
+            }
+        }
+    }
 }
 
 impl GameNode for PostFlopNode {
@@ -1619,16 +2083,51 @@ impl GameNode for PostFlopNode {
 }
 
 impl PostFlopNode {
-    /// Returns the betted amount of the current round.
-    #[inline]
-    pub(crate) fn amount(&self) -> i32 {
-        self.amount
-    }
-
     /// Returns the available actions.
     #[inline]
-    pub(crate) fn available_actions(&self) -> Vec<Action> {
+    fn available_actions(&self) -> Vec<Action> {
         self.children.iter().map(|(action, _)| *action).collect()
+    }
+}
+
+impl Default for PostFlopGame {
+    #[inline]
+    fn default() -> Self {
+        Self {
+            config: GameConfig::default(),
+            root: Box::default(),
+            num_combinations_inv: 0.0,
+            initial_weight: Default::default(),
+            private_hand_cards: Default::default(),
+            same_hand_index: Default::default(),
+            hand_strength: Vec::default(),
+            turn_isomorphism: Vec::default(),
+            turn_isomorphism_cards: Vec::default(),
+            turn_isomorphism_swap: Default::default(),
+            river_isomorphism: Vec::default(),
+            river_isomorphism_cards: Vec::default(),
+            river_isomorphism_swap: Vec::default(),
+            is_memory_allocated: false,
+            is_compression_enabled: false,
+            num_storage_elements: 0,
+            memory_usage: 0,
+            memory_usage_compressed: 0,
+            storage1: MutexLike::default(),
+            storage2: MutexLike::default(),
+            storage1_compressed: MutexLike::default(),
+            storage2_compressed: MutexLike::default(),
+            is_solved: false,
+            node: ptr::null(),
+            turn: NOT_DEALT,
+            river: NOT_DEALT,
+            weights: Default::default(),
+            weights_normalized: Default::default(),
+            weights_normalized_cached: false,
+            normalize_factor: 0.0,
+            turn_swapped_suit: None,
+            turn_swap: ptr::null(),
+            river_swap: ptr::null(),
+        }
     }
 }
 
@@ -1763,7 +2262,6 @@ fn card_from_chars<T: Iterator<Item = char>>(chars: &mut T) -> Result<u8, String
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::interpreter::*;
     use crate::solver::*;
     use crate::utility::*;
 
@@ -1789,12 +2287,10 @@ mod tests {
         game.allocate_memory(false);
         finalize(&mut game);
 
-        let mut interpreter = Interpreter::new(&game, 0.0);
-        interpreter.cache_normalized_weights();
-
-        let weights = interpreter.normalized_weights(interpreter.current_player());
-        let root_ev = compute_average(&interpreter.expected_values(), weights);
-        let root_equity = compute_average(&interpreter.equity(), weights);
+        game.cache_normalized_weights();
+        let weights = game.normalized_weights(game.current_player());
+        let root_ev = compute_average(&game.expected_values(), weights);
+        let root_equity = compute_average(&game.equity(), weights);
 
         assert!((root_ev - 30.0).abs() < 1e-4);
         assert!((root_equity - 0.5).abs() < 1e-5);
@@ -1815,12 +2311,10 @@ mod tests {
         game.allocate_memory(false);
         finalize(&mut game);
 
-        let mut interpreter = Interpreter::new(&game, 0.0);
-        interpreter.cache_normalized_weights();
-
-        let weights = interpreter.normalized_weights(interpreter.current_player());
-        let root_ev = compute_average(&interpreter.expected_values(), weights);
-        let root_equity = compute_average(&interpreter.equity(), weights);
+        game.cache_normalized_weights();
+        let weights = game.normalized_weights(game.current_player());
+        let root_ev = compute_average(&game.expected_values(), weights);
+        let root_equity = compute_average(&game.equity(), weights);
 
         assert!((root_ev - 37.5).abs() < 1e-4);
         assert!((root_equity - 0.5).abs() < 1e-5);
@@ -1841,12 +2335,10 @@ mod tests {
         game.allocate_memory(true);
         finalize(&mut game);
 
-        let mut interpreter = Interpreter::new(&game, 0.0);
-        interpreter.cache_normalized_weights();
-
-        let weights = interpreter.normalized_weights(interpreter.current_player());
-        let root_ev = compute_average(&interpreter.expected_values(), weights);
-        let root_equity = compute_average(&interpreter.equity(), weights);
+        game.cache_normalized_weights();
+        let weights = game.normalized_weights(game.current_player());
+        let root_ev = compute_average(&game.expected_values(), weights);
+        let root_equity = compute_average(&game.equity(), weights);
 
         assert!((root_ev - 37.5).abs() < 1e-2);
         assert!((root_equity - 0.5).abs() < 1e-4);
@@ -1868,12 +2360,10 @@ mod tests {
         game.allocate_memory(false);
         finalize(&mut game);
 
-        let mut interpreter = Interpreter::new(&game, 0.0);
-        interpreter.cache_normalized_weights();
-
-        let weights = interpreter.normalized_weights(interpreter.current_player());
-        let root_ev = compute_average(&interpreter.expected_values(), weights);
-        let root_equity = compute_average(&interpreter.equity(), weights);
+        game.cache_normalized_weights();
+        let weights = game.normalized_weights(game.current_player());
+        let root_ev = compute_average(&game.expected_values(), weights);
+        let root_equity = compute_average(&game.equity(), weights);
 
         assert!((root_ev - 37.5).abs() < 1e-4);
         assert!((root_equity - 0.5).abs() < 1e-5);
@@ -1896,12 +2386,10 @@ mod tests {
         game.allocate_memory(false);
         finalize(&mut game);
 
-        let mut interpreter = Interpreter::new(&game, 0.0);
-        interpreter.cache_normalized_weights();
-
-        let weights = interpreter.normalized_weights(interpreter.current_player());
-        let root_ev = compute_average(&interpreter.expected_values(), weights);
-        let root_equity = compute_average(&interpreter.equity(), weights);
+        game.cache_normalized_weights();
+        let weights = game.normalized_weights(game.current_player());
+        let root_ev = compute_average(&game.expected_values(), weights);
+        let root_equity = compute_average(&game.equity(), weights);
 
         assert!((root_ev - 37.5).abs() < 1e-4);
         assert!((root_equity - 0.5).abs() < 1e-5);
@@ -1923,12 +2411,10 @@ mod tests {
         game.allocate_memory(false);
         finalize(&mut game);
 
-        let mut interpreter = Interpreter::new(&game, 0.0);
-        interpreter.cache_normalized_weights();
-
-        let weights = interpreter.normalized_weights(interpreter.current_player());
-        let root_ev = compute_average(&interpreter.expected_values(), weights);
-        let root_equity = compute_average(&interpreter.equity(), weights);
+        game.cache_normalized_weights();
+        let weights = game.normalized_weights(game.current_player());
+        let root_ev = compute_average(&game.expected_values(), weights);
+        let root_equity = compute_average(&game.equity(), weights);
 
         assert!((root_ev - 60.0).abs() < 1e-4);
         assert!((root_equity - 1.0).abs() < 1e-5);
@@ -1984,12 +2470,10 @@ mod tests {
 
         solve(&mut game, 1000, 180.0 * 0.001, true);
 
-        let mut interpreter = Interpreter::new(&game, 0.0);
-        interpreter.cache_normalized_weights();
-
-        let weights = interpreter.normalized_weights(interpreter.current_player());
-        let root_ev = compute_average(&interpreter.expected_values(), weights);
-        let root_equity = compute_average(&interpreter.equity(), weights);
+        game.cache_normalized_weights();
+        let weights = game.normalized_weights(game.current_player());
+        let root_ev = compute_average(&game.expected_values(), weights);
+        let root_equity = compute_average(&game.equity(), weights);
 
         // verified by PioSOLVER Free
         assert!((root_ev - 105.11).abs() < 0.2);

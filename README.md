@@ -8,14 +8,14 @@ Documentation: https://b-inary.github.io/postflop_solver/postflop_solver/
 
 ## Usage
 
-`Cargo.toml`
+- `Cargo.toml`
 
 ```toml
 [dependencies]
 postflop-solver = { git = "https://github.com/b-inary/postflop-solver" }
 ```
 
-`example.rs`
+- Examples
 
 ```rust
 use postflop_solver::*;
@@ -86,46 +86,46 @@ println!("Exploitability: {:.2}", exploitability);
 // }
 // finalize(&mut game);
 
-// create result interpreter
-let mut interpreter = Interpreter::new(&game, 0.0);
-
 // get EV and equity of a specific hand
-interpreter.cache_normalized_weights();
-let ev = interpreter.expected_values();
-let equity = interpreter.equity();
+game.cache_normalized_weights();
+let ev = game.expected_values();
+let equity = game.equity();
 println!("EV of oop_hands[0]: {:.2}", ev[0]);
 println!("Equity of oop_hands[0]: {:.2}%", 100.0 * equity[0]);
 
 // get EV and equity of whole hand
-let weights = interpreter.normalized_weights(interpreter.current_player());
+let weights = game.normalized_weights(game.current_player());
 let average_ev = compute_average(&ev, weights);
 let average_equity = compute_average(&equity, weights);
 println!("Average EV: {:.2}", average_ev);
 println!("Average equity: {:.2}%", 100.0 * average_equity);
 
 // get available actions
-let actions = interpreter.available_actions();
+let actions = game.available_actions();
 println!("Available actions: {:?}", actions); // [Check, Bet(100)]
 
 // play `Bet(100)`
-interpreter.play(1);
+game.play(1);
 
 // get available actions
-let actions = interpreter.available_actions();
+let actions = game.available_actions();
 println!("Available actions: {:?}", actions); // [Fold, Call, Raise(300)]
 
 // play `Call`
-interpreter.play(1);
+game.play(1);
 
 // confirm that the current node is a chance node
-assert!(interpreter.is_chance_node());
+assert!(game.is_chance_node());
 
 // confirm that "7s" may be dealt
 let card = card_from_str("7s").unwrap();
-assert!(interpreter.possible_cards() & (1 << card) != 0);
+assert!(game.possible_cards() & (1 << card) != 0);
 
 // deal "7s"
-interpreter.play(card as usize);
+game.play(card as usize);
+
+// back to the root node
+game.back_to_root();
 ```
 
 ## Features
