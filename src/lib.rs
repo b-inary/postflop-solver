@@ -150,6 +150,3 @@ pub use mutex_like::*;
 pub use range::*;
 pub use solver::*;
 pub use utility::*;
-
-#[cfg(feature = "custom-alloc")]
-pub use alloc::*;

@@ -1,9 +1,6 @@
 extern crate postflop_solver;
 use postflop_solver::*;
 
-#[cfg(feature = "custom-alloc")]
-use std::sync::atomic::Ordering;
-
 struct LeducGame {
     root: MutexLike<LeducNode>,
     initial_weight: Vec<f32>,
@@ -181,8 +178,6 @@ impl LeducGame {
         };
         Self::build_tree_recursive(&mut root, Action::None, [0, 0]);
         Self::allocate_memory_recursive(&mut root);
-        #[cfg(feature = "custom-alloc")]
-        STACK_UNIT_SIZE.store(1 << 20, Ordering::Relaxed);
         MutexLike::new(root)
     }
 

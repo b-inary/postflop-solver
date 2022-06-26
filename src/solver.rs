@@ -7,7 +7,7 @@ use std::io::{self, Write};
 #[cfg(feature = "custom-alloc")]
 use crate::alloc::*;
 #[cfg(feature = "custom-alloc")]
-use std::{mem, vec};
+use std::vec;
 
 struct DiscountParams {
     alpha_t: f32,
@@ -234,7 +234,7 @@ fn solve_recursive<T: Game>(
     // if the current player is `player`
     else if node.player() == player {
         // computes the strategy by regret-maching algorithm
-        let strategy = if game.is_compression_enabled() {
+        let mut strategy = if game.is_compression_enabled() {
             regret_matching_compressed(
                 node.cum_regret_compressed(),
                 node.cum_regret_scale(),
@@ -272,9 +272,8 @@ fn solve_recursive<T: Game>(
 
         // sums up the counterfactual values
         let mut cfv_actions = cfv_actions.lock();
-        let mut cfv_strategy = strategy;
-        mul_slice(&mut cfv_strategy, &cfv_actions);
-        cfv_strategy.chunks(num_private_hands).for_each(|row| {
+        mul_slice(&mut strategy, &cfv_actions);
+        strategy.chunks(num_private_hands).for_each(|row| {
             add_slice(result, row);
         });
 
@@ -336,13 +335,6 @@ fn solve_recursive<T: Game>(
                 add_slice(cum_strategy, &reach_actions);
             }
         }
-
-        #[cfg(feature = "custom-alloc")]
-        {
-            // drop in reverse order
-            mem::drop(reach_actions);
-            mem::drop(cfv_strategy);
-        }
     }
     // if the current player is not `player`
     else {
@@ -365,14 +357,13 @@ fn solve_recursive<T: Game>(
 
         // computes the counterfactual values of each action
         for_each_child(node, |action| {
-            let cfreach = row(&cfreach_actions, action, row_size);
             solve_recursive(
                 row_mut(&mut cfv_actions.lock(), action, num_private_hands),
                 game,
                 &mut node.play(action),
                 player,
                 reach,
-                cfreach,
+                row(&cfreach_actions, action, row_size),
                 params,
             );
         });

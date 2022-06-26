@@ -12,7 +12,7 @@ pub(crate) fn align_up(size: usize) -> usize {
     (size + mask) & !mask
 }
 
-pub static STACK_UNIT_SIZE: AtomicUsize = AtomicUsize::new(0);
+pub(crate) static STACK_UNIT_SIZE: AtomicUsize = AtomicUsize::new(1 << 20);
 
 pub(crate) struct StackAlloc;
 
