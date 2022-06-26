@@ -63,9 +63,9 @@ pub struct PostFlopGame {
     turn: u8,
     river: u8,
     weights: [Vec<f32>; 2],
-    weights_normalized: [Vec<f64>; 2],
-    weights_normalized_cached: bool,
-    normalize_factor: f64,
+    normalized_weights: [Vec<f32>; 2],
+    normalized_weights_cached: bool,
+    normalize_factor: f32,
     turn_swapped_suit: Option<(u8, u8)>,
     turn_swap: *const SwapList,
     river_swap: *const SwapList,
@@ -745,7 +745,7 @@ impl PostFlopGame {
         // interpreter
         self.is_solved = false;
         self.back_to_root();
-        self.weights_normalized = [
+        self.normalized_weights = [
             vec![0.0; self.num_private_hands(0)],
             vec![0.0; self.num_private_hands(1)],
         ];
@@ -1484,8 +1484,8 @@ impl PostFlopGame {
         self.turn = self.config.turn;
         self.river = self.config.river;
         self.weights = self.initial_weight.clone();
-        self.weights_normalized_cached = false;
-        self.normalize_factor = 1.0 / self.num_combinations_inv;
+        self.normalized_weights_cached = false;
+        self.normalize_factor = 1.0 / self.num_combinations_inv as f32;
         self.turn_swapped_suit = None;
         self.turn_swap = ptr::null();
         self.river_swap = ptr::null();
@@ -1681,7 +1681,7 @@ impl PostFlopGame {
             panic!("playing a terminal action is not allowed");
         }
 
-        self.weights_normalized_cached = false;
+        self.normalized_weights_cached = false;
     }
 
     /// Computes the normalized weights and caches them.
@@ -1689,12 +1689,14 @@ impl PostFlopGame {
     /// After mutating the current node, this method must be called before calling
     /// `normalized_weights()`, `expected_values()`, or `equity()`.
     pub fn cache_normalized_weights(&mut self) {
-        if self.weights_normalized_cached {
+        if self.normalized_weights_cached {
             return;
         }
 
-        self.weights_normalized[0].fill(0.0);
-        self.weights_normalized[1].fill(0.0);
+        let mut normalized_weights_f64 = [
+            vec![0.0; self.num_private_hands(0)],
+            vec![0.0; self.num_private_hands(1)],
+        ];
 
         let oop_hands = &self.private_hand_cards[0];
         let ip_hands = &self.private_hand_cards[1];
@@ -1716,14 +1718,21 @@ impl PostFlopGame {
                     let ip_weight = self.weights[1][j];
                     if (board_mask | oop_mask) & ip_mask == 0 && ip_weight > 0.0 {
                         let weight = oop_weight as f64 * ip_weight as f64;
-                        self.weights_normalized[0][i] += weight;
-                        self.weights_normalized[1][j] += weight;
+                        normalized_weights_f64[0][i] += weight;
+                        normalized_weights_f64[1][j] += weight;
                     }
                 }
             }
         }
 
-        self.weights_normalized_cached = true;
+        for player in 0..2 {
+            self.normalized_weights[player]
+                .iter_mut()
+                .zip(normalized_weights_f64[player].iter())
+                .for_each(|(w, &w_f64)| *w = w_f64 as f32);
+        }
+
+        self.normalized_weights_cached = true;
     }
 
     /// Returns the weights of each private hand of the given player.
@@ -1740,11 +1749,11 @@ impl PostFlopGame {
     /// After mutating the current node, you must call the `cache_normalized_weights()` method
     /// before calling this method.
     #[inline]
-    pub fn normalized_weights(&self, player: usize) -> &[f64] {
-        if !self.weights_normalized_cached {
+    pub fn normalized_weights(&self, player: usize) -> &[f32] {
+        if !self.normalized_weights_cached {
             panic!("normalized weights are not cached");
         }
-        &self.weights_normalized[player]
+        &self.normalized_weights[player]
     }
 
     /// Returns the expected values of each private hand of the current player.
@@ -1762,7 +1771,7 @@ impl PostFlopGame {
             panic!("game is not solved");
         }
 
-        if !self.weights_normalized_cached {
+        if !self.normalized_weights_cached {
             panic!("normalized weights are not cached");
         }
 
@@ -1779,7 +1788,7 @@ impl PostFlopGame {
         self.apply_swap(&mut ret, player);
 
         ret.iter_mut().enumerate().for_each(|(i, x)| {
-            *x *= (self.normalize_factor / self.weights_normalized[player][i]) as f32;
+            *x *= self.normalize_factor / self.normalized_weights[player][i];
             *x += self.config.starting_pot as f32 / 2.0 + self.node().amount as f32;
         });
 
@@ -1801,7 +1810,7 @@ impl PostFlopGame {
             panic!("game is not solved");
         }
 
-        if !self.weights_normalized_cached {
+        if !self.normalized_weights_cached {
             panic!("normalized weights are not cached");
         }
 
@@ -1818,7 +1827,7 @@ impl PostFlopGame {
         self.apply_swap(&mut ret, player);
 
         ret.iter_mut().enumerate().for_each(|(i, x)| {
-            *x *= (self.normalize_factor / self.weights_normalized[player][i]) as f32;
+            *x *= self.normalize_factor / self.normalized_weights[player][i];
             *x += 0.5;
         });
 
@@ -2121,8 +2130,8 @@ impl Default for PostFlopGame {
             turn: NOT_DEALT,
             river: NOT_DEALT,
             weights: Default::default(),
-            weights_normalized: Default::default(),
-            weights_normalized_cached: false,
+            normalized_weights: Default::default(),
+            normalized_weights_cached: false,
             normalize_factor: 0.0,
             turn_swapped_suit: None,
             turn_swap: ptr::null(),
