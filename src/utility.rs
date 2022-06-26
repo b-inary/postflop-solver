@@ -459,6 +459,13 @@ fn compute_best_cfv_recursive<T: Game>(
     let num_actions = node.num_actions();
     let num_private_hands = game.num_private_hands(player);
 
+    // simply recurses when the number of actions is 1
+    if num_actions == 1 && !node.is_chance() {
+        let child = &node.play(0);
+        compute_best_cfv_recursive(result, game, child, player, cfreach);
+        return;
+    }
+
     // allocates memory for storing the counterfactual values
     #[cfg(feature = "custom-alloc")]
     let cfv_actions = MutexLike::new(vec::from_elem_in(
