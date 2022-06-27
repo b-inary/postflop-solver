@@ -39,7 +39,7 @@ impl DiscountParams {
 /// This method returns the exploitability of the obtained strategy.
 pub fn solve<T: Game>(
     game: &mut T,
-    num_iterations: u32,
+    max_num_iterations: u32,
     target_exploitability: f32,
     print_progress: bool,
 ) -> f32 {
@@ -57,12 +57,12 @@ pub fn solve<T: Game>(
     let mut exploitability = f32::INFINITY;
 
     if print_progress {
-        print!("iteration: 0 / {}", num_iterations);
+        print!("iteration: 0 / {}", max_num_iterations);
         print!("(exploitability = {:.4e}[bb])", exploitability);
         io::stdout().flush().unwrap();
     }
 
-    for t in 0..num_iterations {
+    for t in 0..max_num_iterations {
         let params = DiscountParams::new(t);
 
         // alternating updates
@@ -79,12 +79,12 @@ pub fn solve<T: Game>(
             );
         }
 
-        if (t + 1) % 10 == 0 || t + 1 == num_iterations {
+        if (t + 1) % 10 == 0 || t + 1 == max_num_iterations {
             exploitability = compute_exploitability(game);
         }
 
         if print_progress {
-            print!("\riteration: {} / {} ", t + 1, num_iterations);
+            print!("\riteration: {} / {} ", t + 1, max_num_iterations);
             print!("(exploitability = {:.4e}[bb])", exploitability);
             io::stdout().flush().unwrap();
         }

@@ -253,17 +253,18 @@ fn decode_unsigned_slice(slice: &[u16], scale: f32) -> Vec<f32> {
 
 /// Computes the average with given weights.
 #[inline]
-pub fn compute_average<T: Copy + Into<f64>, U: Copy + Into<f64>>(
-    slice: &[T],
-    weights: &[U],
-) -> f64 {
-    let mut weight_sum = 0.0;
-    let mut product_sum = 0.0;
+pub fn compute_average<T, U>(slice: &[T], weights: &[U]) -> f32
+where
+    T: Copy + Into<f64>,
+    U: Copy + Into<f64>,
+{
+    let mut weight_sum = 0.0f64;
+    let mut product_sum = 0.0f64;
     for (&v, &w) in slice.iter().zip(weights.iter()) {
         weight_sum += w.into();
         product_sum += v.into() * w.into();
     }
-    product_sum / weight_sum
+    (product_sum / weight_sum) as f32
 }
 
 impl Game for PostFlopGame {
