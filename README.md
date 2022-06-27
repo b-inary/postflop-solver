@@ -130,7 +130,20 @@ game.play(card as usize);
 game.back_to_root();
 ```
 
-## Features
+## Implementation details
+
+- **Algorithm**: The solver uses [Discounted CFR] algorithm.
+  Currently, the value of γ is set to 5.0, rather than the 2.0 recommended by the original paper.
+- **Precision**: 32-bit floating-point numbers are used in most places.
+  When calculating summations, temporal values use 64-bit floating-point numbers.
+  If the compression feature is enabled, each game node stores the values by 16-bit integers with a single 32-bit floating-point scaling factor.
+- **Handling isomorphism**: The solver does not perform any abstraction.
+  However, isomorphic chances (turn and river deals) are combined into one.
+  For example, if the flop is monotone, the three non-dealt suits are isomorphic, allowing us to skip the calculation for two of the three suits.
+
+[Discounted CFR]: https://arxiv.org/abs/1809.04040
+
+## Crate features
 
 - `custom-alloc`: Uses custom memory allocator in solving process.
   It significantly reduces the number of calls of the default allocator, so it is recommended to use this feature when the default allocator is not so efficient.
