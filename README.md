@@ -1,6 +1,6 @@
 # postflop-solver
 
-An open-source postflop solver written in Rust
+An open-source postflop solver library written in Rust
 
 Web application: https://github.com/b-inary/wasm-postflop
 
@@ -145,7 +145,7 @@ game.back_to_root();
 
 ## Crate features
 
-- `custom-alloc`: Uses custom memory allocator in solving process.
+- `custom-alloc`: Uses custom memory allocator in solving process (only available in nightly Rust).
   It significantly reduces the number of calls of the default allocator, so it is recommended to use this feature when the default allocator is not so efficient.
   Disabled by default.
 - `holdem-hand-evaluator`: Uses [holdem-hand-evaluator] crate to evaluate hands.

@@ -127,7 +127,7 @@
 //! [Discounted CFR]: https://arxiv.org/abs/1809.04040
 //!
 //! # Crate features
-//! - `custom-alloc`: Uses custom memory allocator in solving process.
+//! - `custom-alloc`: Uses custom memory allocator in solving process (only available in nightly Rust).
 //!   It significantly reduces the number of calls of the default allocator,
 //!   so it is recommended to use this feature when the default allocator is not so efficient.
 //!   Disabled by default.
