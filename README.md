@@ -2,11 +2,11 @@
 
 An open-source postflop solver library written in Rust
 
-Web application: https://github.com/b-inary/wasm-postflop
-
-Desktop application: https://github.com/b-inary/desktop-postflop
-
 Documentation: https://b-inary.github.io/postflop_solver/postflop_solver/
+
+**Related repositories**
+- Web application: https://github.com/b-inary/wasm-postflop
+- Desktop application: https://github.com/b-inary/desktop-postflop
 
 ## Usage
 
