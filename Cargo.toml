@@ -11,7 +11,7 @@ license = "AGPL-3.0-or-later"
 [dependencies]
 holdem-hand-evaluator = { git = "https://github.com/b-inary/holdem-hand-evaluator", optional = true }
 num-traits = "0.2.15"
-once_cell = "1.12.0"
+once_cell = "1.13.0"
 rayon = { version = "1.5.3", optional = true }
 regex = "1.5.6"
 
