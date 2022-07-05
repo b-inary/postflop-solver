@@ -14,6 +14,7 @@ pub(crate) fn align_up(size: usize) -> usize {
 
 pub(crate) static STACK_UNIT_SIZE: AtomicUsize = AtomicUsize::new(1 << 20);
 
+#[derive(Clone)]
 pub(crate) struct StackAlloc;
 
 struct StackAllocData {

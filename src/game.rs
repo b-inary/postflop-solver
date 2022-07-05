@@ -85,7 +85,6 @@ pub struct PostFlopNode {
     storage2: *mut u8,
     scale1: f32,
     scale2: f32,
-    scale3: f32,
     num_elements: usize,
 }
 
@@ -253,16 +252,12 @@ fn decode_unsigned_slice(slice: &[u16], scale: f32) -> Vec<f32> {
 
 /// Computes the average with given weights.
 #[inline]
-pub fn compute_average<T, U>(slice: &[T], weights: &[U]) -> f32
-where
-    T: Copy + Into<f64>,
-    U: Copy + Into<f64>,
-{
-    let mut weight_sum = 0.0f64;
-    let mut product_sum = 0.0f64;
+pub fn compute_average(slice: &[f32], weights: &[f32]) -> f32 {
+    let mut weight_sum = 0.0;
+    let mut product_sum = 0.0;
     for (&v, &w) in slice.iter().zip(weights.iter()) {
-        weight_sum += w.into();
-        product_sum += v.into() * w.into();
+        weight_sum += w as f64;
+        product_sum += v as f64 * w as f64;
     }
     (product_sum / weight_sum) as f32
 }
@@ -285,23 +280,18 @@ impl Game for PostFlopGame {
         &self.initial_weight[player]
     }
 
-    fn evaluate(
-        &self,
-        result: &mut [f32],
-        node: &Self::Node,
-        player: usize,
-        cfreach: &[f32],
-        compute_equity: bool,
-    ) {
-        let amount = if compute_equity {
-            0.5
-        } else {
-            self.config.starting_pot as f64 * 0.5 + node.amount as f64
-        };
+    fn evaluate(&self, result: &mut [f32], node: &Self::Node, player: usize, cfreach: &[f32]) {
+        let amount = self.config.starting_pot as f64 * 0.5 + node.amount as f64;
         let amount_normalized = amount * self.num_combinations_inv;
 
+        let player_cards = &self.private_hand_cards[player];
+        let opponent_cards = &self.private_hand_cards[player ^ 1];
+
+        let mut cfreach_sum = 0.0;
+        let mut cfreach_minus = [0.0; 52];
+
         // someone folded
-        if !compute_equity && node.player & PLAYER_FOLD_FLAG == PLAYER_FOLD_FLAG {
+        if node.player & PLAYER_FOLD_FLAG == PLAYER_FOLD_FLAG {
             let mut board_mask = 0u64;
             if node.turn != NOT_DEALT {
                 board_mask |= 1 << node.turn;
@@ -316,12 +306,6 @@ impl Game for PostFlopGame {
             } else {
                 amount_normalized
             };
-
-            let player_cards = &self.private_hand_cards[player];
-            let opponent_cards = &self.private_hand_cards[player ^ 1];
-
-            let mut cfreach_sum = 0.0;
-            let mut cfreach_minus = [0.0; 52];
 
             for i in 0..cfreach.len() {
                 unsafe {
@@ -354,78 +338,60 @@ impl Game for PostFlopGame {
                 }
             }
         }
-        // usual showdown
-        else if node.river != NOT_DEALT {
-            self.evaluate_showdown(
-                result,
-                player,
-                cfreach,
-                node.turn,
-                node.river,
-                amount_normalized,
-            );
-        }
-        // when computing equity
+        // showdown
         else {
-            // use 64-bit floating point values
-            let num_private_hands = self.num_private_hands(player);
-            #[cfg(feature = "custom-alloc")]
-            let mut result_f64 = vec::from_elem_in(0.0, num_private_hands, StackAlloc);
-            #[cfg(feature = "custom-alloc")]
-            let mut result_tmp = vec::from_elem_in(0.0, num_private_hands, StackAlloc);
-            #[cfg(not(feature = "custom-alloc"))]
-            let mut result_f64 = vec![0.0; num_private_hands];
-            #[cfg(not(feature = "custom-alloc"))]
-            let mut result_tmp = vec![0.0; num_private_hands];
+            let hand_strength = &self.hand_strength[card_pair_index(node.turn, node.river)];
+            let player_strength = &hand_strength[player];
+            let opponent_strength = &hand_strength[player ^ 1];
 
-            let flop = &self.config.flop;
-            let flop_mask: u64 = (1 << flop[0]) | (1 << flop[1]) | (1 << flop[2]);
+            let mut j = 0;
+            let player_len = player_strength.len();
+            let opponent_len = opponent_strength.len();
 
-            if node.turn != NOT_DEALT {
-                let board_mask = flop_mask | 1 << node.turn;
-                for river in 0..52 {
-                    if board_mask & (1 << river) == 0 {
-                        result_tmp.fill(0.0);
-                        self.evaluate_showdown(
-                            &mut result_tmp,
-                            player,
-                            cfreach,
-                            node.turn,
-                            river,
-                            amount_normalized / 44.0,
-                        );
-                        result_f64.iter_mut().zip(&result_tmp).for_each(|(l, &r)| {
-                            *l += r as f64;
-                        });
+            for i in 0..player_len {
+                unsafe {
+                    let StrengthItem { strength, index } = *player_strength.get_unchecked(i);
+                    while j < opponent_len && opponent_strength.get_unchecked(j).strength < strength
+                    {
+                        let opponent_index = opponent_strength.get_unchecked(j).index;
+                        let (c1, c2) = *opponent_cards.get_unchecked(opponent_index);
+                        let cfreach_opp = *cfreach.get_unchecked(opponent_index) as f64;
+                        cfreach_sum += cfreach_opp;
+                        *cfreach_minus.get_unchecked_mut(c1 as usize) += cfreach_opp;
+                        *cfreach_minus.get_unchecked_mut(c2 as usize) += cfreach_opp;
+                        j += 1;
                     }
-                }
-            } else {
-                for turn in 0..52 {
-                    if flop_mask & (1 << turn) == 0 {
-                        let board_mask = flop_mask | 1 << turn;
-                        for river in (turn + 1)..52 {
-                            if board_mask & (1 << river) == 0 {
-                                result_tmp.fill(0.0);
-                                self.evaluate_showdown(
-                                    &mut result_tmp,
-                                    player,
-                                    cfreach,
-                                    turn,
-                                    river,
-                                    amount_normalized / (45.0 * 44.0 / 2.0),
-                                );
-                                result_f64.iter_mut().zip(&result_tmp).for_each(|(l, &r)| {
-                                    *l += r as f64;
-                                });
-                            }
-                        }
-                    }
+                    let (c1, c2) = *player_cards.get_unchecked(index);
+                    let cfreach = cfreach_sum
+                        - cfreach_minus.get_unchecked(c1 as usize)
+                        - cfreach_minus.get_unchecked(c2 as usize);
+                    *result.get_unchecked_mut(index) = (amount_normalized * cfreach) as f32;
                 }
             }
 
-            result.iter_mut().zip(&result_f64).for_each(|(l, &r)| {
-                *l = r as f32;
-            });
+            cfreach_sum = 0.0;
+            cfreach_minus.fill(0.0);
+            j = opponent_len;
+
+            for i in (0..player_len).rev() {
+                unsafe {
+                    let StrengthItem { strength, index } = *player_strength.get_unchecked(i);
+                    while j > 0 && opponent_strength.get_unchecked(j - 1).strength > strength {
+                        let opponent_index = opponent_strength.get_unchecked(j - 1).index;
+                        let (c1, c2) = *opponent_cards.get_unchecked(opponent_index);
+                        let cfreach_opp = *cfreach.get_unchecked(opponent_index) as f64;
+                        cfreach_sum += cfreach_opp;
+                        *cfreach_minus.get_unchecked_mut(c1 as usize) += cfreach_opp;
+                        *cfreach_minus.get_unchecked_mut(c2 as usize) += cfreach_opp;
+                        j -= 1;
+                    }
+                    let (c1, c2) = *player_cards.get_unchecked(index);
+                    let cfreach = cfreach_sum
+                        - cfreach_minus.get_unchecked(c1 as usize)
+                        - cfreach_minus.get_unchecked(c2 as usize);
+                    *result.get_unchecked_mut(index) -= (amount_normalized * cfreach) as f32;
+                }
+            }
         }
     }
 
@@ -542,76 +508,6 @@ impl PostFlopGame {
             &self.turn_isomorphism_cards
         } else {
             &self.river_isomorphism_cards[node.turn as usize]
-        }
-    }
-
-    /// Computes the counterfactual values of the showdown.
-    #[inline]
-    fn evaluate_showdown(
-        &self,
-        result: &mut [f32],
-        player: usize,
-        cfreach: &[f32],
-        turn: u8,
-        river: u8,
-        amount: f64,
-    ) {
-        let player_cards = &self.private_hand_cards[player];
-        let opponent_cards = &self.private_hand_cards[player ^ 1];
-
-        let mut cfreach_sum = 0.0;
-        let mut cfreach_minus = [0.0; 52];
-
-        let hand_strength = &self.hand_strength[card_pair_index(turn, river)];
-        let player_strength = &hand_strength[player];
-        let opponent_strength = &hand_strength[player ^ 1];
-
-        let mut j = 0;
-        let player_len = player_strength.len();
-        let opponent_len = opponent_strength.len();
-
-        for i in 0..player_len {
-            unsafe {
-                let StrengthItem { strength, index } = *player_strength.get_unchecked(i);
-                while j < opponent_len && opponent_strength.get_unchecked(j).strength < strength {
-                    let opponent_index = opponent_strength.get_unchecked(j).index;
-                    let (c1, c2) = *opponent_cards.get_unchecked(opponent_index);
-                    let cfreach_opp = *cfreach.get_unchecked(opponent_index) as f64;
-                    cfreach_sum += cfreach_opp;
-                    *cfreach_minus.get_unchecked_mut(c1 as usize) += cfreach_opp;
-                    *cfreach_minus.get_unchecked_mut(c2 as usize) += cfreach_opp;
-                    j += 1;
-                }
-                let (c1, c2) = *player_cards.get_unchecked(index);
-                let cfreach = cfreach_sum
-                    - cfreach_minus.get_unchecked(c1 as usize)
-                    - cfreach_minus.get_unchecked(c2 as usize);
-                *result.get_unchecked_mut(index) = (amount * cfreach) as f32;
-            }
-        }
-
-        cfreach_sum = 0.0;
-        cfreach_minus.fill(0.0);
-        j = opponent_len;
-
-        for i in (0..player_len).rev() {
-            unsafe {
-                let StrengthItem { strength, index } = *player_strength.get_unchecked(i);
-                while j > 0 && opponent_strength.get_unchecked(j - 1).strength > strength {
-                    let opponent_index = opponent_strength.get_unchecked(j - 1).index;
-                    let (c1, c2) = *opponent_cards.get_unchecked(opponent_index);
-                    let cfreach_opp = *cfreach.get_unchecked(opponent_index) as f64;
-                    cfreach_sum += cfreach_opp;
-                    *cfreach_minus.get_unchecked_mut(c1 as usize) += cfreach_opp;
-                    *cfreach_minus.get_unchecked_mut(c2 as usize) += cfreach_opp;
-                    j -= 1;
-                }
-                let (c1, c2) = *player_cards.get_unchecked(index);
-                let cfreach = cfreach_sum
-                    - cfreach_minus.get_unchecked(c1 as usize)
-                    - cfreach_minus.get_unchecked(c2 as usize);
-                *result.get_unchecked_mut(index) -= (amount * cfreach) as f32;
-            }
         }
     }
 
@@ -1776,33 +1672,36 @@ impl PostFlopGame {
             panic!("normalized weights are not cached");
         }
 
-        let player = self.current_player();
+        let num_actions = self.node().num_actions();
+        let num_private_hands = self.num_private_hands(self.current_player());
 
-        let mut ret = if self.is_compression_enabled {
-            let slice = self.node().expected_values_compressed();
-            let scale = self.node().expected_value_scale();
-            decode_signed_slice(slice, scale)
-        } else {
-            self.node().expected_values().to_vec()
-        };
+        let expected_values_detail = self.expected_values_detail();
+        let strategy = self.strategy();
 
-        self.apply_swap(&mut ret, player);
-
-        ret.iter_mut().enumerate().for_each(|(i, x)| {
-            *x *= self.normalize_factor / self.normalized_weights[player][i];
-            *x += self.config.starting_pot as f32 / 2.0 + self.node().amount as f32;
-        });
+        let mut ret = Vec::with_capacity(num_private_hands);
+        for i in 0..num_private_hands {
+            let mut expected_value = 0.0;
+            for j in 0..num_actions {
+                let index = i + j * num_private_hands;
+                expected_value += expected_values_detail[index] * strategy[index];
+            }
+            ret.push(expected_value);
+        }
 
         ret
     }
 
-    /// Returns the equity of each private hand of the current player.
+    /// Returns the expected values of each action of each private hand of the current player.
     ///
     /// Panics if the current node is a chance node.
     ///
+    /// The return value is a vector of the length of `#(actions) * #(private hands)`.
+    /// The expected value of `i`-th action with `j`-th private hand is stored in the
+    /// `i * #(private hands) + j`-th element.
+    ///
     /// After mutating the current node, you must call the `cache_normalized_weights()` method
     /// before calling this method.
-    pub fn equity(&self) -> Vec<f32> {
+    pub fn expected_values_detail(&self) -> Vec<f32> {
         if self.is_chance_node() {
             panic!("chance node is not allowed");
         }
@@ -1818,18 +1717,20 @@ impl PostFlopGame {
         let player = self.current_player();
 
         let mut ret = if self.is_compression_enabled {
-            let slice = self.node().equity_compressed();
-            let scale = self.node().equity_scale();
+            let slice = self.node().expected_values_compressed();
+            let scale = self.node().expected_value_scale();
             decode_signed_slice(slice, scale)
         } else {
-            self.node().equity().to_vec()
+            self.node().expected_values().to_vec()
         };
 
-        self.apply_swap(&mut ret, player);
-
-        ret.iter_mut().enumerate().for_each(|(i, x)| {
-            *x *= self.normalize_factor / self.normalized_weights[player][i];
-            *x += 0.5;
+        let num_private_hands = self.num_private_hands(player);
+        ret.chunks_mut(num_private_hands).for_each(|chunk| {
+            self.apply_swap(chunk, player);
+            chunk.iter_mut().enumerate().for_each(|(i, x)| {
+                *x *= self.normalize_factor / self.normalized_weights[player][i];
+                *x += self.config.starting_pot as f32 * 0.5 + self.node().amount as f32;
+            });
         });
 
         ret
@@ -1839,7 +1740,7 @@ impl PostFlopGame {
     ///
     /// Panics if the current node is a chance node.
     ///
-    /// The strategy is a vector of the length of `#(actions) * #(private hands)`.
+    /// The return value is a vector of the length of `#(actions) * #(private hands)`.
     /// The probability of `i`-th action with `j`-th private hand is stored in the
     /// `i * #(private hands) + j`-th element.
     pub fn strategy(&self) -> Vec<f32> {
@@ -1865,9 +1766,9 @@ impl PostFlopGame {
             self.node().strategy().to_vec()
         };
 
-        for i in 0..num_actions {
-            self.apply_swap(row_mut(&mut ret, i, num_private_hands), player);
-        }
+        ret.chunks_mut(num_private_hands).for_each(|chunk| {
+            self.apply_swap(chunk, player);
+        });
 
         ret
     }
@@ -1944,44 +1845,12 @@ impl GameNode for PostFlopNode {
 
     #[inline]
     fn expected_values(&self) -> &[f32] {
-        let num_private_hands = self.num_elements / self.num_actions();
-        unsafe { slice::from_raw_parts(self.storage1 as *const f32, num_private_hands) }
+        unsafe { slice::from_raw_parts(self.storage1 as *const f32, self.num_elements) }
     }
 
     #[inline]
     fn expected_values_mut(&mut self) -> &mut [f32] {
-        let num_private_hands = self.num_elements / self.num_actions();
-        unsafe { slice::from_raw_parts_mut(self.storage1 as *mut f32, num_private_hands) }
-    }
-
-    #[inline]
-    fn equity(&self) -> &[f32] {
-        let num_private_hands = self.num_elements / self.num_actions();
-        if self.num_actions() == 1 {
-            unsafe { slice::from_raw_parts(self.storage2 as *const f32, num_private_hands) }
-        } else {
-            unsafe {
-                slice::from_raw_parts(
-                    (self.storage1 as *const f32).add(num_private_hands),
-                    num_private_hands,
-                )
-            }
-        }
-    }
-
-    #[inline]
-    fn equity_mut(&mut self) -> &mut [f32] {
-        let num_private_hands = self.num_elements / self.num_actions();
-        if self.num_actions() == 1 {
-            unsafe { slice::from_raw_parts_mut(self.storage2 as *mut f32, num_private_hands) }
-        } else {
-            unsafe {
-                slice::from_raw_parts_mut(
-                    (self.storage1 as *mut f32).add(num_private_hands),
-                    num_private_hands,
-                )
-            }
-        }
+        unsafe { slice::from_raw_parts_mut(self.storage1 as *mut f32, self.num_elements) }
     }
 
     #[inline]
@@ -2006,44 +1875,12 @@ impl GameNode for PostFlopNode {
 
     #[inline]
     fn expected_values_compressed(&self) -> &[i16] {
-        let num_private_hands = self.num_elements / self.num_actions();
-        unsafe { slice::from_raw_parts(self.storage1 as *const i16, num_private_hands) }
+        unsafe { slice::from_raw_parts(self.storage1 as *const i16, self.num_elements) }
     }
 
     #[inline]
     fn expected_values_compressed_mut(&mut self) -> &mut [i16] {
-        let num_private_hands = self.num_elements / self.num_actions();
-        unsafe { slice::from_raw_parts_mut(self.storage1 as *mut i16, num_private_hands) }
-    }
-
-    #[inline]
-    fn equity_compressed(&self) -> &[i16] {
-        let num_private_hands = self.num_elements / self.num_actions();
-        if self.num_actions() == 1 {
-            unsafe { slice::from_raw_parts(self.storage2 as *const i16, num_private_hands) }
-        } else {
-            unsafe {
-                slice::from_raw_parts(
-                    (self.storage1 as *const i16).add(num_private_hands),
-                    num_private_hands,
-                )
-            }
-        }
-    }
-
-    #[inline]
-    fn equity_compressed_mut(&mut self) -> &mut [i16] {
-        let num_private_hands = self.num_elements / self.num_actions();
-        if self.num_actions() == 1 {
-            unsafe { slice::from_raw_parts_mut(self.storage2 as *mut i16, num_private_hands) }
-        } else {
-            unsafe {
-                slice::from_raw_parts_mut(
-                    (self.storage1 as *mut i16).add(num_private_hands),
-                    num_private_hands,
-                )
-            }
-        }
+        unsafe { slice::from_raw_parts_mut(self.storage1 as *mut i16, self.num_elements) }
     }
 
     #[inline]
@@ -2074,16 +1911,6 @@ impl GameNode for PostFlopNode {
     #[inline]
     fn set_expected_value_scale(&mut self, scale: f32) {
         self.scale1 = scale;
-    }
-
-    #[inline]
-    fn equity_scale(&self) -> f32 {
-        self.scale3
-    }
-
-    #[inline]
-    fn set_equity_scale(&mut self, scale: f32) {
-        self.scale3 = scale;
     }
 
     #[inline]
@@ -2154,7 +1981,6 @@ impl Default for PostFlopNode {
             storage2: ptr::null_mut(),
             scale1: 0.0,
             scale2: 0.0,
-            scale3: 0.0,
             num_elements: 0,
         }
     }
@@ -2299,11 +2125,12 @@ mod tests {
 
         game.cache_normalized_weights();
         let weights = game.normalized_weights(game.current_player());
+
         let root_ev = compute_average(&game.expected_values(), weights);
-        let root_equity = compute_average(&game.equity(), weights);
+        // let root_equity = compute_average(&game.equity(), weights);
 
         assert!((root_ev - 30.0).abs() < 1e-4);
-        assert!((root_equity - 0.5).abs() < 1e-5);
+        // assert!((root_equity - 0.5).abs() < 1e-5);
     }
 
     #[test]
@@ -2323,11 +2150,12 @@ mod tests {
 
         game.cache_normalized_weights();
         let weights = game.normalized_weights(game.current_player());
+
         let root_ev = compute_average(&game.expected_values(), weights);
-        let root_equity = compute_average(&game.equity(), weights);
+        // let root_equity = compute_average(&game.equity(), weights);
 
         assert!((root_ev - 37.5).abs() < 1e-4);
-        assert!((root_equity - 0.5).abs() < 1e-5);
+        // assert!((root_equity - 0.5).abs() < 1e-5);
     }
 
     #[test]
@@ -2347,11 +2175,12 @@ mod tests {
 
         game.cache_normalized_weights();
         let weights = game.normalized_weights(game.current_player());
+
         let root_ev = compute_average(&game.expected_values(), weights);
-        let root_equity = compute_average(&game.equity(), weights);
+        // let root_equity = compute_average(&game.equity(), weights);
 
         assert!((root_ev - 37.5).abs() < 1e-2);
-        assert!((root_equity - 0.5).abs() < 1e-4);
+        // assert!((root_equity - 0.5).abs() < 1e-4);
     }
 
     #[test]
@@ -2372,11 +2201,12 @@ mod tests {
 
         game.cache_normalized_weights();
         let weights = game.normalized_weights(game.current_player());
+
         let root_ev = compute_average(&game.expected_values(), weights);
-        let root_equity = compute_average(&game.equity(), weights);
+        // let root_equity = compute_average(&game.equity(), weights);
 
         assert!((root_ev - 37.5).abs() < 1e-4);
-        assert!((root_equity - 0.5).abs() < 1e-5);
+        // assert!((root_equity - 0.5).abs() < 1e-5);
     }
 
     #[test]
@@ -2398,17 +2228,18 @@ mod tests {
 
         game.cache_normalized_weights();
         let weights = game.normalized_weights(game.current_player());
+
         let root_ev = compute_average(&game.expected_values(), weights);
-        let root_equity = compute_average(&game.equity(), weights);
+        // let root_equity = compute_average(&game.equity(), weights);
 
         assert!((root_ev - 37.5).abs() < 1e-4);
-        assert!((root_equity - 0.5).abs() < 1e-5);
+        // assert!((root_equity - 0.5).abs() < 1e-5);
     }
 
     #[test]
     fn always_win() {
         // be careful for straight flushes
-        let lose_range_str = "22+,A2+,K9-K2,Q8-Q2,J8-J2,T8-T2,92+,82+,72+,62+";
+        let lose_range_str = "KK-22,K9-K2,Q8-Q2,J8-J2,T8-T2,92+,82+,72+,62+";
         let config = GameConfig {
             flop: flop_from_str("AcAdKh").unwrap(),
             starting_pot: 60,
@@ -2423,11 +2254,12 @@ mod tests {
 
         game.cache_normalized_weights();
         let weights = game.normalized_weights(game.current_player());
+
         let root_ev = compute_average(&game.expected_values(), weights);
-        let root_equity = compute_average(&game.equity(), weights);
+        // let root_equity = compute_average(&game.equity(), weights);
 
         assert!((root_ev - 60.0).abs() < 1e-4);
-        assert!((root_equity - 1.0).abs() < 1e-5);
+        // assert!((root_equity - 1.0).abs() < 1e-5);
     }
 
     #[test]
@@ -2482,11 +2314,12 @@ mod tests {
 
         game.cache_normalized_weights();
         let weights = game.normalized_weights(game.current_player());
+
         let root_ev = compute_average(&game.expected_values(), weights);
-        let root_equity = compute_average(&game.equity(), weights);
+        // let root_equity = compute_average(&game.equity(), weights);
 
         // verified by PioSOLVER Free
         assert!((root_ev - 105.11).abs() < 0.2);
-        assert!((root_equity - 0.55347).abs() < 1e-5);
+        // assert!((root_equity - 0.55347).abs() < 1e-5);
     }
 }

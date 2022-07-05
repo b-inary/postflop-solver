@@ -150,7 +150,7 @@ fn solve_recursive<T: Game>(
 ) {
     // returns the counterfactual values when the `node` is terminal
     if node.is_terminal() {
-        game.evaluate(result, node, player, cfreach, false);
+        game.evaluate(result, node, player, cfreach);
         return;
     }
 
@@ -348,9 +348,9 @@ fn solve_recursive<T: Game>(
         } else {
             regret_matching(node.cum_regret(), num_actions)
         };
-        let row_size = cfreach_actions.len() / num_actions;
 
         // updates the reach probabilities
+        let row_size = cfreach_actions.len() / num_actions;
         cfreach_actions.chunks_mut(row_size).for_each(|row| {
             mul_slice(row, cfreach);
         });

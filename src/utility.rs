@@ -89,14 +89,13 @@ pub fn finalize<T: Game>(game: &mut T) {
         normalize_strategy_recursive::<T::Node>(&mut game.root());
     }
 
-    // computes the expected values and the equity, and save them
     let reach = [game.initial_weight(0), game.initial_weight(1)];
+
+    // computes the expected values and saves them
     for player in 0..2 {
-        let mut ev = vec![0.0; game.num_private_hands(player)];
-        let mut eq = vec![0.0; game.num_private_hands(player)];
-        compute_ev_and_equity_recursive(
-            &mut ev,
-            &mut eq,
+        let mut cfv = vec![0.0; game.num_private_hands(player)];
+        compute_ev_recursive(
+            &mut cfv,
             game,
             &mut game.root(),
             player,
@@ -217,10 +216,9 @@ fn normalize_strategy_compressed_recursive<T: GameNode>(node: &mut T) {
     })
 }
 
-/// The recursive helper function for computing the expected value and equity.
-fn compute_ev_and_equity_recursive<T: Game>(
-    ev: &mut [f32],
-    eq: &mut [f32],
+/// The recursive helper function for computing the counterfactual values of the given strategy.
+fn compute_ev_recursive<T: Game>(
+    result: &mut [f32],
     game: &T,
     node: &mut T::Node,
     player: usize,
@@ -229,45 +227,30 @@ fn compute_ev_and_equity_recursive<T: Game>(
 ) {
     // terminal node
     if node.is_terminal() {
-        game.evaluate(ev, node, player, cfreach, false);
-        game.evaluate(eq, node, player, cfreach, true);
-        mul_slice(ev, reach);
-        mul_slice(eq, reach);
+        game.evaluate(result, node, player, cfreach);
         return;
     }
 
     let num_actions = node.num_actions();
     let num_private_hands = game.num_private_hands(player);
 
-    // allocates memory for storing the expected values and equity
+    // allocates memory for storing the counterfactual values
     #[cfg(feature = "custom-alloc")]
-    let ev_actions = MutexLike::new(vec::from_elem_in(
-        0.0,
-        num_actions * num_private_hands,
-        StackAlloc,
-    ));
-    #[cfg(feature = "custom-alloc")]
-    let eq_actions = MutexLike::new(vec::from_elem_in(
+    let cfv_actions = MutexLike::new(vec::from_elem_in(
         0.0,
         num_actions * num_private_hands,
         StackAlloc,
     ));
     #[cfg(not(feature = "custom-alloc"))]
-    let ev_actions = MutexLike::new(vec![0.0; num_actions * num_private_hands]);
-    #[cfg(not(feature = "custom-alloc"))]
-    let eq_actions = MutexLike::new(vec![0.0; num_actions * num_private_hands]);
+    let cfv_actions = MutexLike::new(vec![0.0; num_actions * num_private_hands]);
 
     // chance node
     if node.is_chance() {
         // use 64-bit floating point values
         #[cfg(feature = "custom-alloc")]
-        let mut ev_f64 = vec::from_elem_in(0.0, num_private_hands, StackAlloc);
-        #[cfg(feature = "custom-alloc")]
-        let mut eq_f64 = vec::from_elem_in(0.0, num_private_hands, StackAlloc);
+        let mut result_f64 = vec::from_elem_in(0.0, num_private_hands, StackAlloc);
         #[cfg(not(feature = "custom-alloc"))]
-        let mut ev_f64 = vec![0.0; num_private_hands];
-        #[cfg(not(feature = "custom-alloc"))]
-        let mut eq_f64 = vec![0.0; num_private_hands];
+        let mut result_f64 = vec![0.0; num_private_hands];
 
         // updates the reach probabilities
         #[cfg(feature = "custom-alloc")]
@@ -276,11 +259,10 @@ fn compute_ev_and_equity_recursive<T: Game>(
         let mut cfreach = cfreach.to_vec();
         mul_slice_scalar(&mut cfreach, node.chance_factor());
 
-        // computes the expected values and equity of each action
+        // computes the counterfactual values of each action
         for_each_child(node, |action| {
-            compute_ev_and_equity_recursive(
-                row_mut(&mut ev_actions.lock(), action, num_private_hands),
-                row_mut(&mut eq_actions.lock(), action, num_private_hands),
+            compute_ev_recursive(
+                row_mut(&mut cfv_actions.lock(), action, num_private_hands),
                 game,
                 &mut node.play(action),
                 player,
@@ -289,17 +271,11 @@ fn compute_ev_and_equity_recursive<T: Game>(
             );
         });
 
-        // sums up the expected values and equity
-        let mut ev_actions = ev_actions.lock();
-        let mut eq_actions = eq_actions.lock();
-        ev_actions.chunks(num_private_hands).for_each(|row| {
-            ev_f64.iter_mut().zip(row).for_each(|(l, &r)| {
-                *l += r as f64;
-            });
-        });
-        eq_actions.chunks(num_private_hands).for_each(|row| {
-            eq_f64.iter_mut().zip(row).for_each(|(l, &r)| {
-                *l += r as f64;
+        // sums up the counterfactual values
+        let mut cfv_actions = cfv_actions.lock();
+        cfv_actions.chunks(num_private_hands).for_each(|row| {
+            result_f64.iter_mut().zip(row).for_each(|(r, &v)| {
+                *r += v as f64;
             });
         });
 
@@ -308,35 +284,26 @@ fn compute_ev_and_equity_recursive<T: Game>(
 
         // processes isomorphic chances
         for i in 0..isomorphic_chances.len() {
-            let ev_tmp = row_mut(&mut ev_actions, isomorphic_chances[i], num_private_hands);
-            let eq_tmp = row_mut(&mut eq_actions, isomorphic_chances[i], num_private_hands);
+            let tmp = row_mut(&mut cfv_actions, isomorphic_chances[i], num_private_hands);
             for &(i, j) in &game.isomorphic_swap(node, i)[player] {
-                ev_tmp.swap(i, j);
-                eq_tmp.swap(i, j);
+                tmp.swap(i, j);
             }
-            ev_f64.iter_mut().zip(&*ev_tmp).for_each(|(l, &r)| {
-                *l += r as f64;
-            });
-            eq_f64.iter_mut().zip(&*eq_tmp).for_each(|(l, &r)| {
-                *l += r as f64;
+            result_f64.iter_mut().zip(&*tmp).for_each(|(r, &v)| {
+                *r += v as f64;
             });
             for &(i, j) in &game.isomorphic_swap(node, i)[player] {
-                ev_tmp.swap(i, j);
-                eq_tmp.swap(i, j);
+                tmp.swap(i, j);
             }
         }
 
-        ev.iter_mut().zip(&ev_f64).for_each(|(l, &r)| {
-            *l = r as f32;
-        });
-        eq.iter_mut().zip(&eq_f64).for_each(|(l, &r)| {
-            *l = r as f32;
+        result.iter_mut().zip(&result_f64).for_each(|(r, &v)| {
+            *r = v as f32;
         });
     }
     // player node
     else if node.player() == player {
-        // updates the reach probabilities
-        let mut reach_actions = if game.is_compression_enabled() {
+        // obtain the strategy
+        let mut strategy = if game.is_compression_enabled() {
             let strategy = node.strategy_compressed();
             let scale = node.strategy_scale();
             decode_unsigned_slice(strategy, scale)
@@ -351,51 +318,48 @@ fn compute_ev_and_equity_recursive<T: Game>(
             }
         };
 
-        let row_size = reach_actions.len() / node.num_actions();
-        reach_actions.chunks_mut(row_size).for_each(|row| {
+        // updates the reach probabilities
+        let mut reach_actions = strategy.clone();
+        reach_actions.chunks_mut(num_private_hands).for_each(|row| {
             mul_slice(row, reach);
         });
 
-        // computes the expected values and equity of each action
+        // computes the counterfactual values of each action
         for_each_child(node, |action| {
-            compute_ev_and_equity_recursive(
-                row_mut(&mut ev_actions.lock(), action, num_private_hands),
-                row_mut(&mut eq_actions.lock(), action, num_private_hands),
+            compute_ev_recursive(
+                row_mut(&mut cfv_actions.lock(), action, num_private_hands),
                 game,
                 &mut node.play(action),
                 player,
-                row(&reach_actions, action, row_size),
+                row(&reach_actions, action, num_private_hands),
                 cfreach,
             );
         });
 
-        // sums up the expected values and equity
-        let ev_actions = ev_actions.lock();
-        let eq_actions = eq_actions.lock();
-        ev_actions.chunks(num_private_hands).for_each(|row| {
-            add_slice(ev, row);
-        });
-        eq_actions.chunks(num_private_hands).for_each(|row| {
-            add_slice(eq, row);
+        // sums up the counterfactual values
+        let mut cfv_actions = cfv_actions.lock();
+        mul_slice(&mut strategy, &cfv_actions);
+        strategy.chunks(num_private_hands).for_each(|row| {
+            add_slice(result, row);
         });
 
-        // save the expected values and equity
+        // save the expected values
+        cfv_actions
+            .chunks_mut(num_private_hands)
+            .for_each(|row| mul_slice(row, reach));
         if game.is_compression_enabled() {
-            let ev_scale = encode_signed_slice(node.expected_values_compressed_mut(), ev);
-            let eq_scale = encode_signed_slice(node.equity_compressed_mut(), eq);
+            let ev_scale = encode_signed_slice(node.expected_values_compressed_mut(), &cfv_actions);
             node.set_cum_regret_scale(ev_scale);
-            node.set_equity_scale(eq_scale);
         } else {
-            node.expected_values_mut().copy_from_slice(ev);
-            node.equity_mut().copy_from_slice(eq);
+            node.expected_values_mut().copy_from_slice(&cfv_actions);
         }
     }
     // opponent node
     else if num_actions == 1 {
-        // do not use `strategy` field when there is only one action
-        // (because the equity and the strategy may share the same storage)
-        compute_ev_and_equity_recursive(ev, eq, game, &mut node.play(0), player, reach, cfreach);
+        // simply recurses when the number of actions is 1
+        compute_ev_recursive(result, game, &mut node.play(0), player, reach, cfreach);
     } else {
+        // obtain the strategy
         let mut cfreach_actions = if game.is_compression_enabled() {
             let strategy = node.strategy_compressed();
             let scale = node.strategy_scale();
@@ -417,11 +381,10 @@ fn compute_ev_and_equity_recursive<T: Game>(
             mul_slice(row, cfreach);
         });
 
-        // computes the expected values and equity of each action
+        // computes the counterfactual values of each action
         for_each_child(node, |action| {
-            compute_ev_and_equity_recursive(
-                row_mut(&mut ev_actions.lock(), action, num_private_hands),
-                row_mut(&mut eq_actions.lock(), action, num_private_hands),
+            compute_ev_recursive(
+                row_mut(&mut cfv_actions.lock(), action, num_private_hands),
                 game,
                 &mut node.play(action),
                 player,
@@ -430,14 +393,10 @@ fn compute_ev_and_equity_recursive<T: Game>(
             );
         });
 
-        // sums up the expected values and equity
-        let ev_actions = ev_actions.lock();
-        let eq_actions = eq_actions.lock();
-        ev_actions.chunks(num_private_hands).for_each(|row| {
-            add_slice(ev, row);
-        });
-        eq_actions.chunks(num_private_hands).for_each(|row| {
-            add_slice(eq, row);
+        // sums up the counterfactual values
+        let cfv_actions = cfv_actions.lock();
+        cfv_actions.chunks(num_private_hands).for_each(|row| {
+            add_slice(result, row);
         });
     }
 }
@@ -452,7 +411,7 @@ fn compute_best_cfv_recursive<T: Game>(
 ) {
     // terminal node
     if node.is_terminal() {
-        game.evaluate(result, node, player, cfreach, false);
+        game.evaluate(result, node, player, cfreach);
         return;
     }
 

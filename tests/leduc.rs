@@ -62,25 +62,12 @@ impl Game for LeducGame {
         &self.initial_weight
     }
 
-    fn evaluate(
-        &self,
-        result: &mut [f32],
-        node: &Self::Node,
-        player: usize,
-        cfreach: &[f32],
-        compute_equity: bool,
-    ) {
+    fn evaluate(&self, result: &mut [f32], node: &Self::Node, player: usize, cfreach: &[f32]) {
         let num_hands = NUM_PRIVATE_HANDS * (NUM_PRIVATE_HANDS - 1);
         let num_hands_inv = 1.0 / num_hands as f32;
+        let amount_normalized = node.amount as f32 * num_hands_inv;
 
-        let amount = if compute_equity {
-            0.5
-        } else {
-            node.amount as f32
-        };
-        let amount_normalized = amount * num_hands_inv;
-
-        if !compute_equity && node.player & PLAYER_FOLD_FLAG == PLAYER_FOLD_FLAG {
+        if node.player & PLAYER_FOLD_FLAG == PLAYER_FOLD_FLAG {
             let folded_player = node.player & PLAYER_MASK;
             let sign = [1.0, -1.0][(player == folded_player) as usize];
             let payoff_normalized = amount_normalized * sign;
@@ -93,7 +80,7 @@ impl Game for LeducGame {
                     }
                 }
             }
-        } else if node.board != NOT_DEALT {
+        } else {
             for my_card in 0..NUM_PRIVATE_HANDS {
                 if my_card != node.board {
                     for opp_card in 0..NUM_PRIVATE_HANDS {
@@ -107,26 +94,6 @@ impl Game for LeducGame {
                             };
                             let payoff_normalized = amount_normalized * sign;
                             result[my_card] += payoff_normalized * cfreach[opp_card];
-                        }
-                    }
-                }
-            }
-        } else {
-            for board in 0..NUM_PRIVATE_HANDS {
-                for my_card in 0..NUM_PRIVATE_HANDS {
-                    if my_card != board {
-                        for opp_card in 0..NUM_PRIVATE_HANDS {
-                            if my_card != opp_card && opp_card != board {
-                                let sign = match () {
-                                    _ if my_card / 2 == board / 2 => 1.0,
-                                    _ if opp_card / 2 == board / 2 => -1.0,
-                                    _ if my_card / 2 == opp_card / 2 => 0.0,
-                                    _ if my_card > opp_card => 1.0,
-                                    _ => -1.0,
-                                };
-                                let payoff_normalized = amount_normalized * sign / 4.0;
-                                result[my_card] += payoff_normalized * cfreach[opp_card];
-                            }
                         }
                     }
                 }
@@ -365,22 +332,12 @@ impl GameNode for LeducNode {
 
     #[inline]
     fn expected_values(&self) -> &[f32] {
-        &self.storage[..NUM_PRIVATE_HANDS]
+        &self.storage
     }
 
     #[inline]
     fn expected_values_mut(&mut self) -> &mut [f32] {
-        &mut self.storage[..NUM_PRIVATE_HANDS]
-    }
-
-    #[inline]
-    fn equity(&self) -> &[f32] {
-        &self.storage[NUM_PRIVATE_HANDS..2 * NUM_PRIVATE_HANDS]
-    }
-
-    #[inline]
-    fn equity_mut(&mut self) -> &mut [f32] {
-        &mut self.storage[NUM_PRIVATE_HANDS..2 * NUM_PRIVATE_HANDS]
+        &mut self.storage
     }
 }
 
@@ -390,10 +347,10 @@ fn leduc() {
     let mut game = LeducGame::new();
     solve(&mut game, 10000, target, false);
 
-    let root_ev = game.root().expected_values().iter().sum::<f32>();
-    let root_equity = game.root().equity().iter().sum::<f32>();
+    let root_ev = (game.root().expected_values().iter())
+        .zip(game.root().strategy().iter())
+        .fold(0.0, |acc, (ev, strategy)| acc + ev * strategy);
 
     let expected_ev = -0.0856; // verified by OpenSpiel
     assert!((root_ev - expected_ev).abs() < 2.0 * target);
-    assert!(root_equity.abs() < 1e-5);
 }

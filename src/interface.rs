@@ -19,16 +19,9 @@ pub trait Game: Send + Sync {
     #[doc(hidden)]
     fn initial_weight(&self, player: usize) -> &[f32];
 
-    /// Computes the counterfactual values or equity of given node.
+    /// Computes the counterfactual values of given node.
     #[doc(hidden)]
-    fn evaluate(
-        &self,
-        result: &mut [f32],
-        node: &Self::Node,
-        player: usize,
-        cfreach: &[f32],
-        compute_equity: bool,
-    );
+    fn evaluate(&self, result: &mut [f32], node: &Self::Node, player: usize, cfreach: &[f32]);
 
     /// Returns whether the instance is solved.
     #[doc(hidden)]
@@ -113,14 +106,6 @@ pub trait GameNode: Send + Sync {
     #[doc(hidden)]
     fn expected_values_mut(&mut self) -> &mut [f32];
 
-    /// Returns the equity.
-    #[doc(hidden)]
-    fn equity(&self) -> &[f32];
-
-    /// Returns the mutable reference to the equity.
-    #[doc(hidden)]
-    fn equity_mut(&mut self) -> &mut [f32];
-
     /// Returns the [`Range`] struct of actions.
     #[doc(hidden)]
     fn actions(&self) -> Range<usize> {
@@ -163,18 +148,6 @@ pub trait GameNode: Send + Sync {
         unreachable!()
     }
 
-    /// Returns the compressed equity.
-    #[doc(hidden)]
-    fn equity_compressed(&self) -> &[i16] {
-        unreachable!()
-    }
-
-    /// Returns the mutable reference to the compressed equity.
-    #[doc(hidden)]
-    fn equity_compressed_mut(&mut self) -> &mut [i16] {
-        unreachable!()
-    }
-
     /// Returns the scale of the compressed cumulative regrets.
     #[doc(hidden)]
     fn cum_regret_scale(&self) -> f32 {
@@ -208,18 +181,6 @@ pub trait GameNode: Send + Sync {
     /// Sets the scale of the compressed expected values.
     #[doc(hidden)]
     fn set_expected_value_scale(&mut self, _scale: f32) {
-        unreachable!()
-    }
-
-    /// Returns the scale of the compressed equity.
-    #[doc(hidden)]
-    fn equity_scale(&self) -> f32 {
-        unreachable!()
-    }
-
-    /// Sets the scale of the compressed equity.
-    #[doc(hidden)]
-    fn set_equity_scale(&mut self, _scale: f32) {
         unreachable!()
     }
 
