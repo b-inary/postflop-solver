@@ -57,7 +57,7 @@ pub fn solve<T: Game>(
     let mut exploitability = f32::INFINITY;
 
     if print_progress {
-        print!("iteration: 0 / {}", max_num_iterations);
+        print!("iteration: 0 / {} ", max_num_iterations);
         print!("(exploitability = {:.4e}[bb])", exploitability);
         io::stdout().flush().unwrap();
     }

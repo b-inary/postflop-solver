@@ -1583,8 +1583,8 @@ impl PostFlopGame {
 
     /// Computes the normalized weights and caches them.
     ///
-    /// After mutating the current node, this method must be called before calling
-    /// `normalized_weights()`, `expected_values()`, or `equity()`.
+    /// After mutating the current node, this method must be called once before calling
+    /// `normalized_weights()`, `equity()`, `expected_values()`, or `expected_values_detail()`.
     pub fn cache_normalized_weights(&mut self) {
         if self.normalized_weights_cached {
             return;
@@ -1650,7 +1650,42 @@ impl PostFlopGame {
         if !self.normalized_weights_cached {
             panic!("normalized weights are not cached");
         }
+
         &self.normalized_weights[player]
+    }
+
+    /// Returns the equity of each private hand of the given player.
+    ///
+    /// After mutating the current node, you must call the `cache_normalized_weights()` method
+    /// before calling this method.
+    pub fn equity(&self, player: usize) -> Vec<f32> {
+        if !self.normalized_weights_cached {
+            panic!("normalized weights are not cached");
+        }
+
+        let num_private_hands = self.num_private_hands(player);
+        let mut tmp = vec![0.0; num_private_hands];
+
+        if self.river != NOT_DEALT {
+            self.equity_internal(&mut tmp, player, self.turn, self.river, 0.5);
+        } else if self.turn != NOT_DEALT {
+            for river in 0..52 {
+                self.equity_internal(&mut tmp, player, self.turn, river, 0.5 / 44.0);
+            }
+        } else {
+            for turn in 0..52 {
+                for river in turn + 1..52 {
+                    self.equity_internal(&mut tmp, player, turn, river, 1.0 / (45.0 * 44.0));
+                }
+            }
+        }
+
+        tmp.iter()
+            .enumerate()
+            .map(|(i, &v)| {
+                v as f32 * (self.weights[player][i] / self.normalized_weights[player][i]) + 0.5
+            })
+            .collect()
     }
 
     /// Returns the expected values of each private hand of the current player.
@@ -1787,6 +1822,68 @@ impl PostFlopGame {
                 for &(i, j) in unsafe { &(*swap)[player] } {
                     slice.swap(i, j);
                 }
+            }
+        }
+    }
+
+    /// Internal method for calculating the equity.
+    fn equity_internal(&self, result: &mut [f64], player: usize, turn: u8, river: u8, amount: f64) {
+        let player_cards = &self.private_hand_cards[player];
+        let opponent_cards = &self.private_hand_cards[player ^ 1];
+
+        let opponent_weights = &self.weights[player ^ 1];
+        let mut weight_sum = 0.0;
+        let mut weight_minus = [0.0; 52];
+
+        let hand_strength = &self.hand_strength[card_pair_index(turn, river)];
+        let player_strength = &hand_strength[player];
+        let opponent_strength = &hand_strength[player ^ 1];
+
+        let mut j = 0;
+        let player_len = player_strength.len();
+        let opponent_len = opponent_strength.len();
+
+        for i in 0..player_len {
+            unsafe {
+                let StrengthItem { strength, index } = *player_strength.get_unchecked(i);
+                while j < opponent_len && opponent_strength.get_unchecked(j).strength < strength {
+                    let opponent_index = opponent_strength.get_unchecked(j).index;
+                    let (c1, c2) = *opponent_cards.get_unchecked(opponent_index);
+                    let weight = *opponent_weights.get_unchecked(opponent_index) as f64;
+                    weight_sum += weight;
+                    *weight_minus.get_unchecked_mut(c1 as usize) += weight;
+                    *weight_minus.get_unchecked_mut(c2 as usize) += weight;
+                    j += 1;
+                }
+                let (c1, c2) = *player_cards.get_unchecked(index);
+                let opponent_weight = weight_sum
+                    - weight_minus.get_unchecked(c1 as usize)
+                    - weight_minus.get_unchecked(c2 as usize);
+                *result.get_unchecked_mut(index) += amount * opponent_weight;
+            }
+        }
+
+        weight_sum = 0.0;
+        weight_minus.fill(0.0);
+        j = opponent_len;
+
+        for i in (0..player_len).rev() {
+            unsafe {
+                let StrengthItem { strength, index } = *player_strength.get_unchecked(i);
+                while j > 0 && opponent_strength.get_unchecked(j - 1).strength > strength {
+                    let opponent_index = opponent_strength.get_unchecked(j - 1).index;
+                    let (c1, c2) = *opponent_cards.get_unchecked(opponent_index);
+                    let weight = *opponent_weights.get_unchecked(opponent_index) as f64;
+                    weight_sum += weight;
+                    *weight_minus.get_unchecked_mut(c1 as usize) += weight;
+                    *weight_minus.get_unchecked_mut(c2 as usize) += weight;
+                    j -= 1;
+                }
+                let (c1, c2) = *player_cards.get_unchecked(index);
+                let opponent_weight = weight_sum
+                    - weight_minus.get_unchecked(c1 as usize)
+                    - weight_minus.get_unchecked(c2 as usize);
+                *result.get_unchecked_mut(index) -= amount * opponent_weight;
             }
         }
     }
@@ -2126,11 +2223,11 @@ mod tests {
         game.cache_normalized_weights();
         let weights = game.normalized_weights(game.current_player());
 
+        let root_equity = compute_average(&game.equity(game.current_player()), weights);
         let root_ev = compute_average(&game.expected_values(), weights);
-        // let root_equity = compute_average(&game.equity(), weights);
 
+        assert!((root_equity - 0.5).abs() < 1e-5);
         assert!((root_ev - 30.0).abs() < 1e-4);
-        // assert!((root_equity - 0.5).abs() < 1e-5);
     }
 
     #[test]
@@ -2151,11 +2248,11 @@ mod tests {
         game.cache_normalized_weights();
         let weights = game.normalized_weights(game.current_player());
 
+        let root_equity = compute_average(&game.equity(game.current_player()), weights);
         let root_ev = compute_average(&game.expected_values(), weights);
-        // let root_equity = compute_average(&game.equity(), weights);
 
+        assert!((root_equity - 0.5).abs() < 1e-5);
         assert!((root_ev - 37.5).abs() < 1e-4);
-        // assert!((root_equity - 0.5).abs() < 1e-5);
     }
 
     #[test]
@@ -2176,11 +2273,11 @@ mod tests {
         game.cache_normalized_weights();
         let weights = game.normalized_weights(game.current_player());
 
+        let root_equity = compute_average(&game.equity(game.current_player()), weights);
         let root_ev = compute_average(&game.expected_values(), weights);
-        // let root_equity = compute_average(&game.equity(), weights);
 
+        assert!((root_equity - 0.5).abs() < 1e-4);
         assert!((root_ev - 37.5).abs() < 1e-2);
-        // assert!((root_equity - 0.5).abs() < 1e-4);
     }
 
     #[test]
@@ -2202,11 +2299,11 @@ mod tests {
         game.cache_normalized_weights();
         let weights = game.normalized_weights(game.current_player());
 
+        let root_equity = compute_average(&game.equity(game.current_player()), weights);
         let root_ev = compute_average(&game.expected_values(), weights);
-        // let root_equity = compute_average(&game.equity(), weights);
 
+        assert!((root_equity - 0.5).abs() < 1e-5);
         assert!((root_ev - 37.5).abs() < 1e-4);
-        // assert!((root_equity - 0.5).abs() < 1e-5);
     }
 
     #[test]
@@ -2229,11 +2326,11 @@ mod tests {
         game.cache_normalized_weights();
         let weights = game.normalized_weights(game.current_player());
 
+        let root_equity = compute_average(&game.equity(game.current_player()), weights);
         let root_ev = compute_average(&game.expected_values(), weights);
-        // let root_equity = compute_average(&game.equity(), weights);
 
+        assert!((root_equity - 0.5).abs() < 1e-5);
         assert!((root_ev - 37.5).abs() < 1e-4);
-        // assert!((root_equity - 0.5).abs() < 1e-5);
     }
 
     #[test]
@@ -2255,11 +2352,11 @@ mod tests {
         game.cache_normalized_weights();
         let weights = game.normalized_weights(game.current_player());
 
+        let root_equity = compute_average(&game.equity(game.current_player()), weights);
         let root_ev = compute_average(&game.expected_values(), weights);
-        // let root_equity = compute_average(&game.equity(), weights);
 
+        assert!((root_equity - 1.0).abs() < 1e-5);
         assert!((root_ev - 60.0).abs() < 1e-4);
-        // assert!((root_equity - 1.0).abs() < 1e-5);
     }
 
     #[test]
@@ -2315,11 +2412,11 @@ mod tests {
         game.cache_normalized_weights();
         let weights = game.normalized_weights(game.current_player());
 
+        let root_equity = compute_average(&game.equity(game.current_player()), weights);
         let root_ev = compute_average(&game.expected_values(), weights);
-        // let root_equity = compute_average(&game.equity(), weights);
 
         // verified by PioSOLVER Free
+        assert!((root_equity - 0.55347).abs() < 1e-5);
         assert!((root_ev - 105.11).abs() < 0.2);
-        // assert!((root_equity - 0.55347).abs() < 1e-5);
     }
 }

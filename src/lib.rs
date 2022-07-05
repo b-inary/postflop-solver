@@ -70,19 +70,19 @@
 //! // }
 //! // finalize(&mut game);
 //!
-//! // get EV and equity of a specific hand
+//! // get equity and EV of a specific hand
 //! game.cache_normalized_weights();
+//! let equity = game.equity(game.current_player());
 //! let ev = game.expected_values();
-//! // let equity = game.equity();
+//! println!("Equity of oop_hands[0]: {:.2}%", 100.0 * equity[0]);
 //! println!("EV of oop_hands[0]: {:.2}", ev[0]);
-//! // println!("Equity of oop_hands[0]: {:.2}%", 100.0 * equity[0]);
 //!
-//! // get EV and equity of whole hand
+//! // get equity and EV of whole hand
 //! let weights = game.normalized_weights(game.current_player());
+//! let average_equity = compute_average(&equity, weights);
 //! let average_ev = compute_average(&ev, weights);
-//! // let average_equity = compute_average(&equity, weights);
+//! println!("Average equity: {:.2}%", 100.0 * average_equity);
 //! println!("Average EV: {:.2}", average_ev);
-//! // println!("Average equity: {:.2}%", 100.0 * average_equity);
 //!
 //! // get available actions
 //! let actions = game.available_actions();
