@@ -1657,7 +1657,9 @@ impl PostFlopGame {
             self.equity_internal(&mut tmp, player, self.turn, self.river, 0.5);
         } else if self.turn != NOT_DEALT {
             for river in 0..52 {
-                self.equity_internal(&mut tmp, player, self.turn, river, 0.5 / 44.0);
+                if self.turn != river {
+                    self.equity_internal(&mut tmp, player, self.turn, river, 0.5 / 44.0);
+                }
             }
         } else {
             for turn in 0..52 {
