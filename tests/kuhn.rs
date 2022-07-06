@@ -235,8 +235,15 @@ fn kuhn() {
     let mut game = KuhnGame::new();
     solve(&mut game, 10000, target, false);
 
+    let mut strategy = game.root().strategy().to_vec();
+    for i in 0..NUM_PRIVATE_HANDS {
+        let sum = strategy[i] + strategy[i + NUM_PRIVATE_HANDS];
+        strategy[i] /= sum;
+        strategy[i + NUM_PRIVATE_HANDS] /= sum;
+    }
+
     let root_ev = (game.root().expected_values().iter())
-        .zip(game.root().strategy().iter())
+        .zip(strategy.iter())
         .fold(0.0, |acc, (ev, strategy)| acc + ev * strategy);
 
     let expected_ev = -1.0 / 18.0;
