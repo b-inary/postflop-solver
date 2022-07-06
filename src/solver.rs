@@ -268,22 +268,28 @@ fn solve_recursive<T: Game>(
 
         // sums up the counterfactual values
         let mut cfv_actions = cfv_actions.lock();
-        mul_slice(&mut strategy, &cfv_actions);
-        strategy.chunks(num_private_hands).for_each(|row| {
-            add_slice(result, row);
-        });
+        strategy
+            .chunks(num_private_hands)
+            .zip(cfv_actions.chunks(num_private_hands))
+            .for_each(|(strategy_row, cfv_row)| {
+                result
+                    .iter_mut()
+                    .zip(strategy_row)
+                    .zip(cfv_row)
+                    .for_each(|((r, &s), &v)| *r += s * v);
+            });
 
         if game.is_compression_enabled() {
             // updates the cumulative strategy
             let scale = node.strategy_scale();
-            let strategy = node.strategy_compressed_mut();
+            let cum_strategy = node.strategy_compressed_mut();
             let decoder = params.gamma_t * scale / u16::MAX as f32;
 
-            reach_actions.iter_mut().zip(&*strategy).for_each(|(x, y)| {
+            strategy.iter_mut().zip(&*cum_strategy).for_each(|(x, y)| {
                 *x += (*y as f32) * decoder;
             });
 
-            let new_scale = encode_unsigned_slice(strategy, &reach_actions);
+            let new_scale = encode_unsigned_slice(cum_strategy, &strategy);
             node.set_strategy_scale(new_scale);
 
             // updates the cumulative regret
@@ -310,7 +316,7 @@ fn solve_recursive<T: Game>(
             // updates the cumulative strategy
             let cum_strategy = node.strategy_mut();
             mul_slice_scalar(cum_strategy, params.gamma_t);
-            add_slice(cum_strategy, &reach_actions);
+            add_slice(cum_strategy, &strategy);
 
             // updates the cumulative regret
             let cum_regret = node.cum_regret_mut();
