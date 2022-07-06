@@ -3,6 +3,7 @@ use crate::interface::*;
 use crate::mutex_like::*;
 use crate::range::*;
 use crate::sliceop::*;
+use crate::utility::*;
 use std::cmp;
 use std::mem;
 use std::ptr;
@@ -230,21 +231,6 @@ fn decode_signed_slice(slice: &[i16], scale: f32) -> Vec<f32> {
     unsafe {
         for i in 0..slice.len() {
             *ptr.add(i) = (*slice.get_unchecked(i)) as f32 * decoder;
-        }
-        result.set_len(slice.len());
-    }
-    result
-}
-
-/// Decodes the encoded `u16` slice to the `f32` slice.
-#[inline]
-fn decode_unsigned_slice(slice: &[u16], scale: f32) -> Vec<f32> {
-    let decoder = scale / u16::MAX as f32;
-    let mut result = Vec::<f32>::with_capacity(slice.len());
-    let ptr = result.as_mut_ptr();
-    unsafe {
-        for i in 0..slice.len() {
-            *ptr.add(i) = *slice.get_unchecked(i) as f32 * decoder;
         }
         result.set_len(slice.len());
     }
@@ -1566,24 +1552,9 @@ impl PostFlopGame {
             // updates the weights
             if self.node().num_actions() > 1 {
                 let player = self.node().player();
-                let mut weights = if self.is_compression_enabled {
-                    let weights_raw = row(
-                        self.node().strategy_compressed(),
-                        action,
-                        self.num_private_hands(player),
-                    );
-                    let scale = self.node().strategy_scale();
-                    decode_unsigned_slice(weights_raw, scale)
-                } else {
-                    row(
-                        self.node().strategy(),
-                        action,
-                        self.num_private_hands(player),
-                    )
-                    .to_vec()
-                };
-                self.apply_swap(&mut weights, player);
-                mul_slice(&mut self.weights[player], &weights);
+                let strategy = self.strategy();
+                let weights = row(&strategy, action, self.num_private_hands(player));
+                mul_slice(&mut self.weights[player], weights);
             }
 
             // updates the node
@@ -1807,15 +1778,14 @@ impl PostFlopGame {
         let num_actions = self.node().num_actions();
         let num_private_hands = self.num_private_hands(player);
 
-        let mut ret = if num_actions == 1 {
-            vec![1.0; num_private_hands]
-        } else if self.is_compression_enabled {
+        let mut ret = if self.is_compression_enabled {
             let slice = self.node().strategy_compressed();
-            let scale = self.node().strategy_scale();
-            decode_unsigned_slice(slice, scale)
+            slice.iter().map(|&x| x as f32).collect()
         } else {
             self.node().strategy().to_vec()
         };
+
+        normalize_strategy(&mut ret, num_actions);
 
         ret.chunks_mut(num_private_hands).for_each(|chunk| {
             self.apply_swap(chunk, player);
@@ -2211,7 +2181,6 @@ fn card_from_chars<T: Iterator<Item = char>>(chars: &mut T) -> Result<u8, String
 mod tests {
     use super::*;
     use crate::solver::*;
-    use crate::utility::*;
 
     #[test]
     fn test_flop_from_str() {
