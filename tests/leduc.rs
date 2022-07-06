@@ -14,8 +14,8 @@ struct LeducNode {
     board: usize,
     amount: i32,
     children: Vec<(Action, MutexLike<LeducNode>)>,
-    storage: Vec<f32>,
     strategy: Vec<f32>,
+    storage: Vec<f32>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -140,8 +140,8 @@ impl LeducGame {
             board: NOT_DEALT,
             amount: 1,
             children: Vec::new(),
-            storage: Default::default(),
             strategy: Default::default(),
+            storage: Default::default(),
         };
         Self::build_tree_recursive(&mut root, Action::None, [0, 0]);
         Self::allocate_memory_recursive(&mut root);
@@ -187,8 +187,8 @@ impl LeducGame {
                     board: node.board,
                     amount: node.amount + bet_diff,
                     children: Vec::new(),
-                    storage: Default::default(),
                     strategy: Default::default(),
+                    storage: Default::default(),
                 }),
             ));
         }
@@ -211,8 +211,8 @@ impl LeducGame {
                     board: index * 2,
                     amount: node.amount,
                     children: Vec::new(),
-                    storage: Default::default(),
                     strategy: Default::default(),
+                    storage: Default::default(),
                 }),
             ));
         }
@@ -269,8 +269,8 @@ impl LeducGame {
 
         if !node.is_chance() {
             let num_actions = node.num_actions();
-            node.storage = vec![0.0; num_actions * NUM_PRIVATE_HANDS];
             node.strategy = vec![0.0; num_actions * NUM_PRIVATE_HANDS];
+            node.storage = vec![0.0; num_actions * NUM_PRIVATE_HANDS];
         }
 
         for action in node.actions() {
@@ -311,16 +311,6 @@ impl GameNode for LeducNode {
     }
 
     #[inline]
-    fn cum_regret(&self) -> &[f32] {
-        &self.storage
-    }
-
-    #[inline]
-    fn cum_regret_mut(&mut self) -> &mut [f32] {
-        &mut self.storage
-    }
-
-    #[inline]
     fn strategy(&self) -> &[f32] {
         &self.strategy
     }
@@ -328,6 +318,16 @@ impl GameNode for LeducNode {
     #[inline]
     fn strategy_mut(&mut self) -> &mut [f32] {
         &mut self.strategy
+    }
+
+    #[inline]
+    fn cum_regret(&self) -> &[f32] {
+        &self.storage
+    }
+
+    #[inline]
+    fn cum_regret_mut(&mut self) -> &mut [f32] {
+        &mut self.storage
     }
 
     #[inline]

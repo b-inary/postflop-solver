@@ -54,7 +54,7 @@ pub fn solve<T: Game>(
     let mut root = game.root();
     let reach = [game.initial_weight(0), game.initial_weight(1)];
 
-    let mut exploitability = f32::INFINITY;
+    let mut exploitability = compute_exploitability(game);
 
     if print_progress {
         print!("iteration: 0 / {} ", max_num_iterations);
@@ -63,6 +63,10 @@ pub fn solve<T: Game>(
     }
 
     for t in 0..max_num_iterations {
+        if exploitability <= target_exploitability {
+            break;
+        }
+
         let params = DiscountParams::new(t);
 
         // alternating updates
@@ -88,19 +92,11 @@ pub fn solve<T: Game>(
             print!("(exploitability = {:.4e}[bb])", exploitability);
             io::stdout().flush().unwrap();
         }
-
-        if exploitability <= target_exploitability {
-            break;
-        }
     }
 
     if print_progress {
         println!();
         io::stdout().flush().unwrap();
-    }
-
-    if exploitability.is_infinite() {
-        exploitability = compute_exploitability(game);
     }
 
     finalize(game);
@@ -277,63 +273,58 @@ fn solve_recursive<T: Game>(
             add_slice(result, row);
         });
 
-        if !node.is_strategy_locked() {
-            if game.is_compression_enabled() {
-                // updates the cumulative regret
-                let scale = node.cum_regret_scale();
-                let cum_regret = node.cum_regret_compressed_mut();
-                let alpha_decoder = params.alpha_t * scale / i16::MAX as f32;
-                let beta_decoder = params.beta_t * scale / i16::MAX as f32;
-                cfv_actions.iter_mut().zip(&*cum_regret).for_each(|(x, y)| {
-                    *x += if *y >= 0 {
-                        (*y as f32) * alpha_decoder
-                    } else {
-                        (*y as f32) * beta_decoder
-                    }
-                });
-                cfv_actions.chunks_mut(num_private_hands).for_each(|row| {
-                    sub_slice(row, result);
-                });
-                let new_scale = cfv_actions.iter().fold(0.0f32, |m, v| v.abs().max(m));
-                let encoder = i16::MAX as f32 / new_scale;
-                cum_regret.iter_mut().zip(&*cfv_actions).for_each(|(x, y)| {
-                    *x = (*y * encoder).round() as i16;
-                });
-                node.set_cum_regret_scale(new_scale);
+        if game.is_compression_enabled() {
+            // updates the cumulative strategy
+            let scale = node.strategy_scale();
+            let strategy = node.strategy_compressed_mut();
+            let decoder = params.gamma_t * scale / u16::MAX as f32;
 
-                // updates the cumulative strategy
-                let scale = node.strategy_scale();
-                let strategy = node.strategy_compressed_mut();
-                let decoder = params.gamma_t * scale / u16::MAX as f32;
-                reach_actions.iter_mut().zip(&*strategy).for_each(|(x, y)| {
-                    *x += (*y as f32) * decoder;
-                });
-                let new_scale = reach_actions.iter().fold(0.0f32, |m, v| v.max(m));
-                let encoder = u16::MAX as f32 / new_scale;
-                strategy.iter_mut().zip(&reach_actions).for_each(|(x, y)| {
-                    *x = (*y * encoder).round() as u16;
-                });
-                node.set_strategy_scale(new_scale);
-            } else {
-                // updates the cumulative regret
-                let cum_regret = node.cum_regret_mut();
-                cum_regret.iter_mut().for_each(|el| {
-                    *el *= if *el >= 0.0 {
-                        params.alpha_t
-                    } else {
-                        params.beta_t
-                    };
-                });
-                add_slice(cum_regret, &cfv_actions);
-                cum_regret.chunks_mut(num_private_hands).for_each(|row| {
-                    sub_slice(row, result);
-                });
+            reach_actions.iter_mut().zip(&*strategy).for_each(|(x, y)| {
+                *x += (*y as f32) * decoder;
+            });
 
-                // updates the cumulative strategy
-                let cum_strategy = node.strategy_mut();
-                mul_slice_scalar(cum_strategy, params.gamma_t);
-                add_slice(cum_strategy, &reach_actions);
-            }
+            let new_scale = encode_unsigned_slice(strategy, &reach_actions);
+            node.set_strategy_scale(new_scale);
+
+            // updates the cumulative regret
+            let scale = node.cum_regret_scale();
+            let cum_regret = node.cum_regret_compressed_mut();
+            let alpha_decoder = params.alpha_t * scale / i16::MAX as f32;
+            let beta_decoder = params.beta_t * scale / i16::MAX as f32;
+
+            cfv_actions.iter_mut().zip(&*cum_regret).for_each(|(x, y)| {
+                *x += if *y >= 0 {
+                    (*y as f32) * alpha_decoder
+                } else {
+                    (*y as f32) * beta_decoder
+                }
+            });
+
+            cfv_actions.chunks_mut(num_private_hands).for_each(|row| {
+                sub_slice(row, result);
+            });
+
+            let new_scale = encode_signed_slice(cum_regret, &cfv_actions);
+            node.set_cum_regret_scale(new_scale);
+        } else {
+            // updates the cumulative strategy
+            let cum_strategy = node.strategy_mut();
+            mul_slice_scalar(cum_strategy, params.gamma_t);
+            add_slice(cum_strategy, &reach_actions);
+
+            // updates the cumulative regret
+            let cum_regret = node.cum_regret_mut();
+            cum_regret.iter_mut().for_each(|el| {
+                *el *= if *el >= 0.0 {
+                    params.alpha_t
+                } else {
+                    params.beta_t
+                };
+            });
+            add_slice(cum_regret, &cfv_actions);
+            cum_regret.chunks_mut(num_private_hands).for_each(|row| {
+                sub_slice(row, result);
+            });
         }
     }
     // if the current player is not `player`

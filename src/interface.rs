@@ -82,14 +82,6 @@ pub trait GameNode: Send + Sync {
     #[doc(hidden)]
     fn play(&self, action: usize) -> MutexGuardLike<Self>;
 
-    /// Returns the cumulative regrets.
-    #[doc(hidden)]
-    fn cum_regret(&self) -> &[f32];
-
-    /// Returns the mutable reference to the cumulative regrets.
-    #[doc(hidden)]
-    fn cum_regret_mut(&mut self) -> &mut [f32];
-
     /// Returns the strategy.
     #[doc(hidden)]
     fn strategy(&self) -> &[f32];
@@ -97,6 +89,14 @@ pub trait GameNode: Send + Sync {
     /// Returns the mutable reference to the strategy.
     #[doc(hidden)]
     fn strategy_mut(&mut self) -> &mut [f32];
+
+    /// Returns the cumulative regrets.
+    #[doc(hidden)]
+    fn cum_regret(&self) -> &[f32];
+
+    /// Returns the mutable reference to the cumulative regrets.
+    #[doc(hidden)]
+    fn cum_regret_mut(&mut self) -> &mut [f32];
 
     /// Returns the expected values.
     #[doc(hidden)]
@@ -112,18 +112,6 @@ pub trait GameNode: Send + Sync {
         0..self.num_actions()
     }
 
-    /// Returns the compressed cumulative regrets.
-    #[doc(hidden)]
-    fn cum_regret_compressed(&self) -> &[i16] {
-        unreachable!()
-    }
-
-    /// Returns the mutable reference to the compressed cumulative regrets.
-    #[doc(hidden)]
-    fn cum_regret_compressed_mut(&mut self) -> &mut [i16] {
-        unreachable!()
-    }
-
     /// Returns the compressed strategy.
     #[doc(hidden)]
     fn strategy_compressed(&self) -> &[u16] {
@@ -133,6 +121,18 @@ pub trait GameNode: Send + Sync {
     /// Returns the mutable reference to the compressed strategy.
     #[doc(hidden)]
     fn strategy_compressed_mut(&mut self) -> &mut [u16] {
+        unreachable!()
+    }
+
+    /// Returns the compressed cumulative regrets.
+    #[doc(hidden)]
+    fn cum_regret_compressed(&self) -> &[i16] {
+        unreachable!()
+    }
+
+    /// Returns the mutable reference to the compressed cumulative regrets.
+    #[doc(hidden)]
+    fn cum_regret_compressed_mut(&mut self) -> &mut [i16] {
         unreachable!()
     }
 
@@ -148,18 +148,6 @@ pub trait GameNode: Send + Sync {
         unreachable!()
     }
 
-    /// Returns the scale of the compressed cumulative regrets.
-    #[doc(hidden)]
-    fn cum_regret_scale(&self) -> f32 {
-        unreachable!()
-    }
-
-    /// Sets the scale of the compressed cumulative regrets.
-    #[doc(hidden)]
-    fn set_cum_regret_scale(&mut self, _scale: f32) {
-        unreachable!()
-    }
-
     /// Returns the scale of the compressed strategy.
     #[doc(hidden)]
     fn strategy_scale(&self) -> f32 {
@@ -169,6 +157,18 @@ pub trait GameNode: Send + Sync {
     /// Sets the scale of the compressed strategy.
     #[doc(hidden)]
     fn set_strategy_scale(&mut self, _scale: f32) {
+        unreachable!()
+    }
+
+    /// Returns the scale of the compressed cumulative regrets.
+    #[doc(hidden)]
+    fn cum_regret_scale(&self) -> f32 {
+        unreachable!()
+    }
+
+    /// Sets the scale of the compressed cumulative regrets.
+    #[doc(hidden)]
+    fn set_cum_regret_scale(&mut self, _scale: f32) {
         unreachable!()
     }
 
@@ -182,12 +182,6 @@ pub trait GameNode: Send + Sync {
     #[doc(hidden)]
     fn set_expected_value_scale(&mut self, _scale: f32) {
         unreachable!()
-    }
-
-    /// Returns whether the strategy is locked.
-    #[doc(hidden)]
-    fn is_strategy_locked(&self) -> bool {
-        false
     }
 
     /// Hint for parallelization. By default, it is set to `false`.

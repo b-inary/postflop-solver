@@ -11,8 +11,8 @@ struct KuhnNode {
     player: usize,
     amount: i32,
     children: Vec<(Action, MutexLike<KuhnNode>)>,
-    storage: Vec<f32>,
     strategy: Vec<f32>,
+    storage: Vec<f32>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -109,8 +109,8 @@ impl KuhnGame {
             player: PLAYER_OOP,
             amount: 1,
             children: Vec::new(),
-            storage: Default::default(),
             strategy: Default::default(),
+            storage: Default::default(),
         };
         Self::build_tree_recursive(&mut root, Action::None);
         Self::allocate_memory_recursive(&mut root);
@@ -141,8 +141,8 @@ impl KuhnGame {
                     player: next_player,
                     amount: node.amount + (*action == Action::Call) as i32,
                     children: Vec::new(),
-                    storage: Default::default(),
                     strategy: Default::default(),
+                    storage: Default::default(),
                 }),
             ));
         }
@@ -158,8 +158,8 @@ impl KuhnGame {
         }
 
         let num_actions = node.num_actions();
-        node.storage = vec![0.0; num_actions * NUM_PRIVATE_HANDS];
         node.strategy = vec![0.0; num_actions * NUM_PRIVATE_HANDS];
+        node.storage = vec![0.0; num_actions * NUM_PRIVATE_HANDS];
 
         for action in node.actions() {
             Self::allocate_memory_recursive(&mut node.play(action));
@@ -199,16 +199,6 @@ impl GameNode for KuhnNode {
     }
 
     #[inline]
-    fn cum_regret(&self) -> &[f32] {
-        &self.storage
-    }
-
-    #[inline]
-    fn cum_regret_mut(&mut self) -> &mut [f32] {
-        &mut self.storage
-    }
-
-    #[inline]
     fn strategy(&self) -> &[f32] {
         &self.strategy
     }
@@ -216,6 +206,16 @@ impl GameNode for KuhnNode {
     #[inline]
     fn strategy_mut(&mut self) -> &mut [f32] {
         &mut self.strategy
+    }
+
+    #[inline]
+    fn cum_regret(&self) -> &[f32] {
+        &self.storage
+    }
+
+    #[inline]
+    fn cum_regret_mut(&mut self) -> &mut [f32] {
+        &mut self.storage
     }
 
     #[inline]

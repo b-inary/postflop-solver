@@ -45,17 +45,18 @@ pub struct PostFlopGame {
     river_isomorphism: Vec<Vec<usize>>,
     river_isomorphism_cards: Vec<Vec<u8>>,
     river_isomorphism_swap: Vec<[SwapList; 4]>,
+
+    // store options
     is_memory_allocated: bool,
     is_compression_enabled: bool,
+    misc_memory_usage: u64,
     num_storage_elements: u64,
-    memory_usage: u64,
-    memory_usage_compressed: u64,
 
     // global storage
     storage1: MutexLike<Vec<f32>>,
     storage2: MutexLike<Vec<f32>>,
-    storage1_compressed: MutexLike<Vec<i16>>,
-    storage2_compressed: MutexLike<Vec<u16>>,
+    storage1_compressed: MutexLike<Vec<u16>>,
+    storage2_compressed: MutexLike<Vec<i16>>,
 
     // result interpreter
     is_solved: bool,
@@ -474,7 +475,9 @@ impl PostFlopGame {
     /// Returns the estimated memory usage in bytes (uncompressed, compressed).
     #[inline]
     pub fn memory_usage(&self) -> (u64, u64) {
-        (self.memory_usage, self.memory_usage_compressed)
+        let uncompressed = self.misc_memory_usage + 8 * self.num_storage_elements;
+        let compressed = self.misc_memory_usage + 4 * self.num_storage_elements;
+        (uncompressed, compressed)
     }
 
     /// Allocates the memory.
@@ -966,6 +969,9 @@ impl PostFlopGame {
 
         self.build_tree_recursive(&mut root, &info);
 
+        let current_memory_usage = current_memory_usage.load(Ordering::Relaxed);
+        let num_storage_elements = num_storage_elements.load(Ordering::Relaxed);
+
         let stack_size = cmp::max(
             max_stack_size[0].load(Ordering::Relaxed),
             max_stack_size[1].load(Ordering::Relaxed),
@@ -973,9 +979,6 @@ impl PostFlopGame {
 
         #[cfg(feature = "custom-alloc")]
         STACK_UNIT_SIZE.store(4 * stack_size, Ordering::Relaxed);
-
-        let current_memory_usage = current_memory_usage.load(Ordering::Relaxed);
-        let num_storage_elements = num_storage_elements.load(Ordering::Relaxed);
 
         #[cfg(feature = "rayon")]
         let stack_usage = (4 * stack_size * rayon::current_num_threads()) as u64;
@@ -985,6 +988,12 @@ impl PostFlopGame {
         let mut memory_usage = current_memory_usage + stack_usage;
 
         memory_usage += vec_memory_usage(&self.hand_strength);
+        memory_usage += vec_memory_usage(&self.turn_isomorphism);
+        memory_usage += vec_memory_usage(&self.turn_isomorphism_cards);
+        memory_usage += vec_memory_usage(&self.river_isomorphism);
+        memory_usage += vec_memory_usage(&self.river_isomorphism_cards);
+        memory_usage += vec_memory_usage(&self.river_isomorphism_swap);
+
         for i in 0..2 {
             memory_usage += vec_memory_usage(&self.initial_weight[i]);
             memory_usage += vec_memory_usage(&self.private_hand_cards[i]);
@@ -992,12 +1001,19 @@ impl PostFlopGame {
             for strength in &self.hand_strength {
                 memory_usage += vec_memory_usage(&strength[i]);
             }
+            for swap in &self.turn_isomorphism_swap {
+                memory_usage += vec_memory_usage(&swap[i]);
+            }
+            for swap_list in &self.river_isomorphism_swap {
+                for swap in swap_list {
+                    memory_usage += vec_memory_usage(&swap[i]);
+                }
+            }
         }
 
         self.is_memory_allocated = false;
+        self.misc_memory_usage = memory_usage;
         self.num_storage_elements = num_storage_elements;
-        self.memory_usage = memory_usage + 2 * 4 * num_storage_elements;
-        self.memory_usage_compressed = memory_usage + 2 * 2 * num_storage_elements;
 
         self.clear_storage();
     }
@@ -1007,10 +1023,10 @@ impl PostFlopGame {
     fn clear_storage(&mut self) {
         self.storage1.lock().clear();
         self.storage2.lock().clear();
-        self.storage1.lock().shrink_to_fit();
-        self.storage2.lock().shrink_to_fit();
         self.storage1_compressed.lock().clear();
         self.storage2_compressed.lock().clear();
+        self.storage1.lock().shrink_to_fit();
+        self.storage2.lock().shrink_to_fit();
         self.storage1_compressed.lock().shrink_to_fit();
         self.storage2_compressed.lock().shrink_to_fit();
     }
@@ -1256,7 +1272,7 @@ impl PostFlopGame {
                 return size;
             }
 
-            let mut min_opponent_ratio = f32::INFINITY;
+            let mut min_opponent_ratio = f32::MIN;
             for &bet_size in &candidates[player_opponent as usize].raise {
                 match bet_size {
                     BetSize::PotRelative(ratio) => {
@@ -1355,7 +1371,7 @@ impl PostFlopGame {
         if !node.is_chance() {
             let index = counter.fetch_add(node.num_elements, Ordering::SeqCst);
             unsafe {
-                if self.is_compression_enabled() {
+                if self.is_compression_enabled {
                     let storage1_ptr = self.storage1_compressed.lock().as_mut_ptr();
                     let storage2_ptr = self.storage2_compressed.lock().as_mut_ptr();
                     node.storage1 = storage1_ptr.add(index) as *mut u8;
@@ -1921,93 +1937,93 @@ impl GameNode for PostFlopNode {
     }
 
     #[inline]
-    fn cum_regret(&self) -> &[f32] {
+    fn strategy(&self) -> &[f32] {
         unsafe { slice::from_raw_parts(self.storage1 as *const f32, self.num_elements) }
     }
 
     #[inline]
-    fn cum_regret_mut(&mut self) -> &mut [f32] {
+    fn strategy_mut(&mut self) -> &mut [f32] {
         unsafe { slice::from_raw_parts_mut(self.storage1 as *mut f32, self.num_elements) }
     }
 
     #[inline]
-    fn strategy(&self) -> &[f32] {
+    fn cum_regret(&self) -> &[f32] {
         unsafe { slice::from_raw_parts(self.storage2 as *const f32, self.num_elements) }
     }
 
     #[inline]
-    fn strategy_mut(&mut self) -> &mut [f32] {
+    fn cum_regret_mut(&mut self) -> &mut [f32] {
         unsafe { slice::from_raw_parts_mut(self.storage2 as *mut f32, self.num_elements) }
     }
 
     #[inline]
     fn expected_values(&self) -> &[f32] {
-        unsafe { slice::from_raw_parts(self.storage1 as *const f32, self.num_elements) }
+        unsafe { slice::from_raw_parts(self.storage2 as *const f32, self.num_elements) }
     }
 
     #[inline]
     fn expected_values_mut(&mut self) -> &mut [f32] {
-        unsafe { slice::from_raw_parts_mut(self.storage1 as *mut f32, self.num_elements) }
-    }
-
-    #[inline]
-    fn cum_regret_compressed(&self) -> &[i16] {
-        unsafe { slice::from_raw_parts(self.storage1 as *const i16, self.num_elements) }
-    }
-
-    #[inline]
-    fn cum_regret_compressed_mut(&mut self) -> &mut [i16] {
-        unsafe { slice::from_raw_parts_mut(self.storage1 as *mut i16, self.num_elements) }
+        unsafe { slice::from_raw_parts_mut(self.storage2 as *mut f32, self.num_elements) }
     }
 
     #[inline]
     fn strategy_compressed(&self) -> &[u16] {
-        unsafe { slice::from_raw_parts(self.storage2 as *const u16, self.num_elements) }
+        unsafe { slice::from_raw_parts(self.storage1 as *const u16, self.num_elements) }
     }
 
     #[inline]
     fn strategy_compressed_mut(&mut self) -> &mut [u16] {
-        unsafe { slice::from_raw_parts_mut(self.storage2 as *mut u16, self.num_elements) }
+        unsafe { slice::from_raw_parts_mut(self.storage1 as *mut u16, self.num_elements) }
+    }
+
+    #[inline]
+    fn cum_regret_compressed(&self) -> &[i16] {
+        unsafe { slice::from_raw_parts(self.storage2 as *const i16, self.num_elements) }
+    }
+
+    #[inline]
+    fn cum_regret_compressed_mut(&mut self) -> &mut [i16] {
+        unsafe { slice::from_raw_parts_mut(self.storage2 as *mut i16, self.num_elements) }
     }
 
     #[inline]
     fn expected_values_compressed(&self) -> &[i16] {
-        unsafe { slice::from_raw_parts(self.storage1 as *const i16, self.num_elements) }
+        unsafe { slice::from_raw_parts(self.storage2 as *const i16, self.num_elements) }
     }
 
     #[inline]
     fn expected_values_compressed_mut(&mut self) -> &mut [i16] {
-        unsafe { slice::from_raw_parts_mut(self.storage1 as *mut i16, self.num_elements) }
-    }
-
-    #[inline]
-    fn cum_regret_scale(&self) -> f32 {
-        self.scale1
-    }
-
-    #[inline]
-    fn set_cum_regret_scale(&mut self, scale: f32) {
-        self.scale1 = scale;
+        unsafe { slice::from_raw_parts_mut(self.storage2 as *mut i16, self.num_elements) }
     }
 
     #[inline]
     fn strategy_scale(&self) -> f32 {
-        self.scale2
+        self.scale1
     }
 
     #[inline]
     fn set_strategy_scale(&mut self, scale: f32) {
+        self.scale1 = scale;
+    }
+
+    #[inline]
+    fn cum_regret_scale(&self) -> f32 {
+        self.scale2
+    }
+
+    #[inline]
+    fn set_cum_regret_scale(&mut self, scale: f32) {
         self.scale2 = scale;
     }
 
     #[inline]
     fn expected_value_scale(&self) -> f32 {
-        self.scale1
+        self.scale2
     }
 
     #[inline]
     fn set_expected_value_scale(&mut self, scale: f32) {
-        self.scale1 = scale;
+        self.scale2 = scale;
     }
 
     #[inline]
@@ -2043,9 +2059,8 @@ impl Default for PostFlopGame {
             river_isomorphism_swap: Vec::default(),
             is_memory_allocated: false,
             is_compression_enabled: false,
+            misc_memory_usage: 0,
             num_storage_elements: 0,
-            memory_usage: 0,
-            memory_usage_compressed: 0,
             storage1: MutexLike::default(),
             storage2: MutexLike::default(),
             storage1_compressed: MutexLike::default(),

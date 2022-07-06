@@ -62,12 +62,25 @@ fn decode_unsigned_slice(slice: &[u16], scale: f32) -> Vec<f32> {
 
 /// Encodes the `f32` slice to the `i16` slice, and returns the scale.
 #[inline]
-fn encode_signed_slice(dst: &mut [i16], slice: &[f32]) -> f32 {
+pub(crate) fn encode_signed_slice(dst: &mut [i16], slice: &[f32]) -> f32 {
     let scale = slice.iter().fold(0.0f32, |m, v| v.abs().max(m));
-    let encoder = i16::MAX as f32 / scale;
+    let scale_nonzero = if scale == 0.0 { 1.0 } else { scale };
+    let encoder = i16::MAX as f32 / scale_nonzero;
     dst.iter_mut()
         .zip(slice)
         .for_each(|(d, s)| *d = (s * encoder).round() as i16);
+    scale
+}
+
+/// Encodes the `f32` slice to the `u16` slice, and returns the scale.
+#[inline]
+pub(crate) fn encode_unsigned_slice(dst: &mut [u16], slice: &[f32]) -> f32 {
+    let scale = slice.iter().fold(0.0f32, |m, v| v.max(m));
+    let scale_nonzero = if scale == 0.0 { 1.0 } else { scale };
+    let encoder = u16::MAX as f32 / scale_nonzero;
+    dst.iter_mut()
+        .zip(slice)
+        .for_each(|(d, s)| *d = (s * encoder).round() as u16);
     scale
 }
 
@@ -349,7 +362,7 @@ fn compute_ev_recursive<T: Game>(
             .for_each(|row| mul_slice(row, reach));
         if game.is_compression_enabled() {
             let ev_scale = encode_signed_slice(node.expected_values_compressed_mut(), &cfv_actions);
-            node.set_cum_regret_scale(ev_scale);
+            node.set_expected_value_scale(ev_scale);
         } else {
             node.expected_values_mut().copy_from_slice(&cfv_actions);
         }
@@ -504,7 +517,7 @@ fn compute_best_cfv_recursive<T: Game>(
         });
 
         // computes element-wise maximum (takes the best response)
-        result.fill(f32::NEG_INFINITY);
+        result.fill(f32::MIN);
         let cfv_actions = cfv_actions.lock();
         cfv_actions.chunks(num_private_hands).for_each(|row| {
             result.iter_mut().zip(row).for_each(|(l, r)| {
