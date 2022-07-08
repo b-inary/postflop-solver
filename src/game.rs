@@ -39,6 +39,9 @@ pub struct PostFlopGame {
     initial_weight: [Vec<f32>; 2],
     private_hand_cards: [Vec<(u8, u8)>; 2],
     same_hand_index: [Vec<Option<usize>>; 2],
+    valid_indices_flop: [Vec<usize>; 2],
+    valid_indices_turn: Vec<[Vec<usize>; 2]>,
+    valid_indices_river: Vec<[Vec<usize>; 2]>,
     hand_strength: Vec<[Vec<StrengthItem>; 2]>,
     turn_isomorphism: Vec<usize>,
     turn_isomorphism_cards: Vec<u8>,
@@ -279,14 +282,6 @@ impl Game for PostFlopGame {
 
         // someone folded
         if node.player & PLAYER_FOLD_FLAG == PLAYER_FOLD_FLAG {
-            let mut board_mask = 0u64;
-            if node.turn != NOT_DEALT {
-                board_mask |= 1 << node.turn;
-            }
-            if node.river != NOT_DEALT {
-                board_mask |= 1 << node.river;
-            }
-
             let folded_player = node.player & PLAYER_MASK;
             let payoff = if folded_player as usize == player {
                 -amount
@@ -294,34 +289,38 @@ impl Game for PostFlopGame {
                 amount
             };
 
-            for i in 0..cfreach.len() {
+            let valid_indices = if node.turn == NOT_DEALT {
+                &self.valid_indices_flop
+            } else if node.river == NOT_DEALT {
+                &self.valid_indices_turn[node.turn as usize]
+            } else {
+                &self.valid_indices_river[card_pair_index(node.turn, node.river)]
+            };
+
+            let opponent_indices = &valid_indices[player ^ 1];
+            for &i in opponent_indices {
                 unsafe {
                     let (c1, c2) = *opponent_cards.get_unchecked(i);
-                    let hand_mask: u64 = (1 << c1) | (1 << c2);
-                    if hand_mask & board_mask == 0 {
-                        let cfreach_i = *cfreach.get_unchecked(i) as f64;
-                        cfreach_sum += cfreach_i;
-                        *cfreach_minus.get_unchecked_mut(c1 as usize) += cfreach_i;
-                        *cfreach_minus.get_unchecked_mut(c2 as usize) += cfreach_i;
-                    }
+                    let cfreach_i = *cfreach.get_unchecked(i) as f64;
+                    cfreach_sum += cfreach_i;
+                    *cfreach_minus.get_unchecked_mut(c1 as usize) += cfreach_i;
+                    *cfreach_minus.get_unchecked_mut(c2 as usize) += cfreach_i;
                 }
             }
 
+            let player_indices = &valid_indices[player];
             let same_hand_index = &self.same_hand_index[player];
-            for i in 0..result.len() {
+            for &i in player_indices {
                 unsafe {
                     let (c1, c2) = *player_cards.get_unchecked(i);
-                    let hand_mask: u64 = (1 << c1) | (1 << c2);
-                    if hand_mask & board_mask == 0 {
-                        // inclusion-exclusion principle
-                        let cfreach = cfreach_sum
-                            - *cfreach_minus.get_unchecked(c1 as usize)
-                            - *cfreach_minus.get_unchecked(c2 as usize)
-                            + same_hand_index
-                                .get_unchecked(i)
-                                .map_or(0.0, |j| *cfreach.get_unchecked(j) as f64);
-                        *result.get_unchecked_mut(i) = (payoff * cfreach) as f32;
-                    }
+                    // inclusion-exclusion principle
+                    let cfreach = cfreach_sum
+                        - *cfreach_minus.get_unchecked(c1 as usize)
+                        - *cfreach_minus.get_unchecked(c2 as usize)
+                        + same_hand_index
+                            .get_unchecked(i)
+                            .map_or(0.0, |j| *cfreach.get_unchecked(j) as f64);
+                    *result.get_unchecked_mut(i) = (payoff * cfreach) as f32;
                 }
             }
         }
@@ -624,8 +623,8 @@ impl PostFlopGame {
     #[inline]
     fn init(&mut self) {
         self.init_range();
-        self.init_isomorphism();
         self.init_hand_strength();
+        self.init_isomorphism();
         self.init_root();
 
         // interpreter
@@ -677,6 +676,113 @@ impl PostFlopGame {
             let opponent_hands = &self.private_hand_cards[player ^ 1];
             for hand in player_hands {
                 same_hand_index.push(opponent_hands.binary_search(hand).ok());
+            }
+        }
+
+        self.valid_indices_flop = self.init_valid_indices(NOT_DEALT, NOT_DEALT);
+
+        self.valid_indices_turn = vec![Default::default(); 52];
+        for turn in 0..52 {
+            if !flop.contains(&turn) {
+                self.valid_indices_turn[turn as usize] = self.init_valid_indices(turn, NOT_DEALT);
+            }
+        }
+
+        self.valid_indices_river = vec![Default::default(); 52 * 51 / 2];
+        for board1 in 0..52 {
+            for board2 in board1 + 1..52 {
+                if !flop.contains(&board1) && !flop.contains(&board2) {
+                    let index = card_pair_index(board1, board2);
+                    self.valid_indices_river[index] = self.init_valid_indices(board1, board2);
+                }
+            }
+        }
+    }
+
+    /// Initializes a valid indices.
+    fn init_valid_indices(&self, board1: u8, board2: u8) -> [Vec<usize>; 2] {
+        let mut board_mask: u64 = 0;
+        if board1 != NOT_DEALT {
+            board_mask |= 1 << board1;
+        }
+        if board2 != NOT_DEALT {
+            board_mask |= 1 << board2;
+        }
+
+        let private_hand_cards = &self.private_hand_cards;
+        let mut ret = [Vec::new(), Vec::new()];
+
+        for player in 0..2 {
+            let mut valid_indices = Vec::with_capacity(private_hand_cards[player].len());
+            private_hand_cards[player]
+                .iter()
+                .enumerate()
+                .for_each(|(index, (c1, c2))| {
+                    let hand_mask: u64 = (1 << c1) | (1 << c2);
+                    if hand_mask & board_mask == 0 {
+                        valid_indices.push(index);
+                    }
+                });
+
+            valid_indices.shrink_to_fit();
+            ret[player] = valid_indices;
+        }
+
+        ret
+    }
+
+    /// Initializes a field `hand_strength`.
+    fn init_hand_strength(&mut self) {
+        let mut flop = Hand::new();
+        for &card in &self.config.flop {
+            flop = flop.add_card(card as usize);
+        }
+
+        self.hand_strength = vec![Default::default(); 52 * 51 / 2];
+        let private_hand_cards = &self.private_hand_cards;
+
+        for board1 in 0..52 {
+            for board2 in board1 + 1..52 {
+                let mut is_possible =
+                    !flop.contains(board1 as usize) && !flop.contains(board2 as usize);
+                if self.config.river != NOT_DEALT {
+                    is_possible &= (self.config.turn == board1 && self.config.river == board2)
+                        || (self.config.turn == board2 && self.config.river == board1);
+                } else if self.config.turn != NOT_DEALT {
+                    is_possible &= self.config.turn == board1 || self.config.turn == board2;
+                }
+
+                if is_possible {
+                    let board = flop.add_card(board1 as usize).add_card(board2 as usize);
+                    let mut strength = [
+                        Vec::with_capacity(private_hand_cards[0].len()),
+                        Vec::with_capacity(private_hand_cards[1].len()),
+                    ];
+
+                    for player in 0..2 {
+                        strength[player] = private_hand_cards[player]
+                            .iter()
+                            .enumerate()
+                            .filter_map(|(index, &(hand1, hand2))| {
+                                let (hand1, hand2) = (hand1 as usize, hand2 as usize);
+                                if board.contains(hand1) || board.contains(hand2) {
+                                    None
+                                } else {
+                                    let hand = board.add_card(hand1).add_card(hand2);
+                                    Some(StrengthItem {
+                                        strength: hand.evaluate(),
+                                        index: index as u16,
+                                    })
+                                }
+                            })
+                            .collect();
+
+                        strength[player].shrink_to_fit();
+                        strength[player].sort_unstable();
+                    }
+
+                    self.hand_strength[card_pair_index(board1, board2)] = strength;
+                }
             }
         }
     }
@@ -876,62 +982,6 @@ impl PostFlopGame {
         }
     }
 
-    /// Initializes a field `hand_strength`.
-    fn init_hand_strength(&mut self) {
-        let mut flop = Hand::new();
-        for &card in &self.config.flop {
-            flop = flop.add_card(card as usize);
-        }
-
-        self.hand_strength = vec![Default::default(); 52 * 51 / 2];
-        let private_hand_cards = &self.private_hand_cards;
-
-        for board1 in 0..52 {
-            for board2 in board1 + 1..52 {
-                let mut is_possible =
-                    !flop.contains(board1 as usize) && !flop.contains(board2 as usize);
-                if self.config.river != NOT_DEALT {
-                    is_possible &= (self.config.turn == board1 && self.config.river == board2)
-                        || (self.config.turn == board2 && self.config.river == board1);
-                } else if self.config.turn != NOT_DEALT {
-                    is_possible &= self.config.turn == board1 || self.config.turn == board2;
-                }
-
-                if is_possible {
-                    let board = flop.add_card(board1 as usize).add_card(board2 as usize);
-                    let mut strength = [
-                        Vec::with_capacity(private_hand_cards[0].len()),
-                        Vec::with_capacity(private_hand_cards[1].len()),
-                    ];
-
-                    for player in 0..2 {
-                        strength[player] = private_hand_cards[player]
-                            .iter()
-                            .enumerate()
-                            .filter_map(|(index, &(hand1, hand2))| {
-                                let (hand1, hand2) = (hand1 as usize, hand2 as usize);
-                                if board.contains(hand1) || board.contains(hand2) {
-                                    None
-                                } else {
-                                    let hand = board.add_card(hand1).add_card(hand2);
-                                    Some(StrengthItem {
-                                        strength: hand.evaluate(),
-                                        index: index as u16,
-                                    })
-                                }
-                            })
-                            .collect();
-
-                        strength[player].shrink_to_fit();
-                        strength[player].sort_unstable();
-                    }
-
-                    self.hand_strength[card_pair_index(board1, board2)] = strength;
-                }
-            }
-        }
-    }
-
     /// Initializes the root node of game tree.
     fn init_root(&mut self) {
         let current_memory_usage = AtomicU64::new(mem::size_of::<PostFlopNode>() as u64);
@@ -973,6 +1023,8 @@ impl PostFlopGame {
 
         let mut memory_usage = current_memory_usage + stack_usage;
 
+        memory_usage += vec_memory_usage(&self.valid_indices_turn);
+        memory_usage += vec_memory_usage(&self.valid_indices_river);
         memory_usage += vec_memory_usage(&self.hand_strength);
         memory_usage += vec_memory_usage(&self.turn_isomorphism);
         memory_usage += vec_memory_usage(&self.turn_isomorphism_cards);
@@ -984,6 +1036,13 @@ impl PostFlopGame {
             memory_usage += vec_memory_usage(&self.initial_weight[i]);
             memory_usage += vec_memory_usage(&self.private_hand_cards[i]);
             memory_usage += vec_memory_usage(&self.same_hand_index[i]);
+            memory_usage += vec_memory_usage(&self.valid_indices_flop[i]);
+            for indices in &self.valid_indices_turn {
+                memory_usage += vec_memory_usage(&indices[i]);
+            }
+            for indices in &self.valid_indices_river {
+                memory_usage += vec_memory_usage(&indices[i]);
+            }
             for strength in &self.hand_strength {
                 memory_usage += vec_memory_usage(&strength[i]);
             }
@@ -2022,6 +2081,9 @@ impl Default for PostFlopGame {
             initial_weight: Default::default(),
             private_hand_cards: Default::default(),
             same_hand_index: Default::default(),
+            valid_indices_flop: Default::default(),
+            valid_indices_turn: Default::default(),
+            valid_indices_river: Default::default(),
             hand_strength: Vec::default(),
             turn_isomorphism: Vec::default(),
             turn_isomorphism_cards: Vec::default(),
