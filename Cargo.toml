@@ -20,5 +20,6 @@ default = ["holdem-hand-evaluator", "rayon"]
 custom-alloc = []
 
 [profile.release]
-lto = "thin"
+codegen-units = 1
+lto = true
 panic = "abort"

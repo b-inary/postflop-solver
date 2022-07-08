@@ -1,3 +1,5 @@
+use crate::hand_table::*;
+
 #[derive(Clone, Copy, Default)]
 pub struct Hand {
     cards: [usize; 7],
@@ -45,7 +47,12 @@ impl Hand {
         self.cards[0..self.num_cards].contains(&card)
     }
 
-    pub fn evaluate(&self) -> i32 {
+    #[inline]
+    pub fn evaluate(&self) -> u16 {
+        HAND_TABLE.binary_search(&self.evaluate_internal()).unwrap() as u16
+    }
+
+    fn evaluate_internal(&self) -> i32 {
         let mut rankset = 0i32;
         let mut rankset_suit = [0i32; 4];
         let mut rankset_of_count = [0i32; 5];
@@ -141,9 +148,10 @@ mod tests {
                                 let hand = hand.add_card(p);
                                 for q in (p + 1)..52 {
                                     let hand = hand.add_card(q);
-                                    let value = hand.evaluate();
+                                    let value = hand.evaluate_internal();
                                     value_set.insert(value);
                                     counter[(value >> 26) as usize] += 1;
+                                    assert!(HAND_TABLE.binary_search(&value).is_ok());
                                 }
                             }
                         }

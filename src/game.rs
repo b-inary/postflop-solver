@@ -22,8 +22,8 @@ use holdem_hand_evaluator::Hand;
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 struct StrengthItem {
-    strength: usize,
-    index: usize,
+    strength: u16,
+    index: u16,
 }
 
 type SwapList = [Vec<(usize, usize)>; 2];
@@ -268,8 +268,8 @@ impl Game for PostFlopGame {
     }
 
     fn evaluate(&self, result: &mut [f32], node: &Self::Node, player: usize, cfreach: &[f32]) {
-        let amount = self.config.starting_pot as f64 * 0.5 + node.amount as f64;
-        let amount_normalized = amount * self.num_combinations_inv;
+        let amount_raw = self.config.starting_pot as f64 * 0.5 + node.amount as f64;
+        let amount = amount_raw * self.num_combinations_inv;
 
         let player_cards = &self.private_hand_cards[player];
         let opponent_cards = &self.private_hand_cards[player ^ 1];
@@ -288,10 +288,10 @@ impl Game for PostFlopGame {
             }
 
             let folded_player = node.player & PLAYER_MASK;
-            let payoff_normalized = if folded_player as usize == player {
-                -amount_normalized
+            let payoff = if folded_player as usize == player {
+                -amount
             } else {
-                amount_normalized
+                amount
             };
 
             for i in 0..cfreach.len() {
@@ -320,7 +320,7 @@ impl Game for PostFlopGame {
                             + same_hand_index
                                 .get_unchecked(i)
                                 .map_or(0.0, |j| *cfreach.get_unchecked(j) as f64);
-                        *result.get_unchecked_mut(i) = (payoff_normalized * cfreach) as f32;
+                        *result.get_unchecked_mut(i) = (payoff * cfreach) as f32;
                     }
                 }
             }
@@ -340,7 +340,7 @@ impl Game for PostFlopGame {
                     let StrengthItem { strength, index } = *player_strength.get_unchecked(i);
                     while j < opponent_len && opponent_strength.get_unchecked(j).strength < strength
                     {
-                        let opponent_index = opponent_strength.get_unchecked(j).index;
+                        let opponent_index = opponent_strength.get_unchecked(j).index as usize;
                         let (c1, c2) = *opponent_cards.get_unchecked(opponent_index);
                         let cfreach_opp = *cfreach.get_unchecked(opponent_index) as f64;
                         cfreach_sum += cfreach_opp;
@@ -348,11 +348,11 @@ impl Game for PostFlopGame {
                         *cfreach_minus.get_unchecked_mut(c2 as usize) += cfreach_opp;
                         j += 1;
                     }
-                    let (c1, c2) = *player_cards.get_unchecked(index);
+                    let (c1, c2) = *player_cards.get_unchecked(index as usize);
                     let cfreach = cfreach_sum
                         - cfreach_minus.get_unchecked(c1 as usize)
                         - cfreach_minus.get_unchecked(c2 as usize);
-                    *result.get_unchecked_mut(index) = (amount_normalized * cfreach) as f32;
+                    *result.get_unchecked_mut(index as usize) = (amount * cfreach) as f32;
                 }
             }
 
@@ -364,7 +364,7 @@ impl Game for PostFlopGame {
                 unsafe {
                     let StrengthItem { strength, index } = *player_strength.get_unchecked(i);
                     while j > 0 && opponent_strength.get_unchecked(j - 1).strength > strength {
-                        let opponent_index = opponent_strength.get_unchecked(j - 1).index;
+                        let opponent_index = opponent_strength.get_unchecked(j - 1).index as usize;
                         let (c1, c2) = *opponent_cards.get_unchecked(opponent_index);
                         let cfreach_opp = *cfreach.get_unchecked(opponent_index) as f64;
                         cfreach_sum += cfreach_opp;
@@ -372,11 +372,11 @@ impl Game for PostFlopGame {
                         *cfreach_minus.get_unchecked_mut(c2 as usize) += cfreach_opp;
                         j -= 1;
                     }
-                    let (c1, c2) = *player_cards.get_unchecked(index);
+                    let (c1, c2) = *player_cards.get_unchecked(index as usize);
                     let cfreach = cfreach_sum
                         - cfreach_minus.get_unchecked(c1 as usize)
                         - cfreach_minus.get_unchecked(c2 as usize);
-                    *result.get_unchecked_mut(index) -= (amount_normalized * cfreach) as f32;
+                    *result.get_unchecked_mut(index as usize) -= (amount * cfreach) as f32;
                 }
             }
         }
@@ -915,8 +915,8 @@ impl PostFlopGame {
                                 } else {
                                     let hand = board.add_card(hand1).add_card(hand2);
                                     Some(StrengthItem {
-                                        strength: hand.evaluate() as usize,
-                                        index,
+                                        strength: hand.evaluate(),
+                                        index: index as u16,
                                     })
                                 }
                             })
@@ -1835,7 +1835,7 @@ impl PostFlopGame {
             unsafe {
                 let StrengthItem { strength, index } = *player_strength.get_unchecked(i);
                 while j < opponent_len && opponent_strength.get_unchecked(j).strength < strength {
-                    let opponent_index = opponent_strength.get_unchecked(j).index;
+                    let opponent_index = opponent_strength.get_unchecked(j).index as usize;
                     let (c1, c2) = *opponent_cards.get_unchecked(opponent_index);
                     let weight = *opponent_weights.get_unchecked(opponent_index) as f64;
                     weight_sum += weight;
@@ -1843,11 +1843,11 @@ impl PostFlopGame {
                     *weight_minus.get_unchecked_mut(c2 as usize) += weight;
                     j += 1;
                 }
-                let (c1, c2) = *player_cards.get_unchecked(index);
+                let (c1, c2) = *player_cards.get_unchecked(index as usize);
                 let opponent_weight = weight_sum
                     - weight_minus.get_unchecked(c1 as usize)
                     - weight_minus.get_unchecked(c2 as usize);
-                *result.get_unchecked_mut(index) += amount * opponent_weight;
+                *result.get_unchecked_mut(index as usize) += amount * opponent_weight;
             }
         }
 
@@ -1859,7 +1859,7 @@ impl PostFlopGame {
             unsafe {
                 let StrengthItem { strength, index } = *player_strength.get_unchecked(i);
                 while j > 0 && opponent_strength.get_unchecked(j - 1).strength > strength {
-                    let opponent_index = opponent_strength.get_unchecked(j - 1).index;
+                    let opponent_index = opponent_strength.get_unchecked(j - 1).index as usize;
                     let (c1, c2) = *opponent_cards.get_unchecked(opponent_index);
                     let weight = *opponent_weights.get_unchecked(opponent_index) as f64;
                     weight_sum += weight;
@@ -1867,11 +1867,11 @@ impl PostFlopGame {
                     *weight_minus.get_unchecked_mut(c2 as usize) += weight;
                     j -= 1;
                 }
-                let (c1, c2) = *player_cards.get_unchecked(index);
+                let (c1, c2) = *player_cards.get_unchecked(index as usize);
                 let opponent_weight = weight_sum
                     - weight_minus.get_unchecked(c1 as usize)
                     - weight_minus.get_unchecked(c2 as usize);
-                *result.get_unchecked_mut(index) -= amount * opponent_weight;
+                *result.get_unchecked_mut(index as usize) -= amount * opponent_weight;
             }
         }
     }

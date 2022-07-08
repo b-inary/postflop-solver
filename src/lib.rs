@@ -158,6 +158,9 @@ mod alloc;
 #[cfg(not(feature = "holdem-hand-evaluator"))]
 mod hand;
 
+#[cfg(not(feature = "holdem-hand-evaluator"))]
+mod hand_table;
+
 pub use bet_size::*;
 pub use game::*;
 pub use interface::*;
