@@ -330,15 +330,15 @@ impl Game for PostFlopGame {
             let player_strength = &hand_strength[player];
             let opponent_strength = &hand_strength[player ^ 1];
 
-            let mut j = 0;
             let player_len = player_strength.len();
             let opponent_len = opponent_strength.len();
 
-            for i in 0..player_len {
+            let mut j = 1;
+
+            for i in 1..player_len - 1 {
                 unsafe {
                     let StrengthItem { strength, index } = *player_strength.get_unchecked(i);
-                    while j < opponent_len && opponent_strength.get_unchecked(j).strength < strength
-                    {
+                    while opponent_strength.get_unchecked(j).strength < strength {
                         let opponent_index = opponent_strength.get_unchecked(j).index as usize;
                         let (c1, c2) = *opponent_cards.get_unchecked(opponent_index);
                         let cfreach_opp = *cfreach.get_unchecked(opponent_index) as f64;
@@ -357,13 +357,13 @@ impl Game for PostFlopGame {
 
             cfreach_sum = 0.0;
             cfreach_minus.fill(0.0);
-            j = opponent_len;
+            j = opponent_len - 2;
 
-            for i in (0..player_len).rev() {
+            for i in (1..player_len - 1).rev() {
                 unsafe {
                     let StrengthItem { strength, index } = *player_strength.get_unchecked(i);
-                    while j > 0 && opponent_strength.get_unchecked(j - 1).strength > strength {
-                        let opponent_index = opponent_strength.get_unchecked(j - 1).index as usize;
+                    while opponent_strength.get_unchecked(j).strength > strength {
+                        let opponent_index = opponent_strength.get_unchecked(j).index as usize;
                         let (c1, c2) = *opponent_cards.get_unchecked(opponent_index);
                         let cfreach_opp = *cfreach.get_unchecked(opponent_index) as f64;
                         cfreach_sum += cfreach_opp;
@@ -755,27 +755,37 @@ impl PostFlopGame {
                 if is_possible {
                     let board = flop.add_card(board1 as usize).add_card(board2 as usize);
                     let mut strength = [
-                        Vec::with_capacity(private_hand_cards[0].len()),
-                        Vec::with_capacity(private_hand_cards[1].len()),
+                        Vec::with_capacity(private_hand_cards[0].len() + 2),
+                        Vec::with_capacity(private_hand_cards[1].len() + 2),
                     ];
 
                     for player in 0..2 {
-                        strength[player] = private_hand_cards[player]
-                            .iter()
-                            .enumerate()
-                            .filter_map(|(index, &(hand1, hand2))| {
-                                let (hand1, hand2) = (hand1 as usize, hand2 as usize);
-                                if board.contains(hand1) || board.contains(hand2) {
-                                    None
-                                } else {
-                                    let hand = board.add_card(hand1).add_card(hand2);
-                                    Some(StrengthItem {
-                                        strength: hand.evaluate(),
-                                        index: index as u16,
-                                    })
-                                }
-                            })
-                            .collect();
+                        // add weakest and strongest sentinel
+                        strength[player].push(StrengthItem {
+                            strength: 0,
+                            index: u16::MAX,
+                        });
+                        strength[player].push(StrengthItem {
+                            strength: u16::MAX,
+                            index: u16::MAX,
+                        });
+
+                        strength[player].extend(
+                            private_hand_cards[player].iter().enumerate().filter_map(
+                                |(index, &(hand1, hand2))| {
+                                    let (hand1, hand2) = (hand1 as usize, hand2 as usize);
+                                    if board.contains(hand1) || board.contains(hand2) {
+                                        None
+                                    } else {
+                                        let hand = board.add_card(hand1).add_card(hand2);
+                                        Some(StrengthItem {
+                                            strength: hand.evaluate() + 1,
+                                            index: index as u16,
+                                        })
+                                    }
+                                },
+                            ),
+                        );
 
                         strength[player].shrink_to_fit();
                         strength[player].sort_unstable();
@@ -1875,6 +1885,17 @@ impl PostFlopGame {
 
     /// Internal method for calculating the equity.
     fn equity_internal(&self, result: &mut [f64], player: usize, turn: u8, river: u8, amount: f64) {
+        let hand_strength = &self.hand_strength[card_pair_index(turn, river)];
+        let player_strength = &hand_strength[player];
+        let opponent_strength = &hand_strength[player ^ 1];
+
+        let player_len = player_strength.len();
+        let opponent_len = opponent_strength.len();
+
+        if player_len == 0 || opponent_len == 0 {
+            return;
+        }
+
         let player_cards = &self.private_hand_cards[player];
         let opponent_cards = &self.private_hand_cards[player ^ 1];
 
@@ -1882,18 +1903,12 @@ impl PostFlopGame {
         let mut weight_sum = 0.0;
         let mut weight_minus = [0.0; 52];
 
-        let hand_strength = &self.hand_strength[card_pair_index(turn, river)];
-        let player_strength = &hand_strength[player];
-        let opponent_strength = &hand_strength[player ^ 1];
+        let mut j = 1;
 
-        let mut j = 0;
-        let player_len = player_strength.len();
-        let opponent_len = opponent_strength.len();
-
-        for i in 0..player_len {
+        for i in 1..player_len - 1 {
             unsafe {
                 let StrengthItem { strength, index } = *player_strength.get_unchecked(i);
-                while j < opponent_len && opponent_strength.get_unchecked(j).strength < strength {
+                while opponent_strength.get_unchecked(j).strength < strength {
                     let opponent_index = opponent_strength.get_unchecked(j).index as usize;
                     let (c1, c2) = *opponent_cards.get_unchecked(opponent_index);
                     let weight = *opponent_weights.get_unchecked(opponent_index) as f64;
@@ -1912,13 +1927,13 @@ impl PostFlopGame {
 
         weight_sum = 0.0;
         weight_minus.fill(0.0);
-        j = opponent_len;
+        j = opponent_len - 2;
 
-        for i in (0..player_len).rev() {
+        for i in (1..player_len - 1).rev() {
             unsafe {
                 let StrengthItem { strength, index } = *player_strength.get_unchecked(i);
-                while j > 0 && opponent_strength.get_unchecked(j - 1).strength > strength {
-                    let opponent_index = opponent_strength.get_unchecked(j - 1).index as usize;
+                while opponent_strength.get_unchecked(j).strength > strength {
+                    let opponent_index = opponent_strength.get_unchecked(j).index as usize;
                     let (c1, c2) = *opponent_cards.get_unchecked(opponent_index);
                     let weight = *opponent_weights.get_unchecked(opponent_index) as f64;
                     weight_sum += weight;
