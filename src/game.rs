@@ -766,7 +766,7 @@ impl PostFlopGame {
                         // add weakest and strongest sentinel
                         strength[player].push(StrengthItem {
                             strength: 0,
-                            index: u16::MAX,
+                            index: 0,
                         });
                         strength[player].push(StrengthItem {
                             strength: u16::MAX,
@@ -782,7 +782,7 @@ impl PostFlopGame {
                                     } else {
                                         let hand = board.add_card(hand1).add_card(hand2);
                                         Some(StrengthItem {
-                                            strength: hand.evaluate() + 1,
+                                            strength: hand.evaluate(),
                                             index: index as u16,
                                         })
                                     }
