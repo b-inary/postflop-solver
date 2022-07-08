@@ -679,12 +679,12 @@ impl PostFlopGame {
             }
         }
 
-        self.valid_indices_flop = self.init_valid_indices(NOT_DEALT, NOT_DEALT);
+        self.valid_indices_flop = self.valid_indices(NOT_DEALT, NOT_DEALT);
 
         self.valid_indices_turn = vec![Default::default(); 52];
         for turn in 0..52 {
             if !flop.contains(&turn) {
-                self.valid_indices_turn[turn as usize] = self.init_valid_indices(turn, NOT_DEALT);
+                self.valid_indices_turn[turn as usize] = self.valid_indices(turn, NOT_DEALT);
             }
         }
 
@@ -693,14 +693,14 @@ impl PostFlopGame {
             for board2 in board1 + 1..52 {
                 if !flop.contains(&board1) && !flop.contains(&board2) {
                     let index = card_pair_index(board1, board2);
-                    self.valid_indices_river[index] = self.init_valid_indices(board1, board2);
+                    self.valid_indices_river[index] = self.valid_indices(board1, board2);
                 }
             }
         }
     }
 
     /// Initializes a valid indices.
-    fn init_valid_indices(&self, board1: u8, board2: u8) -> [Vec<usize>; 2] {
+    fn valid_indices(&self, board1: u8, board2: u8) -> [Vec<usize>; 2] {
         let mut board_mask: u64 = 0;
         if board1 != NOT_DEALT {
             board_mask |= 1 << board1;
@@ -710,25 +710,28 @@ impl PostFlopGame {
         }
 
         let private_hand_cards = &self.private_hand_cards;
-        let mut ret = [Vec::new(), Vec::new()];
+
+        let mut valid_indices = [
+            Vec::with_capacity(private_hand_cards[0].len()),
+            Vec::with_capacity(private_hand_cards[1].len()),
+        ];
 
         for player in 0..2 {
-            let mut valid_indices = Vec::with_capacity(private_hand_cards[player].len());
-            private_hand_cards[player]
-                .iter()
-                .enumerate()
-                .for_each(|(index, (c1, c2))| {
+            valid_indices[player].extend(private_hand_cards[player].iter().enumerate().filter_map(
+                |(index, (c1, c2))| {
                     let hand_mask: u64 = (1 << c1) | (1 << c2);
                     if hand_mask & board_mask == 0 {
-                        valid_indices.push(index);
+                        Some(index)
+                    } else {
+                        None
                     }
-                });
+                },
+            ));
 
-            valid_indices.shrink_to_fit();
-            ret[player] = valid_indices;
+            valid_indices[player].shrink_to_fit();
         }
 
-        ret
+        valid_indices
     }
 
     /// Initializes a field `hand_strength`.
