@@ -675,11 +675,18 @@ impl PostFlopGame {
             }
         }
 
-        self.valid_indices_flop = self.valid_indices(NOT_DEALT, NOT_DEALT);
+        if self.config.turn == NOT_DEALT {
+            self.valid_indices_flop = self.valid_indices(NOT_DEALT, NOT_DEALT);
+        } else {
+            self.valid_indices_flop = Default::default();
+        }
 
         self.valid_indices_turn = vec![Default::default(); 52];
         for turn in 0..52 {
-            if !flop.contains(&turn) {
+            if !flop.contains(&turn)
+                && (self.config.turn == NOT_DEALT || turn == self.config.turn)
+                && self.config.river == NOT_DEALT
+            {
                 self.valid_indices_turn[turn as usize] = self.valid_indices(turn, NOT_DEALT);
             }
         }
@@ -687,7 +694,15 @@ impl PostFlopGame {
         self.valid_indices_river = vec![Default::default(); 52 * 51 / 2];
         for board1 in 0..52 {
             for board2 in board1 + 1..52 {
-                if !flop.contains(&board1) && !flop.contains(&board2) {
+                if !flop.contains(&board1)
+                    && !flop.contains(&board2)
+                    && (self.config.turn == NOT_DEALT
+                        || board1 == self.config.turn
+                        || board2 == self.config.turn)
+                    && (self.config.river == NOT_DEALT
+                        || board1 == self.config.river
+                        || board2 == self.config.river)
+                {
                     let index = card_pair_index(board1, board2);
                     self.valid_indices_river[index] = self.valid_indices(board1, board2);
                 }
@@ -742,16 +757,15 @@ impl PostFlopGame {
 
         for board1 in 0..52 {
             for board2 in board1 + 1..52 {
-                let mut is_possible =
-                    !flop.contains(board1 as usize) && !flop.contains(board2 as usize);
-                if self.config.river != NOT_DEALT {
-                    is_possible &= (self.config.turn == board1 && self.config.river == board2)
-                        || (self.config.turn == board2 && self.config.river == board1);
-                } else if self.config.turn != NOT_DEALT {
-                    is_possible &= self.config.turn == board1 || self.config.turn == board2;
-                }
-
-                if is_possible {
+                if !flop.contains(board1 as usize)
+                    && !flop.contains(board2 as usize)
+                    && (self.config.turn == NOT_DEALT
+                        || board1 == self.config.turn
+                        || board2 == self.config.turn)
+                    && (self.config.river == NOT_DEALT
+                        || board1 == self.config.river
+                        || board2 == self.config.river)
+                {
                     let board = flop.add_card(board1 as usize).add_card(board2 as usize);
                     let mut strength = [
                         Vec::with_capacity(private_hand_cards[0].len() + 2),
