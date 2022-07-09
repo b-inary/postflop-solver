@@ -148,13 +148,9 @@ game.back_to_root();
 - `custom-alloc`: Uses custom memory allocator in solving process (only available in nightly Rust).
   It significantly reduces the number of calls of the default allocator, so it is recommended to use this feature when the default allocator is not so efficient.
   Disabled by default.
-- `holdem-hand-evaluator`: Uses [holdem-hand-evaluator] crate to evaluate hands.
-  It makes the tree construction slightly faster, but the program size will increase by about 200KB.
-  Enabled by default.
 - `rayon`: Uses [rayon] crate for parallelization.
   Enabled by default.
 
-[holdem-hand-evaluator]: https://github.com/b-inary/holdem-hand-evaluator
 [rayon]: https://github.com/rayon-rs/rayon
 
 ## License

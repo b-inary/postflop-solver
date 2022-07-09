@@ -131,13 +131,9 @@
 //!   It significantly reduces the number of calls of the default allocator,
 //!   so it is recommended to use this feature when the default allocator is not so efficient.
 //!   Disabled by default.
-//! - `holdem-hand-evaluator`: Uses [holdem-hand-evaluator] crate to evaluate hands.
-//!   It makes the tree construction slightly faster, but the program size will increase by about 200KB.
-//!   Enabled by default.
 //! - `rayon`: Uses [rayon] crate for parallelization.
 //!   Enabled by default.
 //!
-//! [holdem-hand-evaluator]: https://github.com/b-inary/holdem-hand-evaluator
 //! [rayon]: https://github.com/rayon-rs/rayon
 
 #![cfg_attr(feature = "custom-alloc", feature(allocator_api))]
@@ -145,6 +141,8 @@
 
 mod bet_size;
 mod game;
+mod hand;
+mod hand_table;
 mod interface;
 mod mutex_like;
 mod range;
@@ -154,12 +152,6 @@ mod utility;
 
 #[cfg(feature = "custom-alloc")]
 mod alloc;
-
-#[cfg(not(feature = "holdem-hand-evaluator"))]
-mod hand;
-
-#[cfg(not(feature = "holdem-hand-evaluator"))]
-mod hand_table;
 
 pub use bet_size::*;
 pub use game::*;

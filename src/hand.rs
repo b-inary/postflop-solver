@@ -1,7 +1,7 @@
 use crate::hand_table::*;
 
 #[derive(Clone, Copy, Default)]
-pub struct Hand {
+pub(crate) struct Hand {
     cards: [usize; 7],
     num_cards: usize,
 }
