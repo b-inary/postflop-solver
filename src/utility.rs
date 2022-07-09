@@ -208,7 +208,7 @@ fn compute_ev_recursive<T: Game>(
             #[cfg(feature = "custom-alloc")]
             {
                 let mut vec = Vec::with_capacity_in(strategy.len(), StackAlloc);
-                strategy.iter().map(|&x| x as f32).collect_into(&mut vec);
+                vec.extend(strategy.iter().map(|&x| x as f32));
                 vec
             }
             #[cfg(not(feature = "custom-alloc"))]
@@ -276,7 +276,7 @@ fn compute_ev_recursive<T: Game>(
             #[cfg(feature = "custom-alloc")]
             {
                 let mut vec = Vec::with_capacity_in(strategy.len(), StackAlloc);
-                strategy.iter().map(|&x| x as f32).collect_into(&mut vec);
+                vec.extend(strategy.iter().map(|&x| x as f32));
                 vec
             }
             #[cfg(not(feature = "custom-alloc"))]
@@ -442,7 +442,7 @@ fn compute_best_cfv_recursive<T: Game>(
             #[cfg(feature = "custom-alloc")]
             {
                 let mut vec = Vec::with_capacity_in(strategy.len(), StackAlloc);
-                strategy.iter().map(|&x| x as f32).collect_into(&mut vec);
+                vec.extend(strategy.iter().map(|&x| x as f32));
                 vec
             }
             #[cfg(not(feature = "custom-alloc"))]

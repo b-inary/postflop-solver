@@ -137,7 +137,6 @@
 //! [rayon]: https://github.com/rayon-rs/rayon
 
 #![cfg_attr(feature = "custom-alloc", feature(allocator_api))]
-#![cfg_attr(feature = "custom-alloc", feature(iter_collect_into))]
 
 mod bet_size;
 mod game;
