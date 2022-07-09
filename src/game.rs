@@ -1754,7 +1754,12 @@ impl PostFlopGame {
         tmp.iter()
             .enumerate()
             .map(|(i, &v)| {
-                v as f32 * (self.weights[player][i] / self.normalized_weights[player][i]) + 0.5
+                let normalized_weight = self.normalized_weights[player][i];
+                if normalized_weight > 0.0 {
+                    v as f32 * (self.weights[player][i] / normalized_weight) + 0.5
+                } else {
+                    0.0
+                }
             })
             .collect()
     }
@@ -1831,12 +1836,18 @@ impl PostFlopGame {
         };
 
         let num_private_hands = self.num_private_hands(player);
-        ret.chunks_mut(num_private_hands).for_each(|chunk| {
-            self.apply_swap(chunk, player);
-            chunk.iter_mut().enumerate().for_each(|(i, x)| {
-                *x *= self.normalize_factor / self.normalized_weights[player][i];
-                *x += self.config.starting_pot as f32 * 0.5 + self.node().amount as f32;
-            });
+        ret.chunks_mut(num_private_hands).for_each(|row| {
+            self.apply_swap(row, player);
+            row.iter_mut()
+                .zip(self.normalized_weights[player].iter())
+                .for_each(|(v, &w)| {
+                    if w > 0.0 {
+                        *v *= self.normalize_factor / w;
+                        *v += self.config.starting_pot as f32 * 0.5 + self.node().amount as f32;
+                    } else {
+                        *v = 0.0;
+                    }
+                });
         });
 
         ret
