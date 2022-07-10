@@ -60,7 +60,8 @@ pub struct PostFlopGame {
 
     // result interpreter
     is_solved: bool,
-    node: *const PostFlopNode,
+    node_ptr: *const PostFlopNode,
+    history: Vec<usize>,
     turn: u8,
     river: u8,
     weights: [Vec<f32>; 2],
@@ -68,8 +69,8 @@ pub struct PostFlopGame {
     normalized_weights_cached: bool,
     normalize_factor: f32,
     turn_swapped_suit: Option<(u8, u8)>,
-    turn_swap: *const SwapList,
-    river_swap: *const SwapList,
+    turn_swap: Option<u8>,
+    river_swap: Option<(u8, u8)>,
 }
 
 unsafe impl Send for PostFlopGame {}
@@ -1458,18 +1459,36 @@ impl PostFlopGame {
         }
     }
 
+    /// Returns the history of the current node.
+    ///
+    /// The history is a list of action indices, i.e., the arguments of `play()`.
+    #[inline]
+    pub fn history(&self) -> &[usize] {
+        &self.history
+    }
+
+    /// Applies the given history from the root node.
+    #[inline]
+    pub fn apply_history(&mut self, history: &[usize]) {
+        self.back_to_root();
+        for &action in history {
+            self.play(action);
+        }
+    }
+
     /// Moves the current node back to the root node.
     #[inline]
     pub fn back_to_root(&mut self) {
-        self.node = &*self.root();
+        self.node_ptr = &*self.root();
+        self.history.clear();
         self.turn = self.config.turn;
         self.river = self.config.river;
         self.weights = self.initial_weight.clone();
         self.normalized_weights_cached = false;
         self.normalize_factor = 1.0 / self.num_combinations_inv as f32;
         self.turn_swapped_suit = None;
-        self.turn_swap = ptr::null();
-        self.river_swap = ptr::null();
+        self.turn_swap = None;
+        self.river_swap = None;
     }
 
     /// Returns the available actions for the current node.
@@ -1556,8 +1575,8 @@ impl PostFlopGame {
     ///   - If the current node is not a chance node, plays the `action`-th action of
     ///     `available_actions()`.
     pub fn play(&mut self, action: usize) {
-        if !self.is_solved {
-            panic!("game is not solved");
+        if !self.is_ready() {
+            panic!("memory is not allocated");
         }
 
         // chande node
@@ -1597,12 +1616,15 @@ impl PostFlopGame {
                     if action_card == isomorphic_cards[i] {
                         action_index = repr_index;
                         if is_turn {
-                            self.turn_swap = self.isomorphic_swap(self.node(), i);
+                            self.turn_swap = Some(self.turn_isomorphism_cards[i] & 3);
                             if let Action::Chance(repr_card) = actions[repr_index] {
                                 self.turn_swapped_suit = Some((action_card & 3, repr_card & 3));
                             }
                         } else {
-                            self.river_swap = self.isomorphic_swap(self.node(), i);
+                            self.river_swap = Some((
+                                self.turn,
+                                self.river_isomorphism_cards[self.turn as usize][i] & 3,
+                            ));
                         }
                         break;
                     }
@@ -1615,7 +1637,7 @@ impl PostFlopGame {
             }
 
             // updates the state
-            self.node = &*self.node().play(action_index);
+            self.node_ptr = &*self.node().play(action_index);
             if is_turn {
                 self.turn = actual_card;
                 self.normalize_factor *= 45.0;
@@ -1640,13 +1662,14 @@ impl PostFlopGame {
             }
 
             // updates the node
-            self.node = &*self.node().play(action);
+            self.node_ptr = &*self.node().play(action);
         }
 
         if self.node().is_terminal() || self.node().amount == self.config.effective_stack {
             panic!("playing a terminal action is not allowed");
         }
 
+        self.history.push(action);
         self.normalized_weights_cached = false;
     }
 
@@ -1865,8 +1888,8 @@ impl PostFlopGame {
             panic!("chance node is not allowed");
         }
 
-        if !self.is_solved {
-            panic!("game is not solved");
+        if !self.is_ready() {
+            panic!("memory is not allocated");
         }
 
         let player = self.current_player();
@@ -1892,17 +1915,23 @@ impl PostFlopGame {
     /// Returns the reference to the current node.
     #[inline]
     fn node(&self) -> &PostFlopNode {
-        unsafe { &*self.node }
+        unsafe { &*self.node_ptr }
     }
 
     /// Applies the swap.
     #[inline]
     fn apply_swap(&self, slice: &mut [f32], player: usize) {
-        for swap in [self.river_swap, self.turn_swap] {
-            if !swap.is_null() {
-                for &(i, j) in unsafe { &(*swap)[player] } {
-                    slice.swap(i, j);
-                }
+        let turn_swap = self
+            .turn_swap
+            .map(|suit| &self.turn_isomorphism_swap[suit as usize][player]);
+
+        let river_swap = self
+            .river_swap
+            .map(|(turn, suit)| &self.river_isomorphism_swap[turn as usize][suit as usize][player]);
+
+        for swap in [river_swap, turn_swap].into_iter().flatten() {
+            for &(i, j) in swap {
+                slice.swap(i, j);
             }
         }
     }
@@ -2139,7 +2168,8 @@ impl Default for PostFlopGame {
             storage1_compressed: MutexLike::default(),
             storage2_compressed: MutexLike::default(),
             is_solved: false,
-            node: ptr::null(),
+            node_ptr: ptr::null(),
+            history: Vec::default(),
             turn: NOT_DEALT,
             river: NOT_DEALT,
             weights: Default::default(),
@@ -2147,8 +2177,8 @@ impl Default for PostFlopGame {
             normalized_weights_cached: false,
             normalize_factor: 0.0,
             turn_swapped_suit: None,
-            turn_swap: ptr::null(),
-            river_swap: ptr::null(),
+            turn_swap: None,
+            river_swap: None,
         }
     }
 }
