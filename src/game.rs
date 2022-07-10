@@ -1459,6 +1459,21 @@ impl PostFlopGame {
         }
     }
 
+    /// Moves the current node back to the root node.
+    #[inline]
+    pub fn back_to_root(&mut self) {
+        self.node_ptr = &*self.root();
+        self.history.clear();
+        self.turn = self.config.turn;
+        self.river = self.config.river;
+        self.weights = self.initial_weight.clone();
+        self.normalized_weights_cached = false;
+        self.normalize_factor = 1.0 / self.num_combinations_inv as f32;
+        self.turn_swapped_suit = None;
+        self.turn_swap = None;
+        self.river_swap = None;
+    }
+
     /// Returns the history of the current node.
     ///
     /// The history is a list of action indices, i.e., the arguments of `play()`.
@@ -1474,21 +1489,6 @@ impl PostFlopGame {
         for &action in history {
             self.play(action);
         }
-    }
-
-    /// Moves the current node back to the root node.
-    #[inline]
-    pub fn back_to_root(&mut self) {
-        self.node_ptr = &*self.root();
-        self.history.clear();
-        self.turn = self.config.turn;
-        self.river = self.config.river;
-        self.weights = self.initial_weight.clone();
-        self.normalized_weights_cached = false;
-        self.normalize_factor = 1.0 / self.num_combinations_inv as f32;
-        self.turn_swapped_suit = None;
-        self.turn_swap = None;
-        self.river_swap = None;
     }
 
     /// Returns the available actions for the current node.
@@ -1548,16 +1548,16 @@ impl PostFlopGame {
                     let ip_mask: u64 = (1 << c3) | (1 << c4);
                     let ip_weight = self.weights[1][j];
                     if (board_mask | oop_mask) & ip_mask == 0 && ip_weight > 0.0 {
-                        mask &= board_mask | oop_mask | ip_mask;
+                        mask &= oop_mask | ip_mask;
                     }
                 }
-                if mask == board_mask {
+                if mask == 0 {
                     break;
                 }
             }
         }
 
-        ((1 << 52) - 1) ^ mask
+        ((1 << 52) - 1) ^ (board_mask | mask)
     }
 
     /// Returns the current player (0 = OOP, 1 = IP).
@@ -1682,14 +1682,6 @@ impl PostFlopGame {
             return;
         }
 
-        let mut normalized_weights_f64 = [
-            vec![0.0; self.num_private_hands(0)],
-            vec![0.0; self.num_private_hands(1)],
-        ];
-
-        let oop_hands = &self.private_hand_cards[0];
-        let ip_hands = &self.private_hand_cards[1];
-
         let mut board_mask: u64 = 0;
         if self.turn != NOT_DEALT {
             board_mask |= 1 << self.turn;
@@ -1698,27 +1690,48 @@ impl PostFlopGame {
             board_mask |= 1 << self.river;
         }
 
-        for (i, &(c1, c2)) in oop_hands.iter().enumerate() {
-            let oop_mask: u64 = (1 << c1) | (1 << c2);
-            let oop_weight = self.weights[0][i];
-            if board_mask & oop_mask == 0 && oop_weight > 0.0 {
-                for (j, &(c3, c4)) in ip_hands.iter().enumerate() {
-                    let ip_mask: u64 = (1 << c3) | (1 << c4);
-                    let ip_weight = self.weights[1][j];
-                    if (board_mask | oop_mask) & ip_mask == 0 && ip_weight > 0.0 {
-                        let weight = oop_weight as f64 * ip_weight as f64;
-                        normalized_weights_f64[0][i] += weight;
-                        normalized_weights_f64[1][j] += weight;
+        let mut weight_sum = [0.0; 2];
+        let mut weight_sum_minus = [[0.0; 52]; 2];
+
+        for player in 0..2 {
+            self.private_hand_cards[player]
+                .iter()
+                .zip(self.weights[player].iter())
+                .for_each(|(&(c1, c2), &weight)| {
+                    let mask: u64 = (1 << c1) | (1 << c2);
+                    if mask & board_mask == 0 {
+                        let weight = weight as f64;
+                        weight_sum[player] += weight;
+                        weight_sum_minus[player][c1 as usize] += weight;
+                        weight_sum_minus[player][c2 as usize] += weight;
                     }
-                }
-            }
+                });
         }
 
         for player in 0..2 {
+            let player_cards = &self.private_hand_cards[player];
+            let player_weights = &self.weights[player];
+            let opponent_weights = &self.weights[player ^ 1];
+            let opponent_weight_sum = weight_sum[player ^ 1];
+            let opponent_weight_sum_minus = &weight_sum_minus[player ^ 1];
+
             self.normalized_weights[player]
                 .iter_mut()
-                .zip(normalized_weights_f64[player].iter())
-                .for_each(|(w, &w_f64)| *w = w_f64 as f32);
+                .enumerate()
+                .for_each(|(i, w)| {
+                    let (c1, c2) = player_cards[i];
+                    let mask: u64 = (1 << c1) | (1 << c2);
+                    if mask & board_mask == 0 {
+                        let opponent_weight = opponent_weight_sum
+                            - opponent_weight_sum_minus[c1 as usize]
+                            - opponent_weight_sum_minus[c2 as usize]
+                            + self.same_hand_index[player][i]
+                                .map_or(0.0, |j| opponent_weights[j] as f64);
+                        *w = player_weights[i] * opponent_weight as f32;
+                    } else {
+                        *w = 0.0;
+                    }
+                });
         }
 
         self.normalized_weights_cached = true;
