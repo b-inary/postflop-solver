@@ -1333,7 +1333,8 @@ impl PostFlopGame {
             let new_bet_diff = size - opponent_bet;
             let new_pot = pot + 2 * new_bet_diff;
 
-            if max_bet <= size + (new_pot as f32 * self.config.force_all_in_threshold) as i32 {
+            let threshold = (new_pot as f32 * self.config.force_all_in_threshold).round() as i32;
+            if max_bet <= size + threshold {
                 return max_bet;
             }
 
@@ -1341,7 +1342,7 @@ impl PostFlopGame {
                 return size;
             }
 
-            let mut min_opponent_ratio = f32::MIN;
+            let mut min_opponent_ratio = f32::MAX;
             for &bet_size in &candidates[player_opponent as usize].raise {
                 match bet_size {
                     BetSize::PotRelative(ratio) => {
@@ -1358,13 +1359,14 @@ impl PostFlopGame {
             let next_bet_diff = min_opponent_bet - size;
             let next_pot = new_pot + 2 * next_bet_diff;
 
-            // next opponent bet will be always all-in
-            let threshold = (next_pot as f32 * self.config.force_all_in_threshold) as i32;
+            let threshold = (next_pot as f32 * self.config.force_all_in_threshold).round() as i32;
             if max_bet <= min_opponent_bet + threshold {
+                // next opponent bet will be always all-in
                 let ratio = new_bet_diff as f32 / pot as f32;
                 let a = 2.0 * pot as f32 * ratio * min_opponent_ratio;
                 let b = pot as f32 * (ratio + min_opponent_ratio);
                 let c = (max_bet - opponent_bet) as f32;
+                // solve quadratic equation
                 let coef = ((4.0 * a * c + b * b).sqrt() - b) / (2.0 * a);
                 return opponent_bet + (new_bet_diff as f32 * coef).round() as i32;
             }
