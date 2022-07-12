@@ -9,6 +9,7 @@ repository = "https://github.com/b-inary/postflop-solver"
 license = "AGPL-3.0-or-later"
 
 [dependencies]
+bincode = { version = "2.0.0-rc.1", optional = true }
 num-traits = "0.2.15"
 once_cell = "1.13.0"
 rayon = { version = "1.5.3", optional = true }

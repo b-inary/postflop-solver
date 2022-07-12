@@ -4,6 +4,9 @@ use std::fmt::Write;
 use std::mem;
 use std::str::FromStr;
 
+#[cfg(feature = "bincode")]
+use bincode::{Decode, Encode};
+
 /// A struct representing a player's range.
 ///
 /// # Examples
@@ -25,6 +28,7 @@ use std::str::FromStr;
 /// assert_eq!(range.get_weight_offsuit(ace_rank, king_rank), 0.0);
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "bincode", derive(Decode, Encode))]
 pub struct Range {
     data: [f32; 52 * 51 / 2],
 }

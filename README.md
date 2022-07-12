@@ -145,12 +145,16 @@ game.back_to_root();
 
 ## Crate features
 
+- `bincode`: Uses [bincode] crate (2.0.0-rc.1) to serialize and deserialize the `PostFlopGame` struct.
+  Disabled by default.
 - `custom-alloc`: Uses custom memory allocator in solving process (only available in nightly Rust).
   It significantly reduces the number of calls of the default allocator, so it is recommended to use this feature when the default allocator is not so efficient.
+  Note that this feature assumes that only one `PostFlopGame` instance is solved simultaneously in a program.
   Disabled by default.
 - `rayon`: Uses [rayon] crate for parallelization.
   Enabled by default.
 
+[bincode]: https://github.com/bincode-org/bincode
 [rayon]: https://github.com/rayon-rs/rayon
 
 ## License

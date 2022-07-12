@@ -11,6 +11,14 @@ use std::ptr;
 use std::slice;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
+#[cfg(feature = "bincode")]
+use bincode::{
+    error::{DecodeError, EncodeError},
+    Decode, Encode,
+};
+#[cfg(feature = "bincode")]
+use std::sync::atomic::AtomicPtr;
+
 #[cfg(feature = "custom-alloc")]
 use crate::alloc::*;
 #[cfg(feature = "custom-alloc")]
@@ -83,7 +91,8 @@ pub struct PostFlopNode {
     turn: u8,
     river: u8,
     amount: i32,
-    children: Vec<(Action, MutexLike<PostFlopNode>)>,
+    actions: Vec<Action>,
+    children: Vec<MutexLike<PostFlopNode>>,
     storage1: *mut u8,
     storage2: *mut u8,
     scale1: f32,
@@ -120,6 +129,7 @@ unsafe impl Sync for PostFlopNode {}
 /// };
 /// ```
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "bincode", derive(Decode, Encode))]
 pub struct GameConfig {
     /// Flop cards: each card must be unique and in range [`0`, `52`).
     pub flop: [u8; 3],
@@ -161,6 +171,7 @@ pub struct GameConfig {
 
 /// Available actions in a postflop game.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[cfg_attr(feature = "bincode", derive(Decode, Encode))]
 pub enum Action {
     /// Only used for the previous action of the root node.
     None,
@@ -467,6 +478,12 @@ impl PostFlopGame {
     pub fn allocate_memory(&mut self, enable_compression: bool) {
         if self.is_memory_allocated && self.is_compression_enabled == enable_compression {
             return;
+        }
+
+        let bytes = if enable_compression { 2 } else { 4 };
+        let vec_size = bytes * self.num_storage_elements;
+        if vec_size > isize::MAX as u64 {
+            panic!("Memory usage exceeds maximum size");
         }
 
         self.clear_storage();
@@ -1124,7 +1141,7 @@ impl PostFlopGame {
                 stack_size[i] += align_up(f32_size * self.num_private_hands(i ^ 1));
             }
 
-            for (action, child) in &node.children {
+            for (action, child) in node.actions.iter().zip(node.children.iter()) {
                 self.build_tree_recursive(
                     &mut child.lock(),
                     &BuildTreeInfo {
@@ -1148,7 +1165,7 @@ impl PostFlopGame {
                 stack_size[i] += n * align_up(col_size * self.num_private_hands(node.player()));
             }
 
-            for (action, child) in &node.children {
+            for (action, child) in node.actions.iter().zip(node.children.iter()) {
                 let mut last_bet = info.last_bet;
                 let mut allin_flag = info.allin_flag;
 
@@ -1193,19 +1210,18 @@ impl PostFlopGame {
                 PLAYER_CHANCE
             };
 
+            node.actions.reserve(49);
             node.children.reserve(49);
 
             for card in 0..52 {
                 if (1 << card) & flop_mask == 0 && !self.turn_isomorphism_cards.contains(&card) {
-                    node.children.push((
-                        Action::Chance(card),
-                        MutexLike::new(PostFlopNode {
-                            player: next_player,
-                            turn: card,
-                            amount: node.amount,
-                            ..Default::default()
-                        }),
-                    ));
+                    node.actions.push(Action::Chance(card));
+                    node.children.push(MutexLike::new(PostFlopNode {
+                        player: next_player,
+                        turn: card,
+                        amount: node.amount,
+                        ..Default::default()
+                    }));
                 }
             }
         }
@@ -1219,29 +1235,31 @@ impl PostFlopGame {
                 PLAYER_TERMINAL_FLAG
             };
 
+            node.actions.reserve(49);
             node.children.reserve(48);
 
             for card in 0..52 {
                 if (1 << card) & turn_mask == 0
                     && !self.river_isomorphism_cards[node.turn as usize].contains(&card)
                 {
-                    node.children.push((
-                        Action::Chance(card),
-                        MutexLike::new(PostFlopNode {
-                            player: next_player,
-                            turn: node.turn,
-                            river: card,
-                            amount: node.amount,
-                            ..Default::default()
-                        }),
-                    ));
+                    node.actions.push(Action::Chance(card));
+                    node.children.push(MutexLike::new(PostFlopNode {
+                        player: next_player,
+                        turn: node.turn,
+                        river: card,
+                        amount: node.amount,
+                        ..Default::default()
+                    }));
                 }
             }
         }
 
+        node.actions.shrink_to_fit();
         node.children.shrink_to_fit();
-        info.current_memory_usage
-            .fetch_add(vec_memory_usage(&node.children), Ordering::Relaxed);
+        info.current_memory_usage.fetch_add(
+            vec_memory_usage(&node.actions) + vec_memory_usage(&node.children),
+            Ordering::Relaxed,
+        );
     }
 
     /// Pushes the actions to the `node`.
@@ -1414,21 +1432,22 @@ impl PostFlopGame {
                 amount += bet_diff;
             }
 
-            node.children.push((
-                action,
-                MutexLike::new(PostFlopNode {
-                    player: next_player,
-                    turn: node.turn,
-                    river: node.river,
-                    amount,
-                    ..Default::default()
-                }),
-            ));
+            node.actions.push(action);
+            node.children.push(MutexLike::new(PostFlopNode {
+                player: next_player,
+                turn: node.turn,
+                river: node.river,
+                amount,
+                ..Default::default()
+            }));
         }
 
+        node.actions.shrink_to_fit();
         node.children.shrink_to_fit();
-        info.current_memory_usage
-            .fetch_add(vec_memory_usage(&node.children), Ordering::Relaxed);
+        info.current_memory_usage.fetch_add(
+            vec_memory_usage(&node.actions) + vec_memory_usage(&node.children),
+            Ordering::Relaxed,
+        );
 
         let num_elems = node.num_actions() * self.num_private_hands(player as usize);
         node.num_elements = num_elems;
@@ -1501,7 +1520,7 @@ impl PostFlopGame {
     /// Note: If the current node is a chance node, isomorphic chances are grouped together into
     /// one representative action.
     #[inline]
-    pub fn available_actions(&self) -> Vec<Action> {
+    pub fn available_actions(&self) -> &[Action] {
         self.node().available_actions()
     }
 
@@ -1621,10 +1640,10 @@ impl PostFlopGame {
                     if action_card == isomorphic_cards[i] {
                         action_index = repr_index;
                         if is_turn {
-                            self.turn_swap = Some(self.turn_isomorphism_cards[i] & 3);
                             if let Action::Chance(repr_card) = actions[repr_index] {
                                 self.turn_swapped_suit = Some((action_card & 3, repr_card & 3));
                             }
+                            self.turn_swap = Some(self.turn_isomorphism_cards[i] & 3);
                         } else {
                             self.river_swap = Some((
                                 self.turn,
@@ -2050,7 +2069,7 @@ impl GameNode for PostFlopNode {
 
     #[inline]
     fn play(&self, action: usize) -> MutexGuardLike<Self> {
-        self.children[action].1.lock()
+        self.children[action].lock()
     }
 
     #[inline]
@@ -2152,8 +2171,8 @@ impl GameNode for PostFlopNode {
 impl PostFlopNode {
     /// Returns the available actions.
     #[inline]
-    fn available_actions(&self) -> Vec<Action> {
-        self.children.iter().map(|(action, _)| *action).collect()
+    fn available_actions(&self) -> &[Action] {
+        &self.actions
     }
 }
 
@@ -2210,6 +2229,7 @@ impl Default for PostFlopNode {
             turn: NOT_DEALT,
             river: NOT_DEALT,
             amount: 0,
+            actions: Vec::new(),
             children: Vec::new(),
             storage1: ptr::null_mut(),
             storage2: ptr::null_mut(),
@@ -2237,6 +2257,186 @@ impl Default for GameConfig {
             force_all_in_threshold: 0.0,
             adjust_last_two_bet_sizes: false,
         }
+    }
+}
+
+#[cfg(feature = "bincode")]
+static VERSION_STR: &str = "2022-07-12";
+
+#[cfg(feature = "bincode")]
+static STORAGE1_PTR: AtomicPtr<u8> = AtomicPtr::new(ptr::null_mut());
+#[cfg(feature = "bincode")]
+static STORAGE2_PTR: AtomicPtr<u8> = AtomicPtr::new(ptr::null_mut());
+
+#[cfg(feature = "bincode")]
+impl Encode for PostFlopGame {
+    fn encode<E: bincode::enc::Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
+        // store base pointer
+        if self.is_memory_allocated {
+            let ptr = if self.is_compression_enabled {
+                self.storage1_compressed.lock().as_mut_ptr() as *mut u8
+            } else {
+                self.storage1.lock().as_mut_ptr() as *mut u8
+            };
+            STORAGE1_PTR.store(ptr, Ordering::Relaxed);
+        } else {
+            STORAGE1_PTR.store(ptr::null_mut(), Ordering::Relaxed);
+        }
+
+        // version
+        VERSION_STR.to_string().encode(encoder)?;
+
+        // contents
+        self.config.encode(encoder)?;
+        self.num_combinations_inv.encode(encoder)?;
+        self.is_memory_allocated.encode(encoder)?;
+        self.is_compression_enabled.encode(encoder)?;
+        self.stack_size.encode(encoder)?;
+        self.misc_memory_usage.encode(encoder)?;
+        self.num_storage_elements.encode(encoder)?;
+        self.storage1.encode(encoder)?;
+        self.storage2.encode(encoder)?;
+        self.storage1_compressed.encode(encoder)?;
+        self.storage2_compressed.encode(encoder)?;
+        self.is_solved.encode(encoder)?;
+        self.history.encode(encoder)?;
+
+        // game tree
+        self.root.encode(encoder)?;
+
+        Ok(())
+    }
+}
+
+#[cfg(feature = "bincode")]
+impl Encode for PostFlopNode {
+    fn encode<E: bincode::enc::Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
+        // compute pointer offset
+        let offset = if self.storage1.is_null() {
+            0
+        } else {
+            let base = STORAGE1_PTR.load(Ordering::Relaxed);
+            unsafe { self.storage1.offset_from(base) }
+        };
+
+        // contents
+        self.player.encode(encoder)?;
+        self.turn.encode(encoder)?;
+        self.river.encode(encoder)?;
+        self.amount.encode(encoder)?;
+        self.actions.encode(encoder)?;
+        self.scale1.encode(encoder)?;
+        self.scale2.encode(encoder)?;
+        self.num_elements.encode(encoder)?;
+        offset.encode(encoder)?;
+
+        // children
+        self.children.encode(encoder)?;
+
+        Ok(())
+    }
+}
+
+#[cfg(feature = "bincode")]
+impl Decode for PostFlopGame {
+    fn decode<D: bincode::de::Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
+        // version check
+        let version = String::decode(decoder)?;
+        if version != VERSION_STR {
+            return Err(DecodeError::OtherString(format!(
+                "Version mismatch: expected '{}', but got '{}'",
+                VERSION_STR, version
+            )));
+        }
+
+        // game instance
+        let mut game = Self {
+            config: Decode::decode(decoder)?,
+            num_combinations_inv: Decode::decode(decoder)?,
+            is_memory_allocated: Decode::decode(decoder)?,
+            is_compression_enabled: Decode::decode(decoder)?,
+            stack_size: Decode::decode(decoder)?,
+            misc_memory_usage: Decode::decode(decoder)?,
+            num_storage_elements: Decode::decode(decoder)?,
+            storage1: Decode::decode(decoder)?,
+            storage2: Decode::decode(decoder)?,
+            storage1_compressed: Decode::decode(decoder)?,
+            storage2_compressed: Decode::decode(decoder)?,
+            is_solved: Decode::decode(decoder)?,
+            ..Default::default()
+        };
+
+        let history = Vec::<usize>::decode(decoder)?;
+
+        // store base pointers
+        if game.is_memory_allocated {
+            let (ptr1, ptr2) = if game.is_compression_enabled {
+                (
+                    game.storage1_compressed.lock().as_mut_ptr() as *mut u8,
+                    game.storage2_compressed.lock().as_mut_ptr() as *mut u8,
+                )
+            } else {
+                (
+                    game.storage1.lock().as_mut_ptr() as *mut u8,
+                    game.storage2.lock().as_mut_ptr() as *mut u8,
+                )
+            };
+            STORAGE1_PTR.store(ptr1, Ordering::Relaxed);
+            STORAGE2_PTR.store(ptr2, Ordering::Relaxed);
+        } else {
+            STORAGE1_PTR.store(ptr::null_mut(), Ordering::Relaxed);
+            STORAGE2_PTR.store(ptr::null_mut(), Ordering::Relaxed);
+        }
+
+        // game tree
+        game.root = Decode::decode(decoder)?;
+
+        // initialization
+        game.init_range();
+        game.init_hand_strength();
+        game.init_isomorphism();
+        game.apply_history(&history);
+        game.normalized_weights = [
+            vec![0.0; game.num_private_hands(0)],
+            vec![0.0; game.num_private_hands(1)],
+        ];
+
+        #[cfg(feature = "custom-alloc")]
+        STACK_UNIT_SIZE.store(4 * game.stack_size, Ordering::Relaxed);
+
+        Ok(game)
+    }
+}
+
+#[cfg(feature = "bincode")]
+impl Decode for PostFlopNode {
+    fn decode<D: bincode::de::Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
+        // node instance
+        let mut node = Self {
+            player: Decode::decode(decoder)?,
+            turn: Decode::decode(decoder)?,
+            river: Decode::decode(decoder)?,
+            amount: Decode::decode(decoder)?,
+            actions: Decode::decode(decoder)?,
+            scale1: Decode::decode(decoder)?,
+            scale2: Decode::decode(decoder)?,
+            num_elements: Decode::decode(decoder)?,
+            ..Default::default()
+        };
+
+        // pointers
+        let offset = isize::decode(decoder)?;
+        let base1 = STORAGE1_PTR.load(Ordering::Relaxed);
+        let base2 = STORAGE2_PTR.load(Ordering::Relaxed);
+        if !base1.is_null() {
+            node.storage1 = unsafe { base1.offset(offset) };
+            node.storage2 = unsafe { base2.offset(offset) };
+        }
+
+        // children
+        node.children = Decode::decode(decoder)?;
+
+        Ok(node)
     }
 }
 
@@ -2333,6 +2533,11 @@ fn card_from_chars<T: Iterator<Item = char>>(chars: &mut T) -> Result<u8, String
 mod tests {
     use super::*;
     use crate::solver::*;
+
+    #[cfg(feature = "bincode")]
+    use std::fs::File;
+    #[cfg(feature = "bincode")]
+    use std::io::{BufReader, BufWriter, Write};
 
     #[test]
     fn test_flop_from_str() {
@@ -2506,6 +2711,48 @@ mod tests {
         };
         let game = PostFlopGame::with_config(&config);
         assert!(game.is_err());
+    }
+
+    #[test]
+    #[cfg(feature = "bincode")]
+    fn serialize_and_deserialize() {
+        let config = GameConfig {
+            flop: flop_from_str("Td9d6h").unwrap(),
+            starting_pot: 60,
+            effective_stack: 970,
+            range: [Range::ones(); 2],
+            river_bet_sizes: [("50%", "").try_into().unwrap(), Default::default()],
+            ..Default::default()
+        };
+
+        let mut game = PostFlopGame::with_config(&config).unwrap();
+        game.allocate_memory(false);
+        finalize(&mut game);
+
+        let config = bincode::config::legacy();
+
+        // save
+        let file = File::create("tmpfile.bin").unwrap();
+        let mut write_buf = BufWriter::new(file);
+        bincode::encode_into_std_write(&game, &mut write_buf, config).unwrap();
+        write_buf.flush().unwrap();
+
+        // load
+        let file = File::open("tmpfile.bin").unwrap();
+        let mut read_buf = BufReader::new(file);
+        let mut game: PostFlopGame = bincode::decode_from_std_read(&mut read_buf, config).unwrap();
+
+        // remove tmpfile
+        std::fs::remove_file("tmpfile.bin").unwrap();
+
+        game.cache_normalized_weights();
+        let weights = game.normalized_weights(game.current_player());
+
+        let root_equity = compute_average(&game.equity(game.current_player()), weights);
+        let root_ev = compute_average(&game.expected_values(), weights);
+
+        assert!((root_equity - 0.5).abs() < 1e-5);
+        assert!((root_ev - 37.5).abs() < 1e-4);
     }
 
     #[test]

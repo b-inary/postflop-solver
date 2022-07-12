@@ -1,6 +1,9 @@
 use once_cell::sync::Lazy;
 use regex::Regex;
 
+#[cfg(feature = "bincode")]
+use bincode::{Decode, Encode};
+
 const FLOAT_PAT: &str = r"(?P<float>(?:[1-9]\d*(?:\.\d*)?)|(?:0?\.\d+))";
 
 static SIZE_REGEX: Lazy<Regex> =
@@ -20,6 +23,7 @@ static TRIM_REGEX: Lazy<Regex> = Lazy::new(|| Regex::new(r"\s*(,)\s*").unwrap())
 /// assert_eq!(bet_size.raise, vec![PotRelative(0.75), LastBetRelative(2.5)]);
 /// ```
 #[derive(Debug, Clone, Default, PartialEq)]
+#[cfg_attr(feature = "bincode", derive(Decode, Encode))]
 pub struct BetSizeCandidates {
     /// Bet size candidates for first bet.
     pub bet: Vec<BetSize>,
@@ -30,6 +34,7 @@ pub struct BetSizeCandidates {
 
 /// Bet size specification.
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "bincode", derive(Decode, Encode))]
 pub enum BetSize {
     /// Bet size relative to the current pot size.
     PotRelative(f32),

@@ -1,6 +1,12 @@
 use std::cell::UnsafeCell;
 use std::ops::{Deref, DerefMut};
 
+#[cfg(feature = "bincode")]
+use bincode::{
+    error::{DecodeError, EncodeError},
+    Decode, Encode,
+};
+
 /// Mutex-like wrapper, but it actually does not perform any locking.
 ///
 /// Use this wrapper when:
@@ -75,5 +81,19 @@ impl<'a, T: ?Sized + 'a> DerefMut for MutexGuardLike<'a, T> {
     #[inline]
     fn deref_mut(&mut self) -> &mut T {
         unsafe { &mut *self.mutex.data.get() }
+    }
+}
+
+#[cfg(feature = "bincode")]
+impl<T: Encode> Encode for MutexLike<T> {
+    fn encode<E: bincode::enc::Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
+        self.lock().encode(encoder)
+    }
+}
+
+#[cfg(feature = "bincode")]
+impl<T: Decode> Decode for MutexLike<T> {
+    fn decode<D: bincode::de::Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
+        Ok(Self::new(T::decode(decoder)?))
     }
 }
