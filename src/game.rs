@@ -17,7 +17,7 @@ use bincode::{
     Decode, Encode,
 };
 #[cfg(feature = "bincode")]
-use std::cell::RefCell;
+use std::cell::Cell;
 
 #[cfg(feature = "custom-alloc")]
 use crate::alloc::*;
@@ -2257,7 +2257,7 @@ static VERSION_STR: &str = "2022-07-13";
 
 #[cfg(feature = "bincode")]
 thread_local! {
-    static BASE_PTR: RefCell<(*mut u8, *mut u8)> = RefCell::new((ptr::null_mut(), ptr::null_mut()));
+    static BASE_PTR: Cell<(*mut u8, *mut u8)> = Cell::new((ptr::null_mut(), ptr::null_mut()));
 }
 
 #[cfg(feature = "bincode")]
@@ -2266,13 +2266,14 @@ impl Encode for PostFlopGame {
         // store base pointer
         BASE_PTR.with(|ps| {
             if self.is_memory_allocated {
-                ps.borrow_mut().0 = if self.is_compression_enabled {
+                let base = if self.is_compression_enabled {
                     self.storage1_compressed.lock().as_mut_ptr() as *mut u8
                 } else {
                     self.storage1.lock().as_mut_ptr() as *mut u8
                 };
+                ps.set((base, ptr::null_mut()));
             } else {
-                ps.borrow_mut().0 = ptr::null_mut();
+                ps.set((ptr::null_mut(), ptr::null_mut()));
             }
         });
 
@@ -2309,10 +2310,7 @@ impl Encode for PostFlopNode {
         let offset = if self.storage1.is_null() {
             0
         } else {
-            BASE_PTR.with(|ps| {
-                let base = ps.borrow().0;
-                unsafe { self.storage1.offset_from(base) }
-            })
+            BASE_PTR.with(|ps| unsafe { self.storage1.offset_from(ps.get().0) })
         };
 
         // contents
@@ -2368,7 +2366,7 @@ impl Decode for PostFlopGame {
         // store base pointers
         BASE_PTR.with(|ps| {
             if game.is_memory_allocated {
-                *ps.borrow_mut() = if game.is_compression_enabled {
+                let bases = if game.is_compression_enabled {
                     (
                         game.storage1_compressed.lock().as_mut_ptr() as *mut u8,
                         game.storage2_compressed.lock().as_mut_ptr() as *mut u8,
@@ -2379,8 +2377,9 @@ impl Decode for PostFlopGame {
                         game.storage2.lock().as_mut_ptr() as *mut u8,
                     )
                 };
+                ps.set(bases);
             } else {
-                *ps.borrow_mut() = (ptr::null_mut(), ptr::null_mut());
+                ps.set((ptr::null_mut(), ptr::null_mut()));
             }
         });
 
@@ -2425,7 +2424,7 @@ impl Decode for PostFlopNode {
 
         // pointers
         let offset = isize::decode(decoder)?;
-        let (base1, base2) = BASE_PTR.with(|ps| *ps.borrow());
+        let (base1, base2) = BASE_PTR.with(|ps| ps.get());
         if !base1.is_null() {
             node.storage1 = unsafe { base1.offset(offset) };
             node.storage2 = unsafe { base2.offset(offset) };
