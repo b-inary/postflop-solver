@@ -132,7 +132,8 @@
 //! - `custom-alloc`: Uses custom memory allocator in solving process (only available in nightly Rust).
 //!   It significantly reduces the number of calls of the default allocator,
 //!   so it is recommended to use this feature when the default allocator is not so efficient.
-//!   Note that this feature assumes that only one `PostFlopGame` instance is solved simultaneously in a program.
+//!   Note that this feature assumes that, at most, only one instance of `PostFlopGame` is available
+//!   when solving in a program.
 //!   Disabled by default.
 //! - `rayon`: Uses [rayon] crate for parallelization.
 //!   Enabled by default.

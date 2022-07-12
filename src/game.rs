@@ -1521,7 +1521,7 @@ impl PostFlopGame {
     /// one representative action.
     #[inline]
     pub fn available_actions(&self) -> &[Action] {
-        self.node().available_actions()
+        &self.node().actions
     }
 
     /// Returns whether the available actions are terminal.
@@ -2059,7 +2059,7 @@ impl GameNode for PostFlopNode {
 
     #[inline]
     fn num_actions(&self) -> usize {
-        self.children.len()
+        self.actions.len()
     }
 
     #[inline]
@@ -2165,14 +2165,6 @@ impl GameNode for PostFlopNode {
     #[inline]
     fn enable_parallelization(&self) -> bool {
         self.river == NOT_DEALT
-    }
-}
-
-impl PostFlopNode {
-    /// Returns the available actions.
-    #[inline]
-    fn available_actions(&self) -> &[Action] {
-        &self.actions
     }
 }
 
