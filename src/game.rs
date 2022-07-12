@@ -17,7 +17,7 @@ use bincode::{
     Decode, Encode,
 };
 #[cfg(feature = "bincode")]
-use std::sync::atomic::AtomicPtr;
+use std::cell::RefCell;
 
 #[cfg(feature = "custom-alloc")]
 use crate::alloc::*;
@@ -2256,24 +2256,25 @@ impl Default for GameConfig {
 static VERSION_STR: &str = "2022-07-13";
 
 #[cfg(feature = "bincode")]
-static STORAGE1_PTR: AtomicPtr<u8> = AtomicPtr::new(ptr::null_mut());
-#[cfg(feature = "bincode")]
-static STORAGE2_PTR: AtomicPtr<u8> = AtomicPtr::new(ptr::null_mut());
+thread_local! {
+    static BASE_PTR: RefCell<(*mut u8, *mut u8)> = RefCell::new((ptr::null_mut(), ptr::null_mut()));
+}
 
 #[cfg(feature = "bincode")]
 impl Encode for PostFlopGame {
     fn encode<E: bincode::enc::Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
         // store base pointer
-        if self.is_memory_allocated {
-            let ptr = if self.is_compression_enabled {
-                self.storage1_compressed.lock().as_mut_ptr() as *mut u8
+        BASE_PTR.with(|ps| {
+            if self.is_memory_allocated {
+                ps.borrow_mut().0 = if self.is_compression_enabled {
+                    self.storage1_compressed.lock().as_mut_ptr() as *mut u8
+                } else {
+                    self.storage1.lock().as_mut_ptr() as *mut u8
+                };
             } else {
-                self.storage1.lock().as_mut_ptr() as *mut u8
-            };
-            STORAGE1_PTR.store(ptr, Ordering::Relaxed);
-        } else {
-            STORAGE1_PTR.store(ptr::null_mut(), Ordering::Relaxed);
-        }
+                ps.borrow_mut().0 = ptr::null_mut();
+            }
+        });
 
         // version
         VERSION_STR.to_string().encode(encoder)?;
@@ -2308,8 +2309,10 @@ impl Encode for PostFlopNode {
         let offset = if self.storage1.is_null() {
             0
         } else {
-            let base = STORAGE1_PTR.load(Ordering::Relaxed);
-            unsafe { self.storage1.offset_from(base) }
+            BASE_PTR.with(|ps| {
+                let base = ps.borrow().0;
+                unsafe { self.storage1.offset_from(base) }
+            })
         };
 
         // contents
@@ -2363,24 +2366,23 @@ impl Decode for PostFlopGame {
         let normalized_weights_cached = bool::decode(decoder)?;
 
         // store base pointers
-        if game.is_memory_allocated {
-            let (ptr1, ptr2) = if game.is_compression_enabled {
-                (
-                    game.storage1_compressed.lock().as_mut_ptr() as *mut u8,
-                    game.storage2_compressed.lock().as_mut_ptr() as *mut u8,
-                )
+        BASE_PTR.with(|ps| {
+            if game.is_memory_allocated {
+                *ps.borrow_mut() = if game.is_compression_enabled {
+                    (
+                        game.storage1_compressed.lock().as_mut_ptr() as *mut u8,
+                        game.storage2_compressed.lock().as_mut_ptr() as *mut u8,
+                    )
+                } else {
+                    (
+                        game.storage1.lock().as_mut_ptr() as *mut u8,
+                        game.storage2.lock().as_mut_ptr() as *mut u8,
+                    )
+                };
             } else {
-                (
-                    game.storage1.lock().as_mut_ptr() as *mut u8,
-                    game.storage2.lock().as_mut_ptr() as *mut u8,
-                )
-            };
-            STORAGE1_PTR.store(ptr1, Ordering::Relaxed);
-            STORAGE2_PTR.store(ptr2, Ordering::Relaxed);
-        } else {
-            STORAGE1_PTR.store(ptr::null_mut(), Ordering::Relaxed);
-            STORAGE2_PTR.store(ptr::null_mut(), Ordering::Relaxed);
-        }
+                *ps.borrow_mut() = (ptr::null_mut(), ptr::null_mut());
+            }
+        });
 
         // game tree
         game.root = Decode::decode(decoder)?;
@@ -2423,8 +2425,7 @@ impl Decode for PostFlopNode {
 
         // pointers
         let offset = isize::decode(decoder)?;
-        let base1 = STORAGE1_PTR.load(Ordering::Relaxed);
-        let base2 = STORAGE2_PTR.load(Ordering::Relaxed);
+        let (base1, base2) = BASE_PTR.with(|ps| *ps.borrow());
         if !base1.is_null() {
             node.storage1 = unsafe { base1.offset(offset) };
             node.storage2 = unsafe { base2.offset(offset) };
