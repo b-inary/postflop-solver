@@ -2253,7 +2253,7 @@ impl Default for GameConfig {
 }
 
 #[cfg(feature = "bincode")]
-static VERSION_STR: &str = "2022-07-12";
+static VERSION_STR: &str = "2022-07-13";
 
 #[cfg(feature = "bincode")]
 static STORAGE1_PTR: AtomicPtr<u8> = AtomicPtr::new(ptr::null_mut());
@@ -2292,6 +2292,7 @@ impl Encode for PostFlopGame {
         self.storage2_compressed.encode(encoder)?;
         self.is_solved.encode(encoder)?;
         self.history.encode(encoder)?;
+        self.normalized_weights_cached.encode(encoder)?;
 
         // game tree
         self.root.encode(encoder)?;
@@ -2359,6 +2360,7 @@ impl Decode for PostFlopGame {
         };
 
         let history = Vec::<usize>::decode(decoder)?;
+        let normalized_weights_cached = bool::decode(decoder)?;
 
         // store base pointers
         if game.is_memory_allocated {
@@ -2392,6 +2394,9 @@ impl Decode for PostFlopGame {
             vec![0.0; game.num_private_hands(0)],
             vec![0.0; game.num_private_hands(1)],
         ];
+        if normalized_weights_cached {
+            game.cache_normalized_weights();
+        }
 
         #[cfg(feature = "custom-alloc")]
         STACK_UNIT_SIZE.store(4 * game.stack_size, Ordering::Relaxed);
