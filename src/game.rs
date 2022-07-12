@@ -1624,7 +1624,7 @@ impl PostFlopGame {
             let actions = self.available_actions();
             let mut action_index = usize::MAX;
 
-            // finds the action index from available actions
+            // find the action index from available actions
             for (i, &action) in actions.iter().enumerate() {
                 if action == Action::Chance(action_card) {
                     action_index = i;
@@ -1632,7 +1632,7 @@ impl PostFlopGame {
                 }
             }
 
-            // finds the action index from isomorphic chances
+            // find the action index from isomorphic chances
             if action_index == usize::MAX {
                 let isomorphism = self.isomorphic_chances(self.node());
                 let isomorphic_cards = self.isomorphic_cards(self.node());
@@ -1655,12 +1655,12 @@ impl PostFlopGame {
                 }
             }
 
-            // panics if the action is not found
+            // panic if the action is not found
             if action_index == usize::MAX {
                 panic!("invalid action");
             }
 
-            // updates the state
+            // update the state
             self.node_ptr = &*self.node().play(action_index);
             if is_turn {
                 self.turn = actual_card;
@@ -1672,12 +1672,12 @@ impl PostFlopGame {
         }
         // not chance node
         else {
-            // panics if the action is invalid
+            // panic if the action is invalid
             if action >= self.node().num_actions() {
                 panic!("invalid action");
             }
 
-            // updates the weights
+            // update the weights
             if self.node().num_actions() > 1 {
                 let player = self.node().player();
                 let strategy = self.strategy();
@@ -1685,7 +1685,7 @@ impl PostFlopGame {
                 mul_slice(&mut self.weights[player], weights);
             }
 
-            // updates the node
+            // update the node
             self.node_ptr = &*self.node().play(action);
         }
 

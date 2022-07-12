@@ -120,7 +120,7 @@ unsafe impl Allocator for StackAlloc {
         STACK_ALLOC_DATA.with(|data| {
             let mut data = data.borrow_mut();
             if layout.align() <= ALIGNMENT {
-                // perfoms allocation
+                // perform allocation
                 Ok(NonNull::new(data.allocate(layout.size())).unwrap())
             } else {
                 // unsupported alignment
