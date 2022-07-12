@@ -49,6 +49,7 @@ pub struct PostFlopGame {
     // store options
     is_memory_allocated: bool,
     is_compression_enabled: bool,
+    stack_size: usize,
     misc_memory_usage: u64,
     num_storage_elements: u64,
 
@@ -60,8 +61,8 @@ pub struct PostFlopGame {
 
     // result interpreter
     is_solved: bool,
-    node_ptr: *const PostFlopNode,
     history: Vec<usize>,
+    node_ptr: *const PostFlopNode,
     turn: u8,
     river: u8,
     weights: [Vec<f32>; 2],
@@ -633,7 +634,8 @@ impl PostFlopGame {
         ];
     }
 
-    /// Initializes fields `initial_weight`, `private_hand_cards` and `same_hand_index`.
+    /// Initializes fields `initial_weight`, `private_hand_cards`, `same_hand_index`, and related to
+    /// valid indices.
     fn init_range(&mut self) {
         let flop = &self.config.flop;
         let mut board_mask: u64 = (1 << flop[0]) | (1 << flop[1]) | (1 << flop[2]);
@@ -811,7 +813,7 @@ impl PostFlopGame {
         }
     }
 
-    /// Initializes a field related to isomorphism.
+    /// Initializes fields related to isomorphism.
     fn init_isomorphism(&mut self) {
         let range = &self.config.range;
         let mut suit_isomorphism = [0; 4];
@@ -1081,6 +1083,7 @@ impl PostFlopGame {
         }
 
         self.is_memory_allocated = false;
+        self.stack_size = stack_size;
         self.misc_memory_usage = memory_usage;
         self.num_storage_elements = num_storage_elements;
 
@@ -1464,8 +1467,8 @@ impl PostFlopGame {
     /// Moves the current node back to the root node.
     #[inline]
     pub fn back_to_root(&mut self) {
-        self.node_ptr = &*self.root();
         self.history.clear();
+        self.node_ptr = &*self.root();
         self.turn = self.config.turn;
         self.river = self.config.river;
         self.weights = self.initial_weight.clone();
@@ -2176,6 +2179,7 @@ impl Default for PostFlopGame {
             river_isomorphism_swap: Vec::default(),
             is_memory_allocated: false,
             is_compression_enabled: false,
+            stack_size: 0,
             misc_memory_usage: 0,
             num_storage_elements: 0,
             storage1: MutexLike::default(),
@@ -2183,8 +2187,8 @@ impl Default for PostFlopGame {
             storage1_compressed: MutexLike::default(),
             storage2_compressed: MutexLike::default(),
             is_solved: false,
-            node_ptr: ptr::null(),
             history: Vec::default(),
+            node_ptr: ptr::null(),
             turn: NOT_DEALT,
             river: NOT_DEALT,
             weights: Default::default(),
