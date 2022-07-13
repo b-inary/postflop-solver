@@ -33,13 +33,13 @@ pub trait Game: Send + Sync {
 
     /// Returns the list of isomorphic chances.
     #[doc(hidden)]
-    fn isomorphic_chances(&self, _node: &Self::Node) -> &[usize] {
+    fn isomorphic_chances(&self, _node: &Self::Node) -> &[u8] {
         &[]
     }
 
     /// Returns the swap list of the given isomorphic chance.
     #[doc(hidden)]
-    fn isomorphic_swap(&self, _node: &Self::Node, _index: usize) -> &[Vec<(usize, usize)>; 2] {
+    fn isomorphic_swap(&self, _node: &Self::Node, _index: usize) -> &[Vec<(u16, u16)>; 2] {
         unreachable!()
     }
 

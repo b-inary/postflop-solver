@@ -30,7 +30,7 @@ struct StrengthItem {
     index: u16,
 }
 
-type SwapList = [Vec<(usize, usize)>; 2];
+type SwapList = [Vec<(u16, u16)>; 2];
 
 /// A struct representing a postflop game.
 pub struct PostFlopGame {
@@ -42,15 +42,15 @@ pub struct PostFlopGame {
     num_combinations_inv: f64,
     initial_weight: [Vec<f32>; 2],
     private_hand_cards: [Vec<(u8, u8)>; 2],
-    same_hand_index: [Vec<Option<usize>>; 2],
-    valid_indices_flop: [Vec<usize>; 2],
-    valid_indices_turn: Vec<[Vec<usize>; 2]>,
-    valid_indices_river: Vec<[Vec<usize>; 2]>,
+    same_hand_index: [Vec<Option<u16>>; 2],
+    valid_indices_flop: [Vec<u16>; 2],
+    valid_indices_turn: Vec<[Vec<u16>; 2]>,
+    valid_indices_river: Vec<[Vec<u16>; 2]>,
     hand_strength: Vec<[Vec<StrengthItem>; 2]>,
-    turn_isomorphism: Vec<usize>,
+    turn_isomorphism: Vec<u8>,
     turn_isomorphism_cards: Vec<u8>,
     turn_isomorphism_swap: [SwapList; 4],
-    river_isomorphism: Vec<Vec<usize>>,
+    river_isomorphism: Vec<Vec<u8>>,
     river_isomorphism_cards: Vec<Vec<u8>>,
     river_isomorphism_swap: Vec<[SwapList; 4]>,
 
@@ -309,8 +309,8 @@ impl Game for PostFlopGame {
             let opponent_indices = &valid_indices[player ^ 1];
             for &i in opponent_indices {
                 unsafe {
-                    let (c1, c2) = *opponent_cards.get_unchecked(i);
-                    let cfreach_i = *cfreach.get_unchecked(i) as f64;
+                    let (c1, c2) = *opponent_cards.get_unchecked(i as usize);
+                    let cfreach_i = *cfreach.get_unchecked(i as usize) as f64;
                     cfreach_sum += cfreach_i;
                     *cfreach_minus.get_unchecked_mut(c1 as usize) += cfreach_i;
                     *cfreach_minus.get_unchecked_mut(c2 as usize) += cfreach_i;
@@ -321,15 +321,15 @@ impl Game for PostFlopGame {
             let same_hand_index = &self.same_hand_index[player];
             for &i in player_indices {
                 unsafe {
-                    let (c1, c2) = *player_cards.get_unchecked(i);
+                    let (c1, c2) = *player_cards.get_unchecked(i as usize);
                     // inclusion-exclusion principle
                     let cfreach = cfreach_sum
                         - *cfreach_minus.get_unchecked(c1 as usize)
                         - *cfreach_minus.get_unchecked(c2 as usize)
                         + same_hand_index
-                            .get_unchecked(i)
-                            .map_or(0.0, |j| *cfreach.get_unchecked(j) as f64);
-                    *result.get_unchecked_mut(i) = (payoff * cfreach) as f32;
+                            .get_unchecked(i as usize)
+                            .map_or(0.0, |j| *cfreach.get_unchecked(j as usize) as f64);
+                    *result.get_unchecked_mut(i as usize) = (payoff * cfreach) as f32;
                 }
             }
         }
@@ -391,7 +391,7 @@ impl Game for PostFlopGame {
     }
 
     #[inline]
-    fn isomorphic_chances(&self, node: &Self::Node) -> &[usize] {
+    fn isomorphic_chances(&self, node: &Self::Node) -> &[u8] {
         if node.turn == NOT_DEALT {
             &self.turn_isomorphism
         } else {
@@ -400,7 +400,7 @@ impl Game for PostFlopGame {
     }
 
     #[inline]
-    fn isomorphic_swap(&self, node: &Self::Node, index: usize) -> &[Vec<(usize, usize)>; 2] {
+    fn isomorphic_swap(&self, node: &Self::Node, index: usize) -> &[Vec<(u16, u16)>; 2] {
         if node.turn == NOT_DEALT {
             &self.turn_isomorphism_swap[self.turn_isomorphism_cards[index] as usize & 3]
         } else {
@@ -691,7 +691,7 @@ impl PostFlopGame {
             let player_hands = &self.private_hand_cards[player];
             let opponent_hands = &self.private_hand_cards[player ^ 1];
             for hand in player_hands {
-                same_hand_index.push(opponent_hands.binary_search(hand).ok());
+                same_hand_index.push(opponent_hands.binary_search(hand).ok().map(|i| i as u16));
             }
         }
 
@@ -731,7 +731,7 @@ impl PostFlopGame {
     }
 
     /// Initializes a valid indices.
-    fn valid_indices(&self, board1: u8, board2: u8) -> [Vec<usize>; 2] {
+    fn valid_indices(&self, board1: u8, board2: u8) -> [Vec<u16>; 2] {
         let mut board_mask: u64 = 0;
         if board1 != NOT_DEALT {
             board_mask |= 1 << board1;
@@ -752,7 +752,7 @@ impl PostFlopGame {
                 |(index, (c1, c2))| {
                     let hand_mask: u64 = (1 << c1) | (1 << c2);
                     if hand_mask & board_mask == 0 {
-                        Some(index)
+                        Some(index as u16)
                     } else {
                         None
                     }
@@ -901,7 +901,7 @@ impl PostFlopGame {
                                 let c2 = replacer(cards[i].1);
                                 let index = reverse_table[card_pair_index(c1, c2)];
                                 if index != usize::MAX && i < index {
-                                    swap_list[player].push((i, index));
+                                    swap_list[player].push((i as u16, index as u16));
                                 }
                             }
                         }
@@ -992,7 +992,7 @@ impl PostFlopGame {
                                     let c2 = replacer(cards[i].1);
                                     let index = reverse_table[card_pair_index(c1, c2)];
                                     if index != usize::MAX && i < index {
-                                        swap_list[player].push((i, index));
+                                        swap_list[player].push((i as u16, index as u16));
                                     }
                                 }
                             }
@@ -1638,9 +1638,9 @@ impl PostFlopGame {
                 let isomorphic_cards = self.isomorphic_cards(self.node());
                 for (i, &repr_index) in isomorphism.iter().enumerate() {
                     if action_card == isomorphic_cards[i] {
-                        action_index = repr_index;
+                        action_index = repr_index as usize;
                         if is_turn {
-                            if let Action::Chance(repr_card) = actions[repr_index] {
+                            if let Action::Chance(repr_card) = actions[repr_index as usize] {
                                 self.turn_swapped_suit = Some((action_card & 3, repr_card & 3));
                             }
                             self.turn_swap = Some(self.turn_isomorphism_cards[i] & 3);
@@ -1750,7 +1750,7 @@ impl PostFlopGame {
                             - opponent_weight_sum_minus[c1 as usize]
                             - opponent_weight_sum_minus[c2 as usize]
                             + self.same_hand_index[player][i]
-                                .map_or(0.0, |j| opponent_weights[j] as f64);
+                                .map_or(0.0, |j| opponent_weights[j as usize] as f64);
                         *w = player_weights[i] * opponent_weight as f32;
                     } else {
                         *w = 0.0;
@@ -1968,7 +1968,7 @@ impl PostFlopGame {
 
         for swap in [river_swap, turn_swap].into_iter().flatten() {
             for &(i, j) in swap {
-                slice.swap(i, j);
+                slice.swap(i as usize, j as usize);
             }
         }
     }

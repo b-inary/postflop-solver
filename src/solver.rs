@@ -211,15 +211,19 @@ fn solve_recursive<T: Game>(
 
         // process isomorphic chances
         for i in 0..isomorphic_chances.len() {
-            let tmp = row_mut(&mut cfv_actions, isomorphic_chances[i], num_private_hands);
+            let tmp = row_mut(
+                &mut cfv_actions,
+                isomorphic_chances[i] as usize,
+                num_private_hands,
+            );
             for &(i, j) in &game.isomorphic_swap(node, i)[player] {
-                tmp.swap(i, j);
+                tmp.swap(i as usize, j as usize);
             }
             result_f64.iter_mut().zip(&*tmp).for_each(|(r, &v)| {
                 *r += v as f64;
             });
             for &(i, j) in &game.isomorphic_swap(node, i)[player] {
-                tmp.swap(i, j);
+                tmp.swap(i as usize, j as usize);
             }
         }
 

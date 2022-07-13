@@ -4,8 +4,8 @@ use postflop_solver::*;
 struct LeducGame {
     root: MutexLike<LeducNode>,
     initial_weight: Vec<f32>,
-    isomorphism: Vec<usize>,
-    isomorphism_swap: [Vec<(usize, usize)>; 2],
+    isomorphism: Vec<u8>,
+    isomorphism_swap: [Vec<(u16, u16)>; 2],
     is_solved: bool,
 }
 
@@ -102,12 +102,12 @@ impl Game for LeducGame {
     }
 
     #[inline]
-    fn isomorphic_chances(&self, _node: &Self::Node) -> &[usize] {
+    fn isomorphic_chances(&self, _node: &Self::Node) -> &[u8] {
         &self.isomorphism
     }
 
     #[inline]
-    fn isomorphic_swap(&self, _node: &Self::Node, _index: usize) -> &[Vec<(usize, usize)>; 2] {
+    fn isomorphic_swap(&self, _node: &Self::Node, _index: usize) -> &[Vec<(u16, u16)>; 2] {
         &self.isomorphism_swap
     }
 
