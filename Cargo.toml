@@ -17,8 +17,3 @@ regex = "1.6.0"
 [features]
 default = ["rayon"]
 custom-alloc = []
-
-[profile.release]
-codegen-units = 1
-lto = true
-panic = "abort"
