@@ -318,11 +318,7 @@ fn solve_recursive<T: Game>(
             let beta_decoder = params.beta_t * scale / i16::MAX as f32;
 
             cfv_actions.iter_mut().zip(&*cum_regret).for_each(|(x, y)| {
-                *x += if *y >= 0 {
-                    (*y as f32) * alpha_decoder
-                } else {
-                    (*y as f32) * beta_decoder
-                }
+                *x += *y as f32 * if *y >= 0 { alpha_decoder } else { beta_decoder };
             });
 
             cfv_actions.chunks_mut(num_private_hands).for_each(|row| {
@@ -338,12 +334,13 @@ fn solve_recursive<T: Game>(
             add_slice(cum_strategy, &strategy);
 
             // update the cumulative regret
+            let (alpha_t, beta_t) = (params.alpha_t, params.beta_t);
             let cum_regret = node.cum_regret_mut();
             cum_regret.iter_mut().for_each(|el| {
-                *el *= if *el >= 0.0 {
-                    params.alpha_t
+                *el *= if el.is_sign_positive() {
+                    alpha_t
                 } else {
-                    params.beta_t
+                    beta_t
                 };
             });
             add_slice(cum_regret, &cfv_actions);
