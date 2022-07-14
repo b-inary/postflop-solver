@@ -3,6 +3,7 @@ use crate::mutex_like::*;
 use crate::sliceop::*;
 use crate::utility::*;
 use std::io::{self, Write};
+use std::ptr;
 
 #[cfg(feature = "custom-alloc")]
 use crate::alloc::*;
@@ -211,19 +212,33 @@ fn solve_recursive<T: Game>(
 
         // process isomorphic chances
         for i in 0..isomorphic_chances.len() {
+            let swap_list = &game.isomorphic_swap(node, i)[player];
             let tmp = row_mut(
                 &mut cfv_actions,
                 isomorphic_chances[i] as usize,
                 num_private_hands,
             );
-            for &(i, j) in &game.isomorphic_swap(node, i)[player] {
-                tmp.swap(i as usize, j as usize);
+
+            for &(i, j) in swap_list {
+                unsafe {
+                    ptr::swap(
+                        tmp.get_unchecked_mut(i as usize),
+                        tmp.get_unchecked_mut(j as usize),
+                    );
+                }
             }
+
             result_f64.iter_mut().zip(&*tmp).for_each(|(r, &v)| {
                 *r += v as f64;
             });
-            for &(i, j) in &game.isomorphic_swap(node, i)[player] {
-                tmp.swap(i as usize, j as usize);
+
+            for &(i, j) in swap_list {
+                unsafe {
+                    ptr::swap(
+                        tmp.get_unchecked_mut(i as usize),
+                        tmp.get_unchecked_mut(j as usize),
+                    );
+                }
             }
         }
 
