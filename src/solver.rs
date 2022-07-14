@@ -329,21 +329,23 @@ fn solve_recursive<T: Game>(
             node.set_cum_regret_scale(new_scale);
         } else {
             // update the cumulative strategy
+            let gamma_t = params.gamma_t;
             let cum_strategy = node.strategy_mut();
-            mul_slice_scalar(cum_strategy, params.gamma_t);
-            add_slice(cum_strategy, &strategy);
+            cum_strategy.iter_mut().zip(&strategy).for_each(|(x, y)| {
+                *x = *x * gamma_t + *y;
+            });
 
             // update the cumulative regret
             let (alpha_t, beta_t) = (params.alpha_t, params.beta_t);
             let cum_regret = node.cum_regret_mut();
-            cum_regret.iter_mut().for_each(|el| {
-                *el *= if el.is_sign_positive() {
+            cum_regret.iter_mut().zip(&*cfv_actions).for_each(|(x, y)| {
+                let coef = if x.is_sign_positive() {
                     alpha_t
                 } else {
                     beta_t
                 };
+                *x = *x * coef + *y;
             });
-            add_slice(cum_regret, &cfv_actions);
             cum_regret.chunks_mut(num_private_hands).for_each(|row| {
                 sub_slice(row, result);
             });
