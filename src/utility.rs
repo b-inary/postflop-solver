@@ -29,10 +29,45 @@ pub(crate) fn for_each_child<T: GameNode, OP: Fn(usize) + Sync + Send>(node: &T,
     node.actions().into_iter().for_each(op);
 }
 
+/// Obtains the maximum absolute value of the given slice.
+fn slice_absolute_max(slice: &[f32]) -> f32 {
+    if slice.len() < 32 {
+        slice.iter().fold(0.0, |a, x| a.max(x.abs()))
+    } else {
+        let mut tmp: [f32; 16] = slice[..16].try_into().unwrap();
+        tmp.iter_mut().for_each(|x| *x = x.abs());
+        let mut iter = slice[16..].chunks_exact(16);
+        for chunk in iter.by_ref() {
+            for i in 0..16 {
+                tmp[i] = tmp[i].max(chunk[i].abs());
+            }
+        }
+        let tmpmax = tmp.iter().fold(0.0f32, |a, &x| a.max(x));
+        iter.remainder().iter().fold(tmpmax, |a, x| a.max(x.abs()))
+    }
+}
+
+/// Obtains the maximum value of the given non-negative slice.
+pub fn slice_nonnegative_max(slice: &[f32]) -> f32 {
+    if slice.len() < 32 {
+        slice.iter().fold(0.0, |a, &x| a.max(x))
+    } else {
+        let mut tmp: [f32; 16] = slice[..16].try_into().unwrap();
+        let mut iter = slice[16..].chunks_exact(16);
+        for chunk in iter.by_ref() {
+            for i in 0..16 {
+                tmp[i] = tmp[i].max(chunk[i]);
+            }
+        }
+        let tmpmax = tmp.iter().fold(0.0f32, |a, &x| a.max(x));
+        iter.remainder().iter().fold(tmpmax, |a, &x| a.max(x))
+    }
+}
+
 /// Encodes the `f32` slice to the `i16` slice, and returns the scale.
 #[inline]
 pub(crate) fn encode_signed_slice(dst: &mut [i16], slice: &[f32]) -> f32 {
-    let scale = slice.iter().fold(0.0f32, |m, v| v.abs().max(m));
+    let scale = slice_absolute_max(slice);
     let scale_nonzero = if scale == 0.0 { 1.0 } else { scale };
     let encoder = i16::MAX as f32 / scale_nonzero;
     dst.iter_mut()
@@ -44,7 +79,7 @@ pub(crate) fn encode_signed_slice(dst: &mut [i16], slice: &[f32]) -> f32 {
 /// Encodes the `f32` slice to the `u16` slice, and returns the scale.
 #[inline]
 pub(crate) fn encode_unsigned_slice(dst: &mut [u16], slice: &[f32]) -> f32 {
-    let scale = slice.iter().fold(0.0f32, |m, v| v.max(m));
+    let scale = slice_nonnegative_max(slice);
     let scale_nonzero = if scale == 0.0 { 1.0 } else { scale };
     let encoder = u16::MAX as f32 / scale_nonzero;
     dst.iter_mut()
