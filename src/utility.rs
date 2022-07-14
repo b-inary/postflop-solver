@@ -30,6 +30,46 @@ pub(crate) fn for_each_child<T: GameNode, OP: Fn(usize) + Sync + Send>(node: &T,
 }
 
 /// Obtains the maximum absolute value of the given slice.
+#[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+fn slice_absolute_max(slice: &[f32]) -> f32 {
+    if slice.len() < 32 {
+        slice.iter().fold(0.0, |a, x| a.max(x.abs()))
+    } else {
+        use std::arch::wasm32::*;
+
+        unsafe {
+            let slice_ptr = slice.as_ptr() as *const v128;
+            let mut tmp: [v128; 4] = [
+                f32x4_abs(v128_load(slice_ptr)),
+                f32x4_abs(v128_load(slice_ptr.add(1))),
+                f32x4_abs(v128_load(slice_ptr.add(2))),
+                f32x4_abs(v128_load(slice_ptr.add(3))),
+            ];
+
+            let mut iter = slice[16..].chunks_exact(16);
+            for chunk in iter.by_ref() {
+                let chunk_ptr = chunk.as_ptr() as *const v128;
+                tmp[0] = f32x4_max(tmp[0], f32x4_abs(v128_load(chunk_ptr)));
+                tmp[1] = f32x4_max(tmp[1], f32x4_abs(v128_load(chunk_ptr.add(1))));
+                tmp[2] = f32x4_max(tmp[2], f32x4_abs(v128_load(chunk_ptr.add(2))));
+                tmp[3] = f32x4_max(tmp[3], f32x4_abs(v128_load(chunk_ptr.add(3))));
+            }
+
+            tmp[0] = f32x4_max(tmp[0], tmp[1]);
+            tmp[2] = f32x4_max(tmp[2], tmp[3]);
+            tmp[0] = f32x4_max(tmp[0], tmp[2]);
+            let tmpmax = f32x4_extract_lane::<0>(tmp[0])
+                .max(f32x4_extract_lane::<1>(tmp[0]))
+                .max(f32x4_extract_lane::<2>(tmp[0]))
+                .max(f32x4_extract_lane::<3>(tmp[0]));
+
+            iter.remainder().iter().fold(tmpmax, |a, x| a.max(x.abs()))
+        }
+    }
+}
+
+/// Obtains the maximum absolute value of the given slice.
+#[cfg(not(all(target_arch = "wasm32", target_feature = "simd128")))]
 fn slice_absolute_max(slice: &[f32]) -> f32 {
     if slice.len() < 32 {
         slice.iter().fold(0.0, |a, x| a.max(x.abs()))
@@ -48,7 +88,47 @@ fn slice_absolute_max(slice: &[f32]) -> f32 {
 }
 
 /// Obtains the maximum value of the given non-negative slice.
-pub fn slice_nonnegative_max(slice: &[f32]) -> f32 {
+#[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+fn slice_nonnegative_max(slice: &[f32]) -> f32 {
+    if slice.len() < 32 {
+        slice.iter().fold(0.0, |a, &x| a.max(x))
+    } else {
+        use std::arch::wasm32::*;
+
+        unsafe {
+            let slice_ptr = slice.as_ptr() as *const v128;
+            let mut tmp: [v128; 4] = [
+                v128_load(slice_ptr),
+                v128_load(slice_ptr.add(1)),
+                v128_load(slice_ptr.add(2)),
+                v128_load(slice_ptr.add(3)),
+            ];
+
+            let mut iter = slice[16..].chunks_exact(16);
+            for chunk in iter.by_ref() {
+                let chunk_ptr = chunk.as_ptr() as *const v128;
+                tmp[0] = f32x4_max(tmp[0], v128_load(chunk_ptr));
+                tmp[1] = f32x4_max(tmp[1], v128_load(chunk_ptr.add(1)));
+                tmp[2] = f32x4_max(tmp[2], v128_load(chunk_ptr.add(2)));
+                tmp[3] = f32x4_max(tmp[3], v128_load(chunk_ptr.add(3)));
+            }
+
+            tmp[0] = f32x4_max(tmp[0], tmp[1]);
+            tmp[2] = f32x4_max(tmp[2], tmp[3]);
+            tmp[0] = f32x4_max(tmp[0], tmp[2]);
+            let tmpmax = f32x4_extract_lane::<0>(tmp[0])
+                .max(f32x4_extract_lane::<1>(tmp[0]))
+                .max(f32x4_extract_lane::<2>(tmp[0]))
+                .max(f32x4_extract_lane::<3>(tmp[0]));
+
+            iter.remainder().iter().fold(tmpmax, |a, &x| a.max(x))
+        }
+    }
+}
+
+/// Obtains the maximum value of the given non-negative slice.
+#[cfg(not(all(target_arch = "wasm32", target_feature = "simd128")))]
+fn slice_nonnegative_max(slice: &[f32]) -> f32 {
     if slice.len() < 32 {
         slice.iter().fold(0.0, |a, &x| a.max(x))
     } else {
