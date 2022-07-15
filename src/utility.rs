@@ -248,25 +248,21 @@ fn compute_ev_recursive<T: Game>(
     }
 
     let num_actions = node.num_actions();
-    let num_private_hands = game.num_private_hands(player);
+    let num_hands = game.num_private_hands(player);
 
     // allocate memory for storing the counterfactual values
     #[cfg(feature = "custom-alloc")]
-    let cfv_actions = MutexLike::new(vec::from_elem_in(
-        0.0,
-        num_actions * num_private_hands,
-        StackAlloc,
-    ));
+    let cfv_actions = MutexLike::new(vec::from_elem_in(0.0, num_actions * num_hands, StackAlloc));
     #[cfg(not(feature = "custom-alloc"))]
-    let cfv_actions = MutexLike::new(vec![0.0; num_actions * num_private_hands]);
+    let cfv_actions = MutexLike::new(vec![0.0; num_actions * num_hands]);
 
     // chance node
     if node.is_chance() {
         // use 64-bit floating point values
         #[cfg(feature = "custom-alloc")]
-        let mut result_f64 = vec::from_elem_in(0.0, num_private_hands, StackAlloc);
+        let mut result_f64 = vec::from_elem_in(0.0, num_hands, StackAlloc);
         #[cfg(not(feature = "custom-alloc"))]
-        let mut result_f64 = vec![0.0; num_private_hands];
+        let mut result_f64 = vec![0.0; num_hands];
 
         // update the reach probabilities
         #[cfg(feature = "custom-alloc")]
@@ -278,7 +274,7 @@ fn compute_ev_recursive<T: Game>(
         // compute the counterfactual values of each action
         for_each_child(node, |action| {
             compute_ev_recursive(
-                row_mut(&mut cfv_actions.lock(), action, num_private_hands),
+                row_mut(&mut cfv_actions.lock(), action, num_hands),
                 game,
                 &mut node.play(action),
                 player,
@@ -289,7 +285,7 @@ fn compute_ev_recursive<T: Game>(
 
         // sum up the counterfactual values
         let mut cfv_actions = cfv_actions.lock();
-        cfv_actions.chunks(num_private_hands).for_each(|row| {
+        cfv_actions.chunks_exact(num_hands).for_each(|row| {
             result_f64.iter_mut().zip(row).for_each(|(r, &v)| {
                 *r += v as f64;
             });
@@ -301,11 +297,7 @@ fn compute_ev_recursive<T: Game>(
         // process isomorphic chances
         for i in 0..isomorphic_chances.len() {
             let swap_list = &game.isomorphic_swap(node, i)[player];
-            let tmp = row_mut(
-                &mut cfv_actions,
-                isomorphic_chances[i] as usize,
-                num_private_hands,
-            );
+            let tmp = row_mut(&mut cfv_actions, isomorphic_chances[i] as usize, num_hands);
 
             for &(i, j) in swap_list {
                 unsafe {
@@ -365,18 +357,18 @@ fn compute_ev_recursive<T: Game>(
 
         // update the reach probabilities
         let mut reach_actions = strategy.clone();
-        reach_actions.chunks_mut(num_private_hands).for_each(|row| {
+        reach_actions.chunks_exact_mut(num_hands).for_each(|row| {
             mul_slice(row, reach);
         });
 
         // compute the counterfactual values of each action
         for_each_child(node, |action| {
             compute_ev_recursive(
-                row_mut(&mut cfv_actions.lock(), action, num_private_hands),
+                row_mut(&mut cfv_actions.lock(), action, num_hands),
                 game,
                 &mut node.play(action),
                 player,
-                row(&reach_actions, action, num_private_hands),
+                row(&reach_actions, action, num_hands),
                 cfreach,
             );
         });
@@ -384,13 +376,13 @@ fn compute_ev_recursive<T: Game>(
         // sum up the counterfactual values
         let mut cfv_actions = cfv_actions.lock();
         mul_slice(&mut strategy, &cfv_actions);
-        strategy.chunks(num_private_hands).for_each(|row| {
+        strategy.chunks_exact(num_hands).for_each(|row| {
             add_slice(result, row);
         });
 
         // save the expected values
         cfv_actions
-            .chunks_mut(num_private_hands)
+            .chunks_exact_mut(num_hands)
             .for_each(|row| mul_slice(row, reach));
         if game.is_compression_enabled() {
             let ev_scale = encode_signed_slice(node.expected_values_compressed_mut(), &cfv_actions);
@@ -433,14 +425,14 @@ fn compute_ev_recursive<T: Game>(
 
         // update the reach probabilities
         let row_size = cfreach_actions.len() / node.num_actions();
-        cfreach_actions.chunks_mut(row_size).for_each(|row| {
+        cfreach_actions.chunks_exact_mut(row_size).for_each(|row| {
             mul_slice(row, cfreach);
         });
 
         // compute the counterfactual values of each action
         for_each_child(node, |action| {
             compute_ev_recursive(
-                row_mut(&mut cfv_actions.lock(), action, num_private_hands),
+                row_mut(&mut cfv_actions.lock(), action, num_hands),
                 game,
                 &mut node.play(action),
                 player,
@@ -451,7 +443,7 @@ fn compute_ev_recursive<T: Game>(
 
         // sum up the counterfactual values
         let cfv_actions = cfv_actions.lock();
-        cfv_actions.chunks(num_private_hands).for_each(|row| {
+        cfv_actions.chunks_exact(num_hands).for_each(|row| {
             add_slice(result, row);
         });
     }
@@ -472,7 +464,7 @@ fn compute_best_cfv_recursive<T: Game>(
     }
 
     let num_actions = node.num_actions();
-    let num_private_hands = game.num_private_hands(player);
+    let num_hands = game.num_private_hands(player);
 
     // simply recurse when the number of actions is one
     if num_actions == 1 && !node.is_chance() {
@@ -483,21 +475,17 @@ fn compute_best_cfv_recursive<T: Game>(
 
     // allocate memory for storing the counterfactual values
     #[cfg(feature = "custom-alloc")]
-    let cfv_actions = MutexLike::new(vec::from_elem_in(
-        0.0,
-        num_actions * num_private_hands,
-        StackAlloc,
-    ));
+    let cfv_actions = MutexLike::new(vec::from_elem_in(0.0, num_actions * num_hands, StackAlloc));
     #[cfg(not(feature = "custom-alloc"))]
-    let cfv_actions = MutexLike::new(vec![0.0; num_actions * num_private_hands]);
+    let cfv_actions = MutexLike::new(vec![0.0; num_actions * num_hands]);
 
     // chance node
     if node.is_chance() {
         // use 64-bit floating point values
         #[cfg(feature = "custom-alloc")]
-        let mut result_f64 = vec::from_elem_in(0.0, num_private_hands, StackAlloc);
+        let mut result_f64 = vec::from_elem_in(0.0, num_hands, StackAlloc);
         #[cfg(not(feature = "custom-alloc"))]
-        let mut result_f64 = vec![0.0; num_private_hands];
+        let mut result_f64 = vec![0.0; num_hands];
 
         // update the reach probabilities
         #[cfg(feature = "custom-alloc")]
@@ -509,7 +497,7 @@ fn compute_best_cfv_recursive<T: Game>(
         // compute the counterfactual values of each action
         for_each_child(node, |action| {
             compute_best_cfv_recursive(
-                row_mut(&mut cfv_actions.lock(), action, num_private_hands),
+                row_mut(&mut cfv_actions.lock(), action, num_hands),
                 game,
                 &node.play(action),
                 player,
@@ -519,7 +507,7 @@ fn compute_best_cfv_recursive<T: Game>(
 
         // sum up the counterfactual values
         let mut cfv_actions = cfv_actions.lock();
-        cfv_actions.chunks(num_private_hands).for_each(|row| {
+        cfv_actions.chunks_exact(num_hands).for_each(|row| {
             result_f64.iter_mut().zip(row).for_each(|(r, v)| {
                 *r += *v as f64;
             });
@@ -531,11 +519,7 @@ fn compute_best_cfv_recursive<T: Game>(
         // process isomorphic chances
         for i in 0..isomorphic_chances.len() {
             let swap_list = &game.isomorphic_swap(node, i)[player];
-            let tmp = row_mut(
-                &mut cfv_actions,
-                isomorphic_chances[i] as usize,
-                num_private_hands,
-            );
+            let tmp = row_mut(&mut cfv_actions, isomorphic_chances[i] as usize, num_hands);
 
             for &(i, j) in swap_list {
                 unsafe {
@@ -569,7 +553,7 @@ fn compute_best_cfv_recursive<T: Game>(
         // compute the counterfactual values of each action
         for_each_child(node, |action| {
             compute_best_cfv_recursive(
-                row_mut(&mut cfv_actions.lock(), action, num_private_hands),
+                row_mut(&mut cfv_actions.lock(), action, num_hands),
                 game,
                 &node.play(action),
                 player,
@@ -580,7 +564,7 @@ fn compute_best_cfv_recursive<T: Game>(
         // compute element-wise maximum (take the best response)
         result.fill(f32::MIN);
         let cfv_actions = cfv_actions.lock();
-        cfv_actions.chunks(num_private_hands).for_each(|row| {
+        cfv_actions.chunks_exact(num_hands).for_each(|row| {
             result.iter_mut().zip(row).for_each(|(l, r)| {
                 *l = l.max(*r);
             });
@@ -617,7 +601,7 @@ fn compute_best_cfv_recursive<T: Game>(
 
         // update the reach probabilities
         let row_size = cfreach_actions.len() / node.num_actions();
-        cfreach_actions.chunks_mut(row_size).for_each(|row| {
+        cfreach_actions.chunks_exact_mut(row_size).for_each(|row| {
             mul_slice(row, cfreach);
         });
 
@@ -626,7 +610,7 @@ fn compute_best_cfv_recursive<T: Game>(
             let cfreach = row(&cfreach_actions, action, row_size);
             if cfreach.iter().any(|&x| x > 0.0) {
                 compute_best_cfv_recursive(
-                    row_mut(&mut cfv_actions.lock(), action, num_private_hands),
+                    row_mut(&mut cfv_actions.lock(), action, num_hands),
                     game,
                     &node.play(action),
                     player,
@@ -637,7 +621,7 @@ fn compute_best_cfv_recursive<T: Game>(
 
         // sum up the counterfactual values
         let cfv_actions = cfv_actions.lock();
-        cfv_actions.chunks(num_private_hands).for_each(|row| {
+        cfv_actions.chunks_exact(num_hands).for_each(|row| {
             add_slice(result, row);
         });
     }
@@ -652,12 +636,12 @@ pub(crate) fn normalize_strategy(slice: &mut [f32], num_actions: usize) {
     #[cfg(not(feature = "custom-alloc"))]
     let mut denom = vec![0.0; row_size];
 
-    slice.chunks(row_size).for_each(|row| {
+    slice.chunks_exact(row_size).for_each(|row| {
         add_slice(&mut denom, row);
     });
 
     let default = 1.0 / num_actions as f32;
-    slice.chunks_mut(row_size).for_each(|row| {
+    slice.chunks_exact_mut(row_size).for_each(|row| {
         div_slice(row, &denom, default);
     });
 }

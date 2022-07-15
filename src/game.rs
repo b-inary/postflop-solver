@@ -1792,8 +1792,8 @@ impl PostFlopGame {
             panic!("normalized weights are not cached");
         }
 
-        let num_private_hands = self.num_private_hands(player);
-        let mut tmp = vec![0.0; num_private_hands];
+        let num_hands = self.num_private_hands(player);
+        let mut tmp = vec![0.0; num_hands];
 
         if self.river != NOT_DEALT {
             self.equity_internal(&mut tmp, player, self.turn, self.river, 0.5);
@@ -1844,16 +1844,16 @@ impl PostFlopGame {
         }
 
         let num_actions = self.node().num_actions();
-        let num_private_hands = self.num_private_hands(self.current_player());
+        let num_hands = self.num_private_hands(self.current_player());
 
         let expected_values_detail = self.expected_values_detail();
         let strategy = self.strategy();
 
-        let mut ret = Vec::with_capacity(num_private_hands);
-        for i in 0..num_private_hands {
+        let mut ret = Vec::with_capacity(num_hands);
+        for i in 0..num_hands {
             let mut expected_value = 0.0;
             for j in 0..num_actions {
-                let index = i + j * num_private_hands;
+                let index = i + j * num_hands;
                 expected_value += expected_values_detail[index] * strategy[index];
             }
             ret.push(expected_value);
@@ -1895,8 +1895,8 @@ impl PostFlopGame {
             self.node().expected_values().to_vec()
         };
 
-        let num_private_hands = self.num_private_hands(player);
-        ret.chunks_mut(num_private_hands).for_each(|row| {
+        let num_hands = self.num_private_hands(player);
+        ret.chunks_exact_mut(num_hands).for_each(|row| {
             self.apply_swap(row, player);
             row.iter_mut()
                 .zip(self.normalized_weights[player].iter())
@@ -1931,7 +1931,7 @@ impl PostFlopGame {
 
         let player = self.current_player();
         let num_actions = self.node().num_actions();
-        let num_private_hands = self.num_private_hands(player);
+        let num_hands = self.num_private_hands(player);
 
         let mut ret = if self.is_compression_enabled {
             let slice = self.node().strategy_compressed();
@@ -1942,7 +1942,7 @@ impl PostFlopGame {
 
         normalize_strategy(&mut ret, num_actions);
 
-        ret.chunks_mut(num_private_hands).for_each(|chunk| {
+        ret.chunks_exact_mut(num_hands).for_each(|chunk| {
             self.apply_swap(chunk, player);
         });
 
