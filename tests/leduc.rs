@@ -1,5 +1,6 @@
 extern crate postflop_solver;
 use postflop_solver::*;
+use std::slice;
 
 struct LeducGame {
     root: MutexLike<LeducNode>,
@@ -7,6 +8,7 @@ struct LeducGame {
     isomorphism: Vec<u8>,
     isomorphism_swap: [Vec<(u16, u16)>; 2],
     is_solved: bool,
+    is_compression_enabled: bool,
 }
 
 struct LeducNode {
@@ -16,6 +18,8 @@ struct LeducNode {
     children: Vec<(Action, MutexLike<LeducNode>)>,
     strategy: Vec<f32>,
     storage: Vec<f32>,
+    strategy_scale: f32,
+    storage_scale: f32,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -120,17 +124,23 @@ impl Game for LeducGame {
     fn set_solved(&mut self) {
         self.is_solved = true;
     }
+
+    #[inline]
+    fn is_compression_enabled(&self) -> bool {
+        self.is_compression_enabled
+    }
 }
 
 impl LeducGame {
     #[inline]
-    pub fn new() -> Self {
+    pub fn new(is_compression_enabled: bool) -> Self {
         Self {
             root: Self::build_tree(),
             initial_weight: vec![1.0; NUM_PRIVATE_HANDS],
             isomorphism: vec![0, 1, 2],
             isomorphism_swap: [vec![(0, 1), (2, 3), (4, 5)], vec![(0, 1), (2, 3), (4, 5)]],
             is_solved: false,
+            is_compression_enabled,
         }
     }
 
@@ -142,6 +152,8 @@ impl LeducGame {
             children: Vec::new(),
             strategy: Default::default(),
             storage: Default::default(),
+            strategy_scale: 0.0,
+            storage_scale: 0.0,
         };
         Self::build_tree_recursive(&mut root, Action::None, [0, 0]);
         Self::allocate_memory_recursive(&mut root);
@@ -189,6 +201,8 @@ impl LeducGame {
                     children: Vec::new(),
                     strategy: Default::default(),
                     storage: Default::default(),
+                    strategy_scale: 0.0,
+                    storage_scale: 0.0,
                 }),
             ));
         }
@@ -213,6 +227,8 @@ impl LeducGame {
                     children: Vec::new(),
                     strategy: Default::default(),
                     storage: Default::default(),
+                    strategy_scale: 0.0,
+                    storage_scale: 0.0,
                 }),
             ));
         }
@@ -339,24 +355,124 @@ impl GameNode for LeducNode {
     fn expected_values_mut(&mut self) -> &mut [f32] {
         &mut self.storage
     }
+
+    #[inline]
+    fn strategy_compressed(&self) -> &[u16] {
+        let ptr = self.strategy.as_ptr() as *const u16;
+        unsafe { slice::from_raw_parts(ptr, self.strategy.len()) }
+    }
+
+    #[inline]
+    fn strategy_compressed_mut(&mut self) -> &mut [u16] {
+        let ptr = self.strategy.as_mut_ptr() as *mut u16;
+        unsafe { slice::from_raw_parts_mut(ptr, self.strategy.len()) }
+    }
+
+    #[inline]
+    fn cum_regret_compressed(&self) -> &[i16] {
+        let ptr = self.storage.as_ptr() as *const i16;
+        unsafe { slice::from_raw_parts(ptr, self.storage.len()) }
+    }
+
+    #[inline]
+    fn cum_regret_compressed_mut(&mut self) -> &mut [i16] {
+        let ptr = self.storage.as_mut_ptr() as *mut i16;
+        unsafe { slice::from_raw_parts_mut(ptr, self.storage.len()) }
+    }
+
+    #[inline]
+    fn expected_values_compressed(&self) -> &[i16] {
+        let ptr = self.storage.as_ptr() as *const i16;
+        unsafe { slice::from_raw_parts(ptr, self.storage.len()) }
+    }
+
+    #[inline]
+    fn expected_values_compressed_mut(&mut self) -> &mut [i16] {
+        let ptr = self.storage.as_mut_ptr() as *mut i16;
+        unsafe { slice::from_raw_parts_mut(ptr, self.storage.len()) }
+    }
+
+    #[inline]
+    fn strategy_scale(&self) -> f32 {
+        self.strategy_scale
+    }
+
+    #[inline]
+    fn set_strategy_scale(&mut self, scale: f32) {
+        self.strategy_scale = scale;
+    }
+
+    #[inline]
+    fn cum_regret_scale(&self) -> f32 {
+        self.storage_scale
+    }
+
+    #[inline]
+    fn set_cum_regret_scale(&mut self, scale: f32) {
+        self.storage_scale = scale;
+    }
+
+    #[inline]
+    fn expected_value_scale(&self) -> f32 {
+        self.storage_scale
+    }
+
+    #[inline]
+    fn set_expected_value_scale(&mut self, scale: f32) {
+        self.storage_scale = scale;
+    }
 }
 
 #[test]
 fn leduc() {
     let target = 1e-4;
-    let mut game = LeducGame::new();
+    let mut game = LeducGame::new(false);
     solve(&mut game, 10000, target, false);
 
-    let mut strategy = game.root().strategy().to_vec();
+    let root = game.root();
+
+    let mut strategy = root.strategy().to_vec();
     for i in 0..NUM_PRIVATE_HANDS {
         let sum = strategy[i] + strategy[i + NUM_PRIVATE_HANDS];
         strategy[i] /= sum;
         strategy[i + NUM_PRIVATE_HANDS] /= sum;
     }
 
-    let root_ev = (game.root().expected_values().iter())
+    let root_ev = root
+        .expected_values()
+        .iter()
         .zip(strategy.iter())
-        .fold(0.0, |acc, (ev, strategy)| acc + ev * strategy);
+        .fold(0.0, |acc, (&ev, &strategy)| acc + ev * strategy);
+
+    let expected_ev = -0.0856; // verified by OpenSpiel
+    assert!((root_ev - expected_ev).abs() < 2.0 * target);
+}
+
+#[test]
+fn leduc_compressed() {
+    let target = 1e-3;
+    let mut game = LeducGame::new(true);
+    solve(&mut game, 10000, target, true);
+
+    let root = game.root();
+
+    let mut strategy = [0.0; NUM_PRIVATE_HANDS * 2];
+    let raw_strategy = root.strategy_compressed();
+
+    for i in 0..NUM_PRIVATE_HANDS {
+        let sum = raw_strategy[i] as u32 + raw_strategy[i + NUM_PRIVATE_HANDS] as u32;
+        strategy[i] = raw_strategy[i] as f32 / sum as f32;
+        strategy[i + NUM_PRIVATE_HANDS] = raw_strategy[i + NUM_PRIVATE_HANDS] as f32 / sum as f32;
+    }
+
+    let ev_decoder = root.expected_value_scale() / i16::MAX as f32;
+    let root_ev = root
+        .expected_values_compressed()
+        .iter()
+        .zip(strategy.iter())
+        .fold(0.0, |acc, (&raw_ev, &strategy)| {
+            acc + ev_decoder * raw_ev as f32 * strategy
+        });
 
     let expected_ev = -0.0856; // verified by OpenSpiel
     assert!((root_ev - expected_ev).abs() < 2.0 * target);
