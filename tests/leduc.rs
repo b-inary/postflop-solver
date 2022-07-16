@@ -433,9 +433,10 @@ fn leduc() {
 
     let mut strategy = root.strategy().to_vec();
     for i in 0..NUM_PRIVATE_HANDS {
-        let sum = strategy[i] + strategy[i + NUM_PRIVATE_HANDS];
+        let j = i + NUM_PRIVATE_HANDS;
+        let sum = strategy[i] + strategy[j];
         strategy[i] /= sum;
-        strategy[i + NUM_PRIVATE_HANDS] /= sum;
+        strategy[j] /= sum;
     }
 
     let root_ev = root
@@ -452,17 +453,17 @@ fn leduc() {
 fn leduc_compressed() {
     let target = 1e-3;
     let mut game = LeducGame::new(true);
-    solve(&mut game, 10000, target, true);
+    solve(&mut game, 10000, target, false);
 
     let root = game.root();
 
     let mut strategy = [0.0; NUM_PRIVATE_HANDS * 2];
     let raw_strategy = root.strategy_compressed();
-
     for i in 0..NUM_PRIVATE_HANDS {
-        let sum = raw_strategy[i] as u32 + raw_strategy[i + NUM_PRIVATE_HANDS] as u32;
-        strategy[i] = raw_strategy[i] as f32 / sum as f32;
-        strategy[i + NUM_PRIVATE_HANDS] = raw_strategy[i + NUM_PRIVATE_HANDS] as f32 / sum as f32;
+        let j = i + NUM_PRIVATE_HANDS;
+        let sum = (raw_strategy[i] as u32 + raw_strategy[j] as u32) as f32;
+        strategy[i] = raw_strategy[i] as f32 / sum;
+        strategy[j] = raw_strategy[j] as f32 / sum;
     }
 
     let ev_decoder = root.expected_value_scale() / i16::MAX as f32;
