@@ -2504,7 +2504,7 @@ pub fn card_from_str(s: &str) -> Result<u8, String> {
 }
 
 #[inline]
-fn card_from_chars<T: Iterator<Item = char>>(chars: &mut T) -> Result<u8, String> {
+pub fn card_from_chars<T: Iterator<Item = char>>(chars: &mut T) -> Result<u8, String> {
     let rank_char = chars.next().ok_or_else(|| "parse failed".to_string())?;
     let suit_char = chars.next().ok_or_else(|| "parse failed".to_string())?;
 
