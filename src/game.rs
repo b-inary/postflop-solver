@@ -1364,7 +1364,7 @@ impl PostFlopGame {
             }
 
             let raise_candidates = &candidates[player_opponent as usize].raise;
-            if raise_candidates.len() == 0 {
+            if raise_candidates.is_empty() {
                 return size;
             }
 
