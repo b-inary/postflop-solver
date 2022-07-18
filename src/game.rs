@@ -1363,8 +1363,13 @@ impl PostFlopGame {
                 return size;
             }
 
+            let raise_candidates = &candidates[player_opponent as usize].raise;
+            if raise_candidates.len() == 0 {
+                return size;
+            }
+
             let mut min_opponent_ratio = f32::MAX;
-            for &bet_size in &candidates[player_opponent as usize].raise {
+            for &bet_size in raise_candidates {
                 match bet_size {
                     BetSize::PotRelative(ratio) => {
                         min_opponent_ratio = min_opponent_ratio.min(ratio);
@@ -1375,7 +1380,6 @@ impl PostFlopGame {
                     }
                 }
             }
-
             let min_opponent_bet = size + (new_pot as f32 * min_opponent_ratio).round() as i32;
             let next_bet_diff = min_opponent_bet - size;
             let next_pot = new_pot + 2 * next_bet_diff;
@@ -2500,8 +2504,22 @@ pub fn card_from_str(s: &str) -> Result<u8, String> {
     Ok(result)
 }
 
+/// Attempts to read the next card from a char iterator.
+///
+/// Card ID: `"2c"` => `0`, `"2d"` => `1`, `"2h"` => `2`, ..., `"As"` => `51`.
+///
+/// # Examples
+/// ```
+/// use postflop_solver::card_from_chars;
+///
+/// let mut chars = "2c3d4hAs".chars();
+/// assert_eq!(card_from_chars(&mut chars), Ok(0));
+/// assert_eq!(card_from_chars(&mut chars), Ok(5));
+/// assert_eq!(card_from_chars(&mut chars), Ok(10));
+/// assert_eq!(card_from_chars(&mut chars), Ok(51));
+/// ```
 #[inline]
-fn card_from_chars<T: Iterator<Item = char>>(chars: &mut T) -> Result<u8, String> {
+pub fn card_from_chars<T: Iterator<Item = char>>(chars: &mut T) -> Result<u8, String> {
     let rank_char = chars.next().ok_or_else(|| "parse failed".to_string())?;
     let suit_char = chars.next().ok_or_else(|| "parse failed".to_string())?;
 
