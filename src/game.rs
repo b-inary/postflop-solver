@@ -1364,35 +1364,36 @@ impl PostFlopGame {
             }
 
             let raise_candidates = &candidates[player_opponent as usize].raise;
-            if raise_candidates.len() > 0 {
-                let mut min_opponent_ratio = f32::MAX;
-                for &bet_size in raise_candidates {
-                    match bet_size {
-                        BetSize::PotRelative(ratio) => {
-                            min_opponent_ratio = min_opponent_ratio.min(ratio);
-                        }
-                        BetSize::LastBetRelative(ratio) => {
-                            let pot_ratio = size as f32 * (ratio - 1.0) / new_pot as f32;
-                            min_opponent_ratio = min_opponent_ratio.min(pot_ratio);
-                        }
+            if raise_candidates.len() == 0 {
+                return size;
+            }
+
+            let mut min_opponent_ratio = f32::MAX;
+            for &bet_size in raise_candidates {
+                match bet_size {
+                    BetSize::PotRelative(ratio) => {
+                        min_opponent_ratio = min_opponent_ratio.min(ratio);
+                    }
+                    BetSize::LastBetRelative(ratio) => {
+                        let pot_ratio = size as f32 * (ratio - 1.0) / new_pot as f32;
+                        min_opponent_ratio = min_opponent_ratio.min(pot_ratio);
                     }
                 }
-                let min_opponent_bet = size + (new_pot as f32 * min_opponent_ratio).round() as i32;
-                let next_bet_diff = min_opponent_bet - size;
-                let next_pot = new_pot + 2 * next_bet_diff;
+            }
+            let min_opponent_bet = size + (new_pot as f32 * min_opponent_ratio).round() as i32;
+            let next_bet_diff = min_opponent_bet - size;
+            let next_pot = new_pot + 2 * next_bet_diff;
 
-                let threshold =
-                    (next_pot as f32 * self.config.force_all_in_threshold).round() as i32;
-                if max_bet <= min_opponent_bet + threshold {
-                    // next opponent bet will be always all-in
-                    let ratio = new_bet_diff as f32 / pot as f32;
-                    let a = 2.0 * pot as f32 * ratio * min_opponent_ratio;
-                    let b = pot as f32 * (ratio + min_opponent_ratio);
-                    let c = (max_bet - opponent_bet) as f32;
-                    // solve quadratic equation
-                    let coef = ((4.0 * a * c + b * b).sqrt() - b) / (2.0 * a);
-                    return opponent_bet + (new_bet_diff as f32 * coef).round() as i32;
-                }
+            let threshold = (next_pot as f32 * self.config.force_all_in_threshold).round() as i32;
+            if max_bet <= min_opponent_bet + threshold {
+                // next opponent bet will be always all-in
+                let ratio = new_bet_diff as f32 / pot as f32;
+                let a = 2.0 * pot as f32 * ratio * min_opponent_ratio;
+                let b = pot as f32 * (ratio + min_opponent_ratio);
+                let c = (max_bet - opponent_bet) as f32;
+                // solve quadratic equation
+                let coef = ((4.0 * a * c + b * b).sqrt() - b) / (2.0 * a);
+                return opponent_bet + (new_bet_diff as f32 * coef).round() as i32;
             }
 
             size
