@@ -1134,9 +1134,11 @@ impl PostFlopGame {
 
             let mut stack_size = info.stack_size;
             let f32_size = mem::size_of::<f32>();
+            let f64_size = mem::size_of::<f64>();
             let col_size = f32_size * node.num_actions();
             for (i, s) in stack_size.iter_mut().enumerate() {
                 *s += align_up(col_size * self.num_private_hands(i));
+                *s += align_up(f64_size * self.num_private_hands(i));
                 *s += align_up(f32_size * self.num_private_hands(i ^ 1));
             }
 
