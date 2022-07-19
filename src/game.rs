@@ -342,11 +342,11 @@ impl Game for PostFlopGame {
             let player_len = player_strength.len();
             let opponent_len = opponent_strength.len();
 
+            let valid_player_strength = &player_strength[1..player_len - 1];
             let mut j = 1;
 
-            for i in 1..player_len - 1 {
+            for &StrengthItem { strength, index } in valid_player_strength {
                 unsafe {
-                    let StrengthItem { strength, index } = *player_strength.get_unchecked(i);
                     while opponent_strength.get_unchecked(j).strength < strength {
                         let opponent_index = opponent_strength.get_unchecked(j).index as usize;
                         let (c1, c2) = *opponent_cards.get_unchecked(opponent_index);
@@ -368,9 +368,8 @@ impl Game for PostFlopGame {
             cfreach_minus.fill(0.0);
             j = opponent_len - 2;
 
-            for i in (1..player_len - 1).rev() {
+            for &StrengthItem { strength, index } in valid_player_strength.iter().rev() {
                 unsafe {
-                    let StrengthItem { strength, index } = *player_strength.get_unchecked(i);
                     while opponent_strength.get_unchecked(j).strength > strength {
                         let opponent_index = opponent_strength.get_unchecked(j).index as usize;
                         let (c1, c2) = *opponent_cards.get_unchecked(opponent_index);
