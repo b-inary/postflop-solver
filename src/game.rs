@@ -895,9 +895,9 @@ impl PostFlopGame {
                                 reverse_table[card_pair_index(cards[i].0, cards[i].1)] = i;
                             }
 
-                            for i in 0..cards.len() {
-                                let c1 = replacer(cards[i].0);
-                                let c2 = replacer(cards[i].1);
+                            for (i, &(c1, c2)) in cards.iter().enumerate() {
+                                let c1 = replacer(c1);
+                                let c2 = replacer(c2);
                                 let index = reverse_table[card_pair_index(c1, c2)];
                                 if index != usize::MAX && i < index {
                                     swap_list[player].push((i as u16, index as u16));
@@ -986,9 +986,9 @@ impl PostFlopGame {
                                     reverse_table[card_pair_index(cards[i].0, cards[i].1)] = i;
                                 }
 
-                                for i in 0..cards.len() {
-                                    let c1 = replacer(cards[i].0);
-                                    let c2 = replacer(cards[i].1);
+                                for (i, &(c1, c2)) in cards.iter().enumerate() {
+                                    let c1 = replacer(c1);
+                                    let c2 = replacer(c2);
                                     let index = reverse_table[card_pair_index(c1, c2)];
                                     if index != usize::MAX && i < index {
                                         swap_list[player].push((i as u16, index as u16));
@@ -1135,9 +1135,9 @@ impl PostFlopGame {
             let mut stack_size = info.stack_size;
             let f32_size = mem::size_of::<f32>();
             let col_size = f32_size * node.num_actions();
-            for i in 0..2 {
-                stack_size[i] += align_up(col_size * self.num_private_hands(i));
-                stack_size[i] += align_up(f32_size * self.num_private_hands(i ^ 1));
+            for (i, s) in stack_size.iter_mut().enumerate() {
+                *s += align_up(col_size * self.num_private_hands(i));
+                *s += align_up(f32_size * self.num_private_hands(i ^ 1));
             }
 
             for (action, child) in node.actions.iter().zip(node.children.iter()) {
@@ -1158,10 +1158,10 @@ impl PostFlopGame {
 
             let mut stack_size = info.stack_size;
             let col_size = mem::size_of::<f32>() * node.num_actions();
-            for i in 0..2 {
+            for (i, s) in stack_size.iter_mut().enumerate() {
                 let n = if i == node.player() { 2 } else { 1 };
-                stack_size[i] += align_up(col_size * self.num_private_hands(i));
-                stack_size[i] += n * align_up(col_size * self.num_private_hands(node.player()));
+                *s += align_up(col_size * self.num_private_hands(i));
+                *s += n * align_up(col_size * self.num_private_hands(node.player()));
             }
 
             for (action, child) in node.actions.iter().zip(node.children.iter()) {

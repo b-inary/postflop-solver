@@ -207,9 +207,9 @@ fn solve_recursive<T: Game>(
         let isomorphic_chances = game.isomorphic_chances(node);
 
         // process isomorphic chances
-        for i in 0..isomorphic_chances.len() {
+        for (i, &isomorphic_index) in isomorphic_chances.iter().enumerate() {
             let swap_list = &game.isomorphic_swap(node, i)[player];
-            let tmp = row_mut(&mut cfv_actions, isomorphic_chances[i] as usize, num_hands);
+            let tmp = row_mut(&mut cfv_actions, isomorphic_index as usize, num_hands);
 
             for &(i, j) in swap_list {
                 unsafe {
