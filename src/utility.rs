@@ -152,7 +152,7 @@ pub(crate) fn encode_signed_slice(dst: &mut [i16], slice: &[f32]) -> f32 {
     let encoder = i16::MAX as f32 / scale_nonzero;
     dst.iter_mut()
         .zip(slice)
-        .for_each(|(d, s)| *d = unsafe { (s * encoder).round().to_int_unchecked() });
+        .for_each(|(d, s)| *d = unsafe { (s * encoder).round().to_int_unchecked::<i32>() as i16 });
     scale
 }
 
@@ -163,9 +163,9 @@ pub(crate) fn encode_unsigned_slice(dst: &mut [u16], slice: &[f32]) -> f32 {
     let scale_nonzero = if scale == 0.0 { 1.0 } else { scale };
     let encoder = u16::MAX as f32 / scale_nonzero;
     // note: 0.49999997 + 0.49999997 = 0.99999994 < 1.0 | 0.5 + 0.49999997 = 1.0
-    dst.iter_mut()
-        .zip(slice)
-        .for_each(|(d, s)| *d = unsafe { (s * encoder + 0.49999997).to_int_unchecked() });
+    dst.iter_mut().zip(slice).for_each(|(d, s)| {
+        *d = unsafe { (s * encoder + 0.49999997).to_int_unchecked::<i32>() as u16 }
+    });
     scale
 }
 
