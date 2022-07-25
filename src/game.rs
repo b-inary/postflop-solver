@@ -2525,11 +2525,11 @@ pub fn card_from_chars<T: Iterator<Item = char>>(chars: &mut T) -> Result<u8, St
     let suit_char = chars.next().ok_or_else(|| "parse failed".to_string())?;
 
     let rank = match rank_char {
-        'A' => 12,
-        'K' => 11,
-        'Q' => 10,
-        'J' => 9,
-        'T' => 8,
+        'A' | 'a' => 12,
+        'K' | 'k' => 11,
+        'Q' | 'q' => 10,
+        'J' | 'j' => 9,
+        'T' | 't' => 8,
         '2'..='9' => rank_char as u8 - b'2',
         _ => return Err(format!("expected rank: {rank_char}")),
     };
