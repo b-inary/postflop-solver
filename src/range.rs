@@ -352,15 +352,6 @@ fn check_card(card: u8) -> Result<(), String> {
 }
 
 #[inline]
-fn check_rank(rank: u8) -> Result<(), String> {
-    if rank < 13 {
-        Ok(())
-    } else {
-        Err(format!("Invalid rank: {rank}"))
-    }
-}
-
-#[inline]
 fn check_weight(weight: f32) -> Result<(), String> {
     if (0.0..=1.0).contains(&weight) {
         Ok(())
@@ -420,7 +411,13 @@ impl Range {
     pub fn from_hands_weights(hands: &[(u8, u8)], weights: &[f32]) -> Result<Self, String> {
         let mut range = Self::default();
         for (&(card1, card2), &weight) in hands.iter().zip(weights.iter()) {
-            range.set_weight_by_cards(card1, card2, weight)?;
+            check_card(card1)?;
+            check_card(card2)?;
+            check_weight(weight)?;
+            if card1 == card2 {
+                return Err(format!("Hand must consist of two different cards"));
+            }
+            range.set_weight_by_cards(card1, card2, weight);
         }
         Ok(range)
     }
@@ -503,6 +500,10 @@ impl Range {
 
     /// Obtains the weight by card indices.
     ///
+    /// Undefined behavior if:
+    ///   - `card1` or `card2` is not less than `52`
+    ///   - `card1` is equal to `card2`
+    ///
     /// Card ID: `"2c"` => `0`, `"2d"` => `1`, `"2h"` => `2`, ..., `"As"` => `51`.
     #[inline]
     pub fn get_weight_by_cards(&self, card1: u8, card2: u8) -> f32 {
@@ -510,18 +511,28 @@ impl Range {
     }
 
     /// Obtains the average weight of a pair.
+    ///
+    /// Undefined behavior if `rank` is not less than `13`.
     #[inline]
     pub fn get_weight_pair(&self, rank: u8) -> f32 {
         self.get_average_weight(&pair_indices(rank))
     }
 
     /// Obtains the average weight of a suited hand.
+    ///
+    /// Undefined behavior if:
+    ///   - `rank1` or `rank2` is not less than `13`
+    ///   - `rank1` is equal to `rank2`
     #[inline]
     pub fn get_weight_suited(&self, rank1: u8, rank2: u8) -> f32 {
         self.get_average_weight(&suited_indices(rank1, rank2))
     }
 
     /// Obtains the average weight of an offsuit hand.
+    ///
+    /// Undefined behavior if:
+    ///   - `rank1` or `rank2` is not less than `13`
+    ///   - `rank1` is equal to `rank2`
     #[inline]
     pub fn get_weight_offsuit(&self, rank1: u8, rank2: u8) -> f32 {
         self.get_average_weight(&offsuit_indices(rank1, rank2))
@@ -529,53 +540,47 @@ impl Range {
 
     /// Sets the weight by card indices.
     ///
+    /// Undefined behavior if:
+    ///   - `card1` or `card2` is not less than `52`
+    ///   - `card1` is equal to `card2`
+    ///   - `weight` is not in the range `[0.0, 1.0]`
+    ///
     /// Card ID: `"2c"` => `0`, `"2d"` => `1`, `"2h"` => `2`, ..., `"As"` => `51`.
     #[inline]
-    pub fn set_weight_by_cards(&mut self, card1: u8, card2: u8, weight: f32) -> Result<(), String> {
-        check_card(card1)?;
-        check_card(card2)?;
-        check_weight(weight)?;
+    pub fn set_weight_by_cards(&mut self, card1: u8, card2: u8, weight: f32) {
         self.data[card_pair_index(card1, card2)] = weight;
-        Ok(())
     }
 
     /// Sets the weight of a specified pair.
+    ///
+    /// Undefined behavior if:
+    ///   - `rank` is not less than `13`
+    ///   - `weight` is not in the range `[0.0, 1.0]`
     #[inline]
-    pub fn set_weight_pair(&mut self, rank: u8, weight: f32) -> Result<(), String> {
-        check_rank(rank)?;
-        check_weight(weight)?;
+    pub fn set_weight_pair(&mut self, rank: u8, weight: f32) {
         self.set_weight(&pair_indices(rank), weight);
-        Ok(())
     }
 
     /// Sets the weight of a specified suited hand.
+    ///
+    /// Undefined behavior if:
+    ///   - `rank1` or `rank2` is not less than `13`
+    ///   - `rank1` is equal to `rank2`
+    ///   - `weight` is not in the range `[0.0, 1.0]`
     #[inline]
-    pub fn set_weight_suited(&mut self, rank1: u8, rank2: u8, weight: f32) -> Result<(), String> {
-        check_rank(rank1)?;
-        check_rank(rank2)?;
-        check_weight(weight)?;
-        if rank1 == rank2 {
-            return Err(format!(
-                "set_weight_suited() accepts non-pairs, but got rank1 = rank2 = {rank1}"
-            ));
-        }
+    pub fn set_weight_suited(&mut self, rank1: u8, rank2: u8, weight: f32) {
         self.set_weight(&suited_indices(rank1, rank2), weight);
-        Ok(())
     }
 
     /// Sets the weight of a specified offsuit hand.
+    ///
+    /// Undefined behavior if:
+    ///   - `rank1` or `rank2` is not less than `13`
+    ///   - `rank1` is equal to `rank2`
+    ///   - `weight` is not in the range `[0.0, 1.0]`
     #[inline]
-    pub fn set_weight_offsuit(&mut self, rank1: u8, rank2: u8, weight: f32) -> Result<(), String> {
-        check_rank(rank1)?;
-        check_rank(rank2)?;
-        check_weight(weight)?;
-        if rank1 == rank2 {
-            return Err(format!(
-                "set_weight_offsuit() accepts non-pairs, but got rank1 = rank2 = {rank1}"
-            ));
-        }
+    pub fn set_weight_offsuit(&mut self, rank1: u8, rank2: u8, weight: f32) {
         self.set_weight(&offsuit_indices(rank1, rank2), weight);
-        Ok(())
     }
 
     /// Returns whether the two suits are isomorphic.
