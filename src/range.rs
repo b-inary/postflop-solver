@@ -415,7 +415,7 @@ impl Range {
             check_card(card2)?;
             check_weight(weight)?;
             if card1 == card2 {
-                return Err(format!("Hand must consist of two different cards"));
+                return Err("Hand must consist of two different cards".to_string());
             }
             range.set_weight_by_cards(card1, card2, weight);
         }
@@ -498,7 +498,7 @@ impl Range {
         self.data.iter().all(|el| *el == 0.0)
     }
 
-    /// Obtains the weight by card indices.
+    /// Obtains the weight of a specified hand.
     ///
     /// Undefined behavior if:
     ///   - `card1` or `card2` is not less than `52`
@@ -510,7 +510,7 @@ impl Range {
         self.data[card_pair_index(card1, card2)]
     }
 
-    /// Obtains the average weight of a pair.
+    /// Obtains the average weight of specified pair hands.
     ///
     /// Undefined behavior if `rank` is not less than `13`.
     #[inline]
@@ -518,7 +518,7 @@ impl Range {
         self.get_average_weight(&pair_indices(rank))
     }
 
-    /// Obtains the average weight of a suited hand.
+    /// Obtains the average weight of specified suited hands.
     ///
     /// Undefined behavior if:
     ///   - `rank1` or `rank2` is not less than `13`
@@ -528,7 +528,7 @@ impl Range {
         self.get_average_weight(&suited_indices(rank1, rank2))
     }
 
-    /// Obtains the average weight of an offsuit hand.
+    /// Obtains the average weight of specified offsuit hands.
     ///
     /// Undefined behavior if:
     ///   - `rank1` or `rank2` is not less than `13`
@@ -538,7 +538,7 @@ impl Range {
         self.get_average_weight(&offsuit_indices(rank1, rank2))
     }
 
-    /// Sets the weight by card indices.
+    /// Sets the weight of a specified hand.
     ///
     /// Undefined behavior if:
     ///   - `card1` or `card2` is not less than `52`
@@ -551,7 +551,7 @@ impl Range {
         self.data[card_pair_index(card1, card2)] = weight;
     }
 
-    /// Sets the weight of a specified pair.
+    /// Sets the weights of specified pair hands.
     ///
     /// Undefined behavior if:
     ///   - `rank` is not less than `13`
@@ -561,7 +561,7 @@ impl Range {
         self.set_weight(&pair_indices(rank), weight);
     }
 
-    /// Sets the weight of a specified suited hand.
+    /// Sets the weights of specified suited hands.
     ///
     /// Undefined behavior if:
     ///   - `rank1` or `rank2` is not less than `13`
@@ -572,7 +572,7 @@ impl Range {
         self.set_weight(&suited_indices(rank1, rank2), weight);
     }
 
-    /// Sets the weight of a specified offsuit hand.
+    /// Sets the weights of specified offsuit hands.
     ///
     /// Undefined behavior if:
     ///   - `rank1` or `rank2` is not less than `13`
