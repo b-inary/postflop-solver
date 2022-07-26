@@ -478,44 +478,45 @@ impl Range {
         let weight = self.data[indices[0]];
         indices
             .iter()
-            .all(|i| (self.data[*i] - weight).abs() < 1e-4)
+            .all(|&i| (self.data[i] - weight).abs() < 1e-4)
     }
 
     #[inline]
     fn get_average_weight(&self, indices: &[usize]) -> f32 {
         let mut sum = 0.0;
-        for i in indices {
-            sum += self.data[*i] as f64;
+        for &i in indices {
+            sum += self.data[i] as f64;
         }
         (sum / indices.len() as f64) as f32
     }
 
     #[inline]
     fn set_weight(&mut self, indices: &[usize], weight: f32) {
-        for i in indices {
-            self.data[*i] = weight;
+        for &i in indices {
+            self.data[i] = weight;
         }
     }
 
-    /// Returns a list of all hands in this range and their
-    /// associated weights.  If there are no dead cards, pass 0 to
-    /// dead_cards_mask.
+    /// Returns a list of all hands in this range and their associated weights.
+    ///
+    /// If there are no dead cards, pass `0` to `dead_cards_mask`.
     pub fn get_hands_weights(&self, dead_cards_mask: u64) -> (Vec<(u8, u8)>, Vec<f32>) {
-        let mut hands = Vec::<(u8, u8)>::with_capacity(192);
-        let mut weights = Vec::<f32>::with_capacity(192);
+        let mut hands = Vec::with_capacity(128);
+        let mut weights = Vec::with_capacity(128);
 
         for card1 in 0..52 {
             for card2 in card1 + 1..52 {
+                let hand_mask: u64 = (1 << card1) | (1 << card2);
                 let weight = self.get_weight_by_cards(card1, card2);
-                if weight > 0.0 {
-                    let hand_mask: u64 = (1 << card1) | (1 << card2);
-                    if (hand_mask & dead_cards_mask) == 0 {
-                        weights.push(weight);
-                        hands.push((card1, card2));
-                    }
+                if weight > 0.0 && hand_mask & dead_cards_mask == 0 {
+                    hands.push((card1, card2));
+                    weights.push(weight);
                 }
             }
         }
+
+        hands.shrink_to_fit();
+        weights.shrink_to_fit();
 
         (hands, weights)
     }

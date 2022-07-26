@@ -666,8 +666,8 @@ impl PostFlopGame {
         for player in 0..2 {
             let range = ranges[player];
             let (hands, weights) = range.get_hands_weights(board_mask);
-            self.private_hand_cards[player] = hands;
             self.initial_weight[player] = weights;
+            self.private_hand_cards[player] = hands;
         }
 
         for player in 0..2 {
