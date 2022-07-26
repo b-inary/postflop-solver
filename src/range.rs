@@ -416,6 +416,7 @@ impl Range {
     }
 
     /// Attempts to create a range from a list of hands with their weights.
+    #[inline]
     pub fn from_hands_weights(hands: &[(u8, u8)], weights: &[f32]) -> Result<Self, String> {
         let mut range = Self::default();
         for (&(card1, card2), &weight) in hands.iter().zip(weights.iter()) {
@@ -453,7 +454,6 @@ impl Range {
     /// "Sanitized" means that the range string does not contain any invalid patterns and whitespace
     /// characters. Therefore, this method can bypass the regular expression processing. If you want
     /// to create a range from a regular string, use `parse::<Range>()` instead.
-    #[inline]
     pub fn from_sanitized_str(ranges: &str) -> Result<Self, String> {
         let mut ranges = ranges.split(',').collect::<Vec<_>>();
 
