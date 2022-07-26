@@ -662,25 +662,12 @@ impl PostFlopGame {
             board_mask |= 1 << self.config.river;
         }
 
-        let range = &self.config.range;
-
+        let ranges = &self.config.range;
         for player in 0..2 {
-            let range = range[player];
-            let initial_weight = &mut self.initial_weight[player];
-            let private_hand_cards = &mut self.private_hand_cards[player];
-            initial_weight.clear();
-            private_hand_cards.clear();
-
-            for card1 in 0..52 {
-                for card2 in card1 + 1..52 {
-                    let hand_mask: u64 = (1 << card1) | (1 << card2);
-                    let weight = range.get_weight_by_cards(card1, card2);
-                    if weight > 0.0 && hand_mask & board_mask == 0 {
-                        initial_weight.push(weight);
-                        private_hand_cards.push((card1, card2));
-                    }
-                }
-            }
+            let range = ranges[player];
+            let (hands, weights) = range.get_hands_weights(board_mask);
+            self.private_hand_cards[player] = hands;
+            self.initial_weight[player] = weights;
         }
 
         for player in 0..2 {

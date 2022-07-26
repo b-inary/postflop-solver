@@ -497,6 +497,29 @@ impl Range {
         }
     }
 
+    /// Returns a list of all hands in this range and their
+    /// associated weights.  If there are no dead cards, pass 0 to
+    /// dead_cards_mask.
+    pub fn get_hands_weights(&self, dead_cards_mask: u64) -> (Vec<(u8, u8)>, Vec<f32>) {
+        let mut hands = Vec::<(u8, u8)>::with_capacity(192);
+        let mut weights = Vec::<f32>::with_capacity(192);
+
+        for card1 in 0..52 {
+            for card2 in card1 + 1..52 {
+                let weight = self.get_weight_by_cards(card1, card2);
+                if weight > 0.0 {
+                    let hand_mask: u64 = (1 << card1) | (1 << card2);
+                    if (hand_mask & dead_cards_mask) == 0 {
+                        weights.push(weight);
+                        hands.push((card1, card2));
+                    }
+                }
+            }
+        }
+
+        (hands, weights)
+    }
+
     #[inline]
     fn update_with_singleton(&mut self, combo: &str, weight: f32) -> Result<(), String> {
         let (rank1, rank2, suitedness) = parse_singleton(combo)?;
