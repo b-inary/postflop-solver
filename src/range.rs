@@ -11,7 +11,7 @@ use bincode::{Decode, Encode};
 ///
 /// # Examples
 /// ```
-/// use postflop_solver::*;
+/// use postflop_solver::Range;
 ///
 /// // construct a range from a string
 /// let range = "QQ+,AKs".parse::<Range>().unwrap();
@@ -77,7 +77,6 @@ fn pair_indices(rank: u8) -> Vec<usize> {
 
 #[inline]
 fn nonpair_indices(rank1: u8, rank2: u8) -> Vec<usize> {
-    debug_assert!(rank1 != rank2);
     let mut result = Vec::with_capacity(16);
     for i in 0..4 {
         for j in 0..4 {
@@ -89,7 +88,6 @@ fn nonpair_indices(rank1: u8, rank2: u8) -> Vec<usize> {
 
 #[inline]
 fn suited_indices(rank1: u8, rank2: u8) -> Vec<usize> {
-    debug_assert!(rank1 != rank2);
     let mut result = Vec::with_capacity(4);
     for i in 0..4 {
         result.push(card_pair_index(4 * rank1 + i, 4 * rank2 + i));
@@ -99,7 +97,6 @@ fn suited_indices(rank1: u8, rank2: u8) -> Vec<usize> {
 
 #[inline]
 fn offsuit_indices(rank1: u8, rank2: u8) -> Vec<usize> {
-    debug_assert!(rank1 != rank2);
     let mut result = Vec::with_capacity(12);
     for i in 0..4 {
         for j in 0..4 {
@@ -145,7 +142,7 @@ fn char_to_rank(c: char) -> Result<u8, String> {
         'J' => Ok(9),
         'T' => Ok(8),
         '2'..='9' => Ok(c as u8 - b'2'),
-        _ => Err(format!("invalid input: {c}")),
+        _ => Err(format!("Expected rank character: {c}")),
     }
 }
 
@@ -159,7 +156,7 @@ fn char_to_suit(c: char) -> Result<u8, String> {
         'd' => Ok(1),
         'h' => Ok(2),
         's' => Ok(3),
-        _ => Err(format!("invalid input: {c}")),
+        _ => Err(format!("Expected suit character: {c}")),
     }
 }
 
@@ -175,7 +172,7 @@ fn rank_to_char(rank: u8) -> Result<char, String> {
         9 => Ok('J'),
         8 => Ok('T'),
         0..=7 => Ok((rank + b'2') as char),
-        _ => Err(format!("invalid input: {rank}")),
+        _ => Err(format!("Invalid input: {rank}")),
     }
 }
 
@@ -189,7 +186,7 @@ fn suit_to_char(suit: u8) -> Result<char, String> {
         1 => Ok('d'),
         2 => Ok('h'),
         3 => Ok('s'),
-        _ => Err(format!("invalid input: {suit}")),
+        _ => Err(format!("Invalid input: {suit}")),
     }
 }
 
@@ -208,9 +205,93 @@ fn suit_to_char(suit: u8) -> Result<char, String> {
 /// ```
 #[inline]
 pub fn card_to_string(card: u8) -> Result<String, String> {
+    check_card(card)?;
     let rank = card >> 2;
     let suit = card & 3;
     Ok(format!("{}{}", rank_to_char(rank)?, suit_to_char(suit)?))
+}
+
+/// Attempts to read the next card from a char iterator.
+///
+/// Card ID: `"2c"` => `0`, `"2d"` => `1`, `"2h"` => `2`, ..., `"As"` => `51`.
+///
+/// # Examples
+/// ```
+/// use postflop_solver::card_from_chars;
+///
+/// let mut chars = "2c3d4hAs".chars();
+/// assert_eq!(card_from_chars(&mut chars), Ok(0));
+/// assert_eq!(card_from_chars(&mut chars), Ok(5));
+/// assert_eq!(card_from_chars(&mut chars), Ok(10));
+/// assert_eq!(card_from_chars(&mut chars), Ok(51));
+/// ```
+#[inline]
+pub fn card_from_chars<T: Iterator<Item = char>>(chars: &mut T) -> Result<u8, String> {
+    let rank_char = chars.next().ok_or_else(|| "Unexpected end".to_string())?;
+    let suit_char = chars.next().ok_or_else(|| "Unexpected end".to_string())?;
+
+    let rank = char_to_rank(rank_char)?;
+    let suit = char_to_suit(suit_char)?;
+
+    Ok((rank << 2) | suit)
+}
+
+/// Attempts to convert a string into a card.
+///
+/// Card ID: `"2c"` => `0`, `"2d"` => `1`, `"2h"` => `2`, ..., `"As"` => `51`.
+///
+/// # Examples
+/// ```
+/// use postflop_solver::card_from_str;
+///
+/// assert_eq!(card_from_str("2c"), Ok(0));
+/// assert_eq!(card_from_str("3d"), Ok(5));
+/// assert_eq!(card_from_str("4h"), Ok(10));
+/// assert_eq!(card_from_str("As"), Ok(51));
+/// ```
+#[inline]
+pub fn card_from_str(s: &str) -> Result<u8, String> {
+    let mut chars = s.chars();
+    let result = card_from_chars(&mut chars)?;
+
+    if chars.next().is_some() {
+        return Err("Expected exactly two characters".to_string());
+    }
+
+    Ok(result)
+}
+
+/// Attempts to convert an optionally space-separated string into a sorted flop array.
+///
+/// Card ID: `"2c"` => `0`, `"2d"` => `1`, `"2h"` => `2`, ..., `"As"` => `51`.
+///
+/// # Examples
+/// ```
+/// use postflop_solver::flop_from_str;
+///
+/// assert_eq!(flop_from_str("2c3d4h"), Ok([0, 5, 10]));
+/// assert_eq!(flop_from_str("As Ah Ks"), Ok([47, 50, 51]));
+/// ```
+#[inline]
+pub fn flop_from_str(s: &str) -> Result<[u8; 3], String> {
+    let mut result = [0; 3];
+    let mut chars = s.chars();
+
+    result[0] = card_from_chars(&mut chars)?;
+    result[1] = card_from_chars(&mut chars.by_ref().skip_while(|c| c.is_whitespace()))?;
+    result[2] = card_from_chars(&mut chars.by_ref().skip_while(|c| c.is_whitespace()))?;
+
+    if chars.next().is_some() {
+        return Err("Expected exactly three cards".to_string());
+    }
+
+    result.sort_unstable();
+
+    if result[0] == result[1] || result[1] == result[2] {
+        return Err("Cards must be unique".to_string());
+    }
+
+    Ok(result)
 }
 
 #[inline]
@@ -225,10 +306,10 @@ fn parse_singleton(combo: &str) -> Result<(u8, u8, Suitedness), String> {
 #[inline]
 fn parse_simple_singleton(combo: &str) -> Result<(u8, u8, Suitedness), String> {
     let mut chars = combo.chars();
-    let rank1 = char_to_rank(chars.next().unwrap())?;
-    let suit1 = char_to_suit(chars.next().unwrap())?;
-    let rank2 = char_to_rank(chars.next().unwrap())?;
-    let suit2 = char_to_suit(chars.next().unwrap())?;
+    let rank1 = char_to_rank(chars.next().ok_or_else(|| "Unexpected end".to_string())?)?;
+    let suit1 = char_to_suit(chars.next().ok_or_else(|| "Unexpected end".to_string())?)?;
+    let rank2 = char_to_rank(chars.next().ok_or_else(|| "Unexpected end".to_string())?)?;
+    let suit2 = char_to_suit(chars.next().ok_or_else(|| "Unexpected end".to_string())?)?;
     if rank1 < rank2 {
         return Err(format!(
             "The first rank must be equal or higher than the second rank: {combo}"
@@ -243,13 +324,13 @@ fn parse_simple_singleton(combo: &str) -> Result<(u8, u8, Suitedness), String> {
 #[inline]
 fn parse_compound_singleton(combo: &str) -> Result<(u8, u8, Suitedness), String> {
     let mut chars = combo.chars();
-    let rank1 = char_to_rank(chars.next().unwrap())?;
-    let rank2 = char_to_rank(chars.next().unwrap())?;
-    let suitedness = chars.next().map_or(Suitedness::All, |c| match c {
-        's' => Suitedness::Suited,
-        'o' => Suitedness::Offsuit,
-        _ => panic!("parse_singleton: invalid suitedness: {combo}"),
-    });
+    let rank1 = char_to_rank(chars.next().ok_or_else(|| "Unexpected end".to_string())?)?;
+    let rank2 = char_to_rank(chars.next().ok_or_else(|| "Unexpected end".to_string())?)?;
+    let suitedness = chars.next().map_or(Ok(Suitedness::All), |c| match c {
+        's' => Ok(Suitedness::Suited),
+        'o' => Ok(Suitedness::Offsuit),
+        _ => Err(format!("Invalid suitedness: {combo}")),
+    })?;
     if rank1 < rank2 {
         return Err(format!(
             "The first rank must be equal or higher than the second rank: {combo}"
@@ -312,17 +393,68 @@ impl Range {
         }
     }
 
-    /// Creates a range from raw data.
+    /// Attempts to create a range from raw data.
     #[inline]
-    pub fn from_raw_data(data: &[f32]) -> Self {
-        Self {
-            data: data.try_into().unwrap(),
+    pub fn from_raw_data(data: &[f32]) -> Result<Self, String> {
+        if data.len() != 52 * 51 / 2 {
+            return Err(format!("Expected exactly {} elements", 52 * 51 / 2));
         }
+
+        for &weight in data {
+            check_weight(weight)?;
+        }
+
+        Ok(Self {
+            data: data.try_into().unwrap(),
+        })
     }
 
-    /// Creates a range from a set of sanitized range strings.
+    /// Obtains the raw data of the range.
     #[inline]
-    pub fn from_sanitized_ranges(ranges: &str) -> Result<Self, String> {
+    pub fn raw_data(&self) -> &[f32] {
+        &self.data
+    }
+
+    /// Attempts to create a range from a list of hands with their weights.
+    pub fn from_hands_weights(hands: &[(u8, u8)], weights: &[f32]) -> Result<Self, String> {
+        let mut range = Self::default();
+        for (&(card1, card2), &weight) in hands.iter().zip(weights.iter()) {
+            range.set_weight_by_cards(card1, card2, weight)?;
+        }
+        Ok(range)
+    }
+
+    /// Returns a list of all hands in this range and their associated weights.
+    ///
+    /// If there are no dead cards, pass `0` to `dead_cards_mask`.
+    pub fn get_hands_weights(&self, dead_cards_mask: u64) -> (Vec<(u8, u8)>, Vec<f32>) {
+        let mut hands = Vec::with_capacity(128);
+        let mut weights = Vec::with_capacity(128);
+
+        for card1 in 0..52 {
+            for card2 in card1 + 1..52 {
+                let hand_mask: u64 = (1 << card1) | (1 << card2);
+                let weight = self.get_weight_by_cards(card1, card2);
+                if weight > 0.0 && hand_mask & dead_cards_mask == 0 {
+                    hands.push((card1, card2));
+                    weights.push(weight);
+                }
+            }
+        }
+
+        hands.shrink_to_fit();
+        weights.shrink_to_fit();
+
+        (hands, weights)
+    }
+
+    /// Attempts to create a range from a sanitized range string.
+    ///
+    /// "Sanitized" means that the range string does not contain any invalid patterns and whitespace
+    /// characters. Therefore, this method can bypass the regular expression processing. If you want
+    /// to create a range from a regular string, use `parse::<Range>()` instead.
+    #[inline]
+    pub fn from_sanitized_str(ranges: &str) -> Result<Self, String> {
         let mut ranges = ranges.split(',').collect::<Vec<_>>();
 
         // remove last empty element if any
@@ -336,8 +468,14 @@ impl Range {
             let mut split = range.split(':');
             let range = split.next().unwrap();
 
-            let weight = split.next().map_or(1.0, |s| s.parse().unwrap());
+            let weight = split
+                .next()
+                .map_or(Ok(1.0), |s| s.parse::<f32>().map_err(|e| e.to_string()))?;
             check_weight(weight)?;
+
+            if split.next().is_some() {
+                return Err(format!("Invalid range: {range}"));
+            }
 
             if range.contains('-') {
                 result.update_with_dash_range(range, weight)?;
@@ -351,10 +489,16 @@ impl Range {
         Ok(result)
     }
 
-    /// Obtains the raw data of the range.
+    /// Clears the range.
     #[inline]
-    pub fn raw_data(&self) -> &[f32] {
-        &self.data
+    pub fn clear(&mut self) {
+        self.data.fill(0.0);
+    }
+
+    /// Returns whether the range is empty.
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.data.iter().all(|el| *el == 0.0)
     }
 
     /// Obtains the weight by card indices.
@@ -390,11 +534,12 @@ impl Range {
     pub fn set_weight_by_cards(&mut self, card1: u8, card2: u8, weight: f32) -> Result<(), String> {
         check_card(card1)?;
         check_card(card2)?;
+        check_weight(weight)?;
         self.data[card_pair_index(card1, card2)] = weight;
         Ok(())
     }
 
-    /// Sets the weight of a pair.
+    /// Sets the weight of a specified pair.
     #[inline]
     pub fn set_weight_pair(&mut self, rank: u8, weight: f32) -> Result<(), String> {
         check_rank(rank)?;
@@ -403,7 +548,7 @@ impl Range {
         Ok(())
     }
 
-    /// Sets the weight of a suited hand.
+    /// Sets the weight of a specified suited hand.
     #[inline]
     pub fn set_weight_suited(&mut self, rank1: u8, rank2: u8, weight: f32) -> Result<(), String> {
         check_rank(rank1)?;
@@ -418,7 +563,7 @@ impl Range {
         Ok(())
     }
 
-    /// Sets the weight of an offsuit hand.
+    /// Sets the weight of a specified offsuit hand.
     #[inline]
     pub fn set_weight_offsuit(&mut self, rank1: u8, rank2: u8, weight: f32) -> Result<(), String> {
         check_rank(rank1)?;
@@ -433,20 +578,7 @@ impl Range {
         Ok(())
     }
 
-    /// Clears the range.
-    #[inline]
-    pub fn clear(&mut self) {
-        self.data.fill(0.0);
-    }
-
-    /// Returns whether the range is empty.
-    #[inline]
-    pub fn is_empty(&self) -> bool {
-        self.data.iter().all(|el| *el == 0.0)
-    }
-
     /// Returns whether the two suits are isomorphic.
-    #[inline]
     pub(crate) fn is_suit_isomorphic(&self, suit1: u8, suit2: u8) -> bool {
         let replace_suit = |suit| {
             if suit == suit1 {
@@ -497,30 +629,6 @@ impl Range {
         }
     }
 
-    /// Returns a list of all hands in this range and their associated weights.
-    ///
-    /// If there are no dead cards, pass `0` to `dead_cards_mask`.
-    pub fn get_hands_weights(&self, dead_cards_mask: u64) -> (Vec<(u8, u8)>, Vec<f32>) {
-        let mut hands = Vec::with_capacity(128);
-        let mut weights = Vec::with_capacity(128);
-
-        for card1 in 0..52 {
-            for card2 in card1 + 1..52 {
-                let hand_mask: u64 = (1 << card1) | (1 << card2);
-                let weight = self.get_weight_by_cards(card1, card2);
-                if weight > 0.0 && hand_mask & dead_cards_mask == 0 {
-                    hands.push((card1, card2));
-                    weights.push(weight);
-                }
-            }
-        }
-
-        hands.shrink_to_fit();
-        weights.shrink_to_fit();
-
-        (hands, weights)
-    }
-
     #[inline]
     fn update_with_singleton(&mut self, combo: &str, weight: f32) -> Result<(), String> {
         let (rank1, rank2, suitedness) = parse_singleton(combo)?;
@@ -530,7 +638,6 @@ impl Range {
 
     #[inline]
     fn update_with_plus_range(&mut self, range: &str, weight: f32) -> Result<(), String> {
-        debug_assert!(range.ends_with('+'));
         let lowest_combo = &range[..range.len() - 1];
         let (rank1, rank2, suitedness) = parse_singleton(lowest_combo)?;
         let gap = rank1 - rank2;
@@ -551,7 +658,6 @@ impl Range {
     #[inline]
     fn update_with_dash_range(&mut self, range: &str, weight: f32) -> Result<(), String> {
         let combo_pair = range.split('-').collect::<Vec<_>>();
-        debug_assert!(combo_pair.len() == 2);
         let (rank11, rank12, suitedness) = parse_singleton(combo_pair[0])?;
         let (rank21, rank22, suitedness2) = parse_singleton(combo_pair[1])?;
         let gap = rank11 - rank12;
@@ -583,7 +689,6 @@ impl Range {
         }
     }
 
-    #[inline]
     fn pairs_strings(&self, result: &mut Vec<String>) {
         let mut start: Option<(u8, f32)> = None;
 
@@ -623,7 +728,6 @@ impl Range {
         }
     }
 
-    #[inline]
     fn nonpairs_strings(&self, result: &mut Vec<String>) {
         for rank1 in (1..13).rev() {
             if self.can_unsuit(rank1) {
@@ -650,7 +754,6 @@ impl Range {
         true
     }
 
-    #[inline]
     fn high_cards_strings(&self, result: &mut Vec<String>, rank1: u8, suitedness: Suitedness) {
         let rank1_char = rank_to_char(rank1).unwrap();
         let mut start: Option<(u8, f32)> = None;
@@ -698,7 +801,6 @@ impl Range {
         }
     }
 
-    #[inline]
     fn suit_specified_strings(&self, result: &mut Vec<String>) {
         // pairs
         for rank in (0..13).rev() {
@@ -777,7 +879,6 @@ impl Range {
 impl FromStr for Range {
     type Err = String;
 
-    #[inline]
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let s = TRIM_REGEX.replace_all(s, "$1").trim().to_string();
         let mut ranges = s.split(',').collect::<Vec<_>>();
