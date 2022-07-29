@@ -162,8 +162,9 @@ pub(crate) fn encode_unsigned_slice(dst: &mut [u16], slice: &[f32]) -> f32 {
     let scale = slice_nonnegative_max(slice);
     let scale_nonzero = if scale == 0.0 { 1.0 } else { scale };
     let encoder = u16::MAX as f32 / scale_nonzero;
+    // note: 0.49999997 + 0.49999997 = 0.99999994 < 1.0 | 0.5 + 0.49999997 = 1.0
     dst.iter_mut().zip(slice).for_each(|(d, s)| {
-        *d = unsafe { (s * encoder).to_int_unchecked::<i32>() as u16 } // truncate
+        *d = unsafe { (s * encoder + 0.49999997).to_int_unchecked::<i32>() as u16 }
     });
     scale
 }
