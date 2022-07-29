@@ -41,7 +41,7 @@ enum Suitedness {
     Specific(u8, u8),
 }
 
-const COMBO_PAT: &str = r"(?:(?:[AKQJT2-9]{2}[os]?)|(?:(?:[AKQJT2-9][cdhs]){2}))";
+const COMBO_PAT: &str = r"(?:(?:[AaKkQqJjTt2-9]{2}[os]?)|(?:(?:[AaKkQqJjTt2-9][cdhs]){2}))";
 const WEIGHT_PAT: &str = r"(?:(?:[01](\.\d*)?)|(?:\.\d+))";
 
 static RANGE_REGEX: Lazy<Regex> = Lazy::new(|| {
@@ -136,11 +136,11 @@ fn indices_with_suitedness(rank1: u8, rank2: u8, suitedness: Suitedness) -> Vec<
 #[inline]
 fn char_to_rank(c: char) -> Result<u8, String> {
     match c {
-        'A' => Ok(12),
-        'K' => Ok(11),
-        'Q' => Ok(10),
-        'J' => Ok(9),
-        'T' => Ok(8),
+        'A' | 'a' => Ok(12),
+        'K' | 'k' => Ok(11),
+        'Q' | 'q' => Ok(10),
+        'J' | 'j' => Ok(9),
+        'T' | 't' => Ok(8),
         '2'..='9' => Ok(c as u8 - b'2'),
         _ => Err(format!("Expected rank character: {c}")),
     }
@@ -938,13 +938,13 @@ mod tests {
     fn range_regex() {
         let tests = [
             ("AK", Some(("AK", None))),
+            ("ak", Some(("ak", None))),
             ("K9s:.67", Some(("K9s", Some(".67")))),
             ("88+:1.", Some(("88+", Some("1.")))),
             ("98s-65s:0.25", Some(("98s-65s", Some("0.25")))),
             ("AcKh", Some(("AcKh", None))),
             ("8h8s+:.67", Some(("8h8s+", Some(".67")))),
             ("9d8d-6d5d:0.25", Some(("9d8d-6d5d", Some("0.25")))),
-            ("ak", None),
             ("AKQ", None),
             ("AK+-AJ", None),
             ("K9s.67", None),
