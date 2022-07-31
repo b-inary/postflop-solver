@@ -383,6 +383,15 @@ fn solve_recursive<T: Game>(
     }
 }
 
+#[inline]
+fn max(x: f32, y: f32) -> f32 {
+    if x > y {
+        x
+    } else {
+        y
+    }
+}
+
 /// Computes the strategy by regret-mathcing algorithm.
 #[cfg(feature = "custom-alloc")]
 #[inline]
@@ -390,7 +399,7 @@ fn regret_matching(regret: &[f32], num_actions: usize) -> Vec<f32, StackAlloc> {
     let mut strategy = regret.to_vec_in(StackAlloc);
     let row_size = strategy.len() / num_actions;
 
-    strategy.iter_mut().for_each(|el| *el = el.max(0.0));
+    strategy.iter_mut().for_each(|el| *el = max(*el, 0.0));
 
     let mut denom = vec::from_elem_in(0.0, row_size, StackAlloc);
     strategy.chunks_exact(row_size).for_each(|row| {
@@ -412,7 +421,7 @@ fn regret_matching(regret: &[f32], num_actions: usize) -> Vec<f32> {
     let mut strategy = regret.to_vec();
     let row_size = strategy.len() / num_actions;
 
-    strategy.iter_mut().for_each(|el| *el = el.max(0.0));
+    strategy.iter_mut().for_each(|el| *el = max(*el, 0.0));
 
     let mut denom = vec![0.0; row_size];
     strategy.chunks_exact(row_size).for_each(|row| {

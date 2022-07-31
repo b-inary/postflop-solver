@@ -29,11 +29,20 @@ pub(crate) fn for_each_child<T: GameNode, OP: Fn(usize) + Sync + Send>(node: &T,
     node.actions().into_iter().for_each(op);
 }
 
+#[inline]
+fn max(x: f32, y: f32) -> f32 {
+    if x > y {
+        x
+    } else {
+        y
+    }
+}
+
 /// Obtains the maximum absolute value of the given slice.
 #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
 fn slice_absolute_max(slice: &[f32]) -> f32 {
     if slice.len() < 32 {
-        slice.iter().fold(0.0, |a, x| a.max(x.abs()))
+        slice.iter().fold(0.0, |a, x| max(a, x.abs()))
     } else {
         use std::arch::wasm32::*;
 
@@ -58,12 +67,18 @@ fn slice_absolute_max(slice: &[f32]) -> f32 {
             tmp[0] = f32x4_max(tmp[0], tmp[1]);
             tmp[2] = f32x4_max(tmp[2], tmp[3]);
             tmp[0] = f32x4_max(tmp[0], tmp[2]);
-            let tmpmax = f32x4_extract_lane::<0>(tmp[0])
-                .max(f32x4_extract_lane::<1>(tmp[0]))
-                .max(f32x4_extract_lane::<2>(tmp[0]))
-                .max(f32x4_extract_lane::<3>(tmp[0]));
+            let tmpmax = max(
+                max(
+                    f32x4_extract_lane::<0>(tmp[0]),
+                    f32x4_extract_lane::<1>(tmp[0]),
+                ),
+                max(
+                    f32x4_extract_lane::<2>(tmp[0]),
+                    f32x4_extract_lane::<3>(tmp[0]),
+                ),
+            );
 
-            iter.remainder().iter().fold(tmpmax, |a, x| a.max(x.abs()))
+            iter.remainder().iter().fold(tmpmax, |a, x| max(a, x.abs()))
         }
     }
 }
@@ -72,18 +87,18 @@ fn slice_absolute_max(slice: &[f32]) -> f32 {
 #[cfg(not(all(target_arch = "wasm32", target_feature = "simd128")))]
 fn slice_absolute_max(slice: &[f32]) -> f32 {
     if slice.len() < 32 {
-        slice.iter().fold(0.0, |a, x| a.max(x.abs()))
+        slice.iter().fold(0.0, |a, x| max(a, x.abs()))
     } else {
         let mut tmp: [f32; 16] = slice[..16].try_into().unwrap();
         tmp.iter_mut().for_each(|x| *x = x.abs());
         let mut iter = slice[16..].chunks_exact(16);
         for chunk in iter.by_ref() {
             for i in 0..16 {
-                tmp[i] = tmp[i].max(chunk[i].abs());
+                tmp[i] = max(tmp[i], chunk[i].abs());
             }
         }
-        let tmpmax = tmp.iter().fold(0.0f32, |a, &x| a.max(x));
-        iter.remainder().iter().fold(tmpmax, |a, x| a.max(x.abs()))
+        let tmpmax = tmp.iter().fold(0.0f32, |a, &x| max(a, x));
+        iter.remainder().iter().fold(tmpmax, |a, x| max(a, x.abs()))
     }
 }
 
@@ -91,7 +106,7 @@ fn slice_absolute_max(slice: &[f32]) -> f32 {
 #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
 fn slice_nonnegative_max(slice: &[f32]) -> f32 {
     if slice.len() < 32 {
-        slice.iter().fold(0.0, |a, &x| a.max(x))
+        slice.iter().fold(0.0, |a, &x| max(a, x))
     } else {
         use std::arch::wasm32::*;
 
@@ -116,12 +131,18 @@ fn slice_nonnegative_max(slice: &[f32]) -> f32 {
             tmp[0] = f32x4_max(tmp[0], tmp[1]);
             tmp[2] = f32x4_max(tmp[2], tmp[3]);
             tmp[0] = f32x4_max(tmp[0], tmp[2]);
-            let tmpmax = f32x4_extract_lane::<0>(tmp[0])
-                .max(f32x4_extract_lane::<1>(tmp[0]))
-                .max(f32x4_extract_lane::<2>(tmp[0]))
-                .max(f32x4_extract_lane::<3>(tmp[0]));
+            let tmpmax = max(
+                max(
+                    f32x4_extract_lane::<0>(tmp[0]),
+                    f32x4_extract_lane::<1>(tmp[0]),
+                ),
+                max(
+                    f32x4_extract_lane::<2>(tmp[0]),
+                    f32x4_extract_lane::<3>(tmp[0]),
+                ),
+            );
 
-            iter.remainder().iter().fold(tmpmax, |a, &x| a.max(x))
+            iter.remainder().iter().fold(tmpmax, |a, &x| max(a, x))
         }
     }
 }
@@ -130,17 +151,17 @@ fn slice_nonnegative_max(slice: &[f32]) -> f32 {
 #[cfg(not(all(target_arch = "wasm32", target_feature = "simd128")))]
 fn slice_nonnegative_max(slice: &[f32]) -> f32 {
     if slice.len() < 32 {
-        slice.iter().fold(0.0, |a, &x| a.max(x))
+        slice.iter().fold(0.0, |a, &x| max(a, x))
     } else {
         let mut tmp: [f32; 16] = slice[..16].try_into().unwrap();
         let mut iter = slice[16..].chunks_exact(16);
         for chunk in iter.by_ref() {
             for i in 0..16 {
-                tmp[i] = tmp[i].max(chunk[i]);
+                tmp[i] = max(tmp[i], chunk[i]);
             }
         }
-        let tmpmax = tmp.iter().fold(0.0f32, |a, &x| a.max(x));
-        iter.remainder().iter().fold(tmpmax, |a, &x| a.max(x))
+        let tmpmax = tmp.iter().fold(0.0f32, |a, &x| max(a, x));
+        iter.remainder().iter().fold(tmpmax, |a, &x| max(a, x))
     }
 }
 
@@ -566,8 +587,8 @@ fn compute_best_cfv_recursive<T: Game>(
         result.fill(f32::MIN);
         let cfv_actions = cfv_actions.lock();
         cfv_actions.chunks_exact(num_hands).for_each(|row| {
-            result.iter_mut().zip(row).for_each(|(l, r)| {
-                *l = l.max(*r);
+            result.iter_mut().zip(row).for_each(|(r, v)| {
+                *r = max(*r, *v);
             });
         });
     }
