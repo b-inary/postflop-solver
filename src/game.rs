@@ -1223,7 +1223,7 @@ impl PostFlopGame {
                 PLAYER_TERMINAL_FLAG
             };
 
-            node.actions.reserve(49);
+            node.actions.reserve(48);
             node.children.reserve(48);
 
             for card in 0..52 {
