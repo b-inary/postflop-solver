@@ -18,7 +18,7 @@ pub(crate) fn for_each_child<T: GameNode, OP: Fn(usize) + Sync + Send>(node: &T,
     if node.enable_parallelization() {
         node.actions().into_par_iter().for_each(op);
     } else {
-        node.actions().into_iter().for_each(op);
+        node.actions().for_each(op);
     }
 }
 
@@ -26,7 +26,7 @@ pub(crate) fn for_each_child<T: GameNode, OP: Fn(usize) + Sync + Send>(node: &T,
 #[cfg(not(feature = "rayon"))]
 #[inline]
 pub(crate) fn for_each_child<T: GameNode, OP: Fn(usize) + Sync + Send>(node: &T, op: OP) {
-    node.actions().into_iter().for_each(op);
+    node.actions().for_each(op);
 }
 
 #[inline]
