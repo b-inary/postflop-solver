@@ -53,7 +53,6 @@ pub fn solve<T: Game>(
     }
 
     let mut root = game.root();
-    let reach = [game.initial_weight(0), game.initial_weight(1)];
 
     let mut exploitability = compute_exploitability(game);
 
@@ -78,8 +77,7 @@ pub fn solve<T: Game>(
                 game,
                 &mut root,
                 player,
-                reach[player],
-                reach[player ^ 1],
+                game.initial_weight(player ^ 1),
                 &params,
             );
         }
@@ -117,7 +115,6 @@ pub fn solve_step<T: Game>(game: &T, current_iteration: u32) {
     }
 
     let mut root = game.root();
-    let reach = [game.initial_weight(0), game.initial_weight(1)];
     let params = DiscountParams::new(current_iteration);
 
     // alternating updates
@@ -128,8 +125,7 @@ pub fn solve_step<T: Game>(game: &T, current_iteration: u32) {
             game,
             &mut root,
             player,
-            reach[player],
-            reach[player ^ 1],
+            game.initial_weight(player ^ 1),
             &params,
         );
     }
@@ -141,7 +137,6 @@ fn solve_recursive<T: Game>(
     game: &T,
     node: &mut T::Node,
     player: usize,
-    reach: &[f32],
     cfreach: &[f32],
     params: &DiscountParams,
 ) {
@@ -157,7 +152,7 @@ fn solve_recursive<T: Game>(
     // simply recurse when the number of actions is one
     if num_actions == 1 && !node.is_chance() {
         let child = &mut node.play(0);
-        solve_recursive(result, game, child, player, reach, cfreach, params);
+        solve_recursive(result, game, child, player, cfreach, params);
         return;
     }
 
@@ -189,7 +184,6 @@ fn solve_recursive<T: Game>(
                 game,
                 &mut node.play(action),
                 player,
-                reach,
                 &cfreach,
                 params,
             );
@@ -251,19 +245,6 @@ fn solve_recursive<T: Game>(
             regret_matching(node.cum_regret(), num_actions)
         };
 
-        // update the reach probabilities
-        #[cfg(feature = "custom-alloc")]
-        let mut reach_actions = {
-            let mut tmp = Vec::with_capacity_in(strategy.len(), StackAlloc);
-            tmp.extend_from_slice(&strategy);
-            tmp
-        };
-        #[cfg(not(feature = "custom-alloc"))]
-        let mut reach_actions = strategy.clone();
-        reach_actions.chunks_exact_mut(num_hands).for_each(|row| {
-            mul_slice(row, reach);
-        });
-
         // compute the counterfactual values of each action
         for_each_child(node, |action| {
             solve_recursive(
@@ -271,7 +252,6 @@ fn solve_recursive<T: Game>(
                 game,
                 &mut node.play(action),
                 player,
-                row(&reach_actions, action, num_hands),
                 cfreach,
                 params,
             );
@@ -369,7 +349,6 @@ fn solve_recursive<T: Game>(
                 game,
                 &mut node.play(action),
                 player,
-                reach,
                 row(&cfreach_actions, action, row_size),
                 params,
             );
