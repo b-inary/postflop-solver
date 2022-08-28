@@ -155,8 +155,14 @@ pub struct GameConfig {
     /// Bet size candidates of each player in turn.
     pub turn_bet_sizes: [BetSizeCandidates; 2],
 
+    /// Bet size candidates of each player for donk situations on the turn.
+    pub turn_donk_sizes: [BetSizeCandidates; 2],
+
     /// Bet size candidates of each player in river.
     pub river_bet_sizes: [BetSizeCandidates; 2],
+
+    /// Bet size candidates of each player for donk situations on the river.
+    pub river_donk_sizes: [BetSizeCandidates; 2],
 
     /// Add all-in action when SPR is below this value (set `0.0` to disable).
     pub add_all_in_threshold: f32,
@@ -206,6 +212,7 @@ struct BuildTreeInfo<'a> {
     num_storage_elements: &'a AtomicU64,
     stack_size: [usize; 2],
     max_stack_size: &'a [AtomicUsize; 2],
+    last_aggressor: i32
 }
 
 const PLAYER_OOP: u16 = 0;
@@ -1025,6 +1032,7 @@ impl PostFlopGame {
             num_storage_elements: &num_storage_elements,
             stack_size: [0, 0],
             max_stack_size: &max_stack_size,
+            last_aggressor: -1
         };
 
         let mut root = self.root();
@@ -1130,6 +1138,7 @@ impl PostFlopGame {
             }
 
             for (action, child) in node.actions.iter().zip(node.children.iter()) {
+                
                 self.build_tree_recursive(
                     &mut child.lock(),
                     &BuildTreeInfo {
@@ -1170,17 +1179,31 @@ impl PostFlopGame {
                     }
                     _ => {}
                 }
-
-                self.build_tree_recursive(
-                    &mut child.lock(),
-                    &BuildTreeInfo {
-                        last_action: *action,
-                        last_bet,
-                        allin_flag,
-                        stack_size,
-                        ..*info
-                    },
-                )
+                //if the current nodes player is calling, this means that the last aggressor must be the other player
+                if matches!(action, Action::Call){
+                    self.build_tree_recursive(
+                        &mut child.lock(),
+                        &BuildTreeInfo {
+                            last_action: *action,
+                            last_bet,
+                            allin_flag,
+                            stack_size,
+                            last_aggressor: (node.player ^ 1) as i32,
+                            ..*info
+                        },
+                    )
+                }else{
+                    self.build_tree_recursive(
+                        &mut child.lock(),
+                        &BuildTreeInfo {
+                            last_action: *action,
+                            last_bet,
+                            allin_flag,
+                            stack_size,
+                            ..*info
+                        },
+                    )
+                }
             }
         }
     }
@@ -1266,8 +1289,21 @@ impl PostFlopGame {
 
         let (candidates, is_river) = if node.turn == NOT_DEALT {
             (&self.config.flop_bet_sizes, false)
+
+        }else if node.river == NOT_DEALT && matches!(
+            info.last_action,
+            Action::Chance(_)
+        ) && player == PLAYER_OOP && info.last_aggressor == player_opponent as i32{
+            //Turn sizings for the oop player if they were not the last aggressor, also called a donk bet.
+            (&self.config.turn_donk_sizes, false)
         } else if node.river == NOT_DEALT {
             (&self.config.turn_bet_sizes, false)
+        } else if matches!(
+            info.last_action,
+            Action::Chance(_)
+        ) && player == PLAYER_OOP && info.last_aggressor == player_opponent as i32 {
+            //Turn sizings for the oop player if they were not the last aggressor, also called a donk bet.
+            (&self.config.river_donk_sizes, true)
         } else {
             (&self.config.river_bet_sizes, true)
         };
@@ -2235,6 +2271,8 @@ impl Default for GameConfig {
             effective_stack: 0,
             range: Default::default(),
             flop_bet_sizes: Default::default(),
+            turn_donk_sizes: Default::default(),
+            river_donk_sizes: Default::default(),
             turn_bet_sizes: Default::default(),
             river_bet_sizes: Default::default(),
             add_all_in_threshold: 0.0,
