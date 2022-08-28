@@ -123,6 +123,8 @@ unsafe impl Sync for PostFlopNode {}
 ///     flop_bet_sizes: [bet_sizes.clone(), bet_sizes.clone()],
 ///     turn_bet_sizes: [bet_sizes.clone(), bet_sizes.clone()],
 ///     river_bet_sizes: [bet_sizes.clone(), bet_sizes.clone()],
+///     turn_donk_sizes: [bet_sizes.clone(), bet_sizes.clone()],
+///    river_donk_sizes: [bet_sizes.clone(), bet_sizes.clone()],
 ///     add_all_in_threshold: 1.2,
 ///     force_all_in_threshold: 0.1,
 ///     adjust_last_two_bet_sizes: true,
