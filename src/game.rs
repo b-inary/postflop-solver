@@ -112,6 +112,7 @@ unsafe impl Sync for PostFlopNode {}
 /// let oop_range = "66+,A8s+,A5s-A4s,AJo+,K9s+,KQo,QTs+,JTs,96s+,85s+,75s+,65s,54s";
 /// let ip_range = "QQ-22,AQs-A2s,ATo+,K5s+,KJo+,Q8s+,J8s+,T7s+,96s+,86s+,75s+,64s+,53s+";
 /// let bet_sizes = BetSizeCandidates::try_from(("50%", "50%")).unwrap();
+/// let donk_sizes = DonkSizeCandidates::try_from("50%, 150%").unwrap();
 ///
 /// let config = GameConfig {
 ///     flop: flop_from_str("Td9d6h").unwrap(),
@@ -123,8 +124,8 @@ unsafe impl Sync for PostFlopNode {}
 ///     flop_bet_sizes: [bet_sizes.clone(), bet_sizes.clone()],
 ///     turn_bet_sizes: [bet_sizes.clone(), bet_sizes.clone()],
 ///     river_bet_sizes: [bet_sizes.clone(), bet_sizes.clone()],
-///     turn_donk_sizes: [bet_sizes.clone(), bet_sizes.clone()],
-///    river_donk_sizes: [bet_sizes.clone(), bet_sizes.clone()],
+///     turn_donk_sizes: Some(donk_sizes.clone()),
+///     river_donk_sizes: Some(donk_sizes.clone()),
 ///     add_all_in_threshold: 1.2,
 ///     force_all_in_threshold: 0.1,
 ///     adjust_last_two_bet_sizes: true,
@@ -154,17 +155,17 @@ pub struct GameConfig {
     /// Bet size candidates of each player in flop.
     pub flop_bet_sizes: [BetSizeCandidates; 2],
 
+    /// Donk sizings for the turn, (set None to disable).
+    pub turn_donk_sizes: Option<DonkSizeCandidates>,
+
     /// Bet size candidates of each player in turn.
     pub turn_bet_sizes: [BetSizeCandidates; 2],
 
-    /// Bet size candidates of each player for donk situations on the turn.
-    pub turn_donk_sizes: [BetSizeCandidates; 2],
+    //Donk Sizings for the River, (set None to disable).
+    pub river_donk_sizes: Option<DonkSizeCandidates>,
 
     /// Bet size candidates of each player in river.
     pub river_bet_sizes: [BetSizeCandidates; 2],
-
-    /// Bet size candidates of each player for donk situations on the river.
-    pub river_donk_sizes: [BetSizeCandidates; 2],
 
     /// Add all-in action when SPR is below this value (set `0.0` to disable).
     pub add_all_in_threshold: f32,
@@ -1166,13 +1167,18 @@ impl PostFlopGame {
             for (action, child) in node.actions.iter().zip(node.children.iter()) {
                 let mut last_bet = info.last_bet;
                 let mut allin_flag = info.allin_flag;
+                let mut last_aggressor: i32 = info.last_aggressor;
 
                 match *action {
+                    Action::Check => {
+                        last_aggressor = -1;
+                    }
                     Action::Call => {
                         last_bet[node.player as usize] = last_bet[node.player as usize ^ 1];
                     }
                     Action::Bet(size) | Action::Raise(size) => {
                         last_bet[node.player as usize] = size;
+                        last_aggressor = node.player as i32;
                     }
                     Action::AllIn(size) => {
                         last_bet[node.player as usize] = size;
@@ -1180,31 +1186,17 @@ impl PostFlopGame {
                     }
                     _ => {}
                 }
-                //if the current nodes player is calling, this means that the last aggressor must be the other player
-                if matches!(action, Action::Call) {
-                    self.build_tree_recursive(
-                        &mut child.lock(),
-                        &BuildTreeInfo {
-                            last_action: *action,
-                            last_bet,
-                            allin_flag,
-                            stack_size,
-                            last_aggressor: (node.player ^ 1) as i32,
-                            ..*info
-                        },
-                    )
-                } else {
-                    self.build_tree_recursive(
-                        &mut child.lock(),
-                        &BuildTreeInfo {
-                            last_action: *action,
-                            last_bet,
-                            allin_flag,
-                            stack_size,
-                            ..*info
-                        },
-                    )
-                }
+                self.build_tree_recursive(
+                    &mut child.lock(),
+                    &BuildTreeInfo {
+                        last_action: *action,
+                        last_bet,
+                        allin_flag,
+                        stack_size,
+                        last_aggressor,
+                        ..*info
+                    },
+                )
             }
         }
     }
@@ -1288,23 +1280,27 @@ impl PostFlopGame {
         let max_bet = self.config.effective_stack - node.amount + player_bet;
         let min_bet = (opponent_bet + bet_diff).clamp(1, max_bet);
 
+        let donk_candidates = if node.river == NOT_DEALT
+            && matches!(info.last_action, Action::Chance(_))
+            && self.config.river_donk_sizes.is_some()
+            && info.last_aggressor == player_opponent as i32
+        {
+            //Turn sizings for the oop player if they were not the last aggressor, also called a donk bet.
+            &self.config.turn_donk_sizes
+        } else if matches!(info.last_action, Action::Chance(_))
+            && self.config.river_donk_sizes.is_some()
+            && info.last_aggressor == player_opponent as i32
+        {
+            //Turn sizings for the oop player if they were not the last aggressor, also called a donk bet.
+            &self.config.river_donk_sizes
+        } else {
+            &None
+        };
+
         let (candidates, is_river) = if node.turn == NOT_DEALT {
             (&self.config.flop_bet_sizes, false)
-        } else if node.river == NOT_DEALT
-            && matches!(info.last_action, Action::Chance(_))
-            && player == PLAYER_OOP
-            && info.last_aggressor == player_opponent as i32
-        {
-            //Turn sizings for the oop player if they were not the last aggressor, also called a donk bet.
-            (&self.config.turn_donk_sizes, false)
         } else if node.river == NOT_DEALT {
             (&self.config.turn_bet_sizes, false)
-        } else if matches!(info.last_action, Action::Chance(_))
-            && player == PLAYER_OOP
-            && info.last_aggressor == player_opponent as i32
-        {
-            //Turn sizings for the oop player if they were not the last aggressor, also called a donk bet.
-            (&self.config.river_donk_sizes, true)
         } else {
             (&self.config.river_bet_sizes, true)
         };
@@ -1323,7 +1319,27 @@ impl PostFlopGame {
 
         let mut actions = Vec::new();
 
-        if matches!(
+        if donk_candidates.is_some()
+            && matches!(info.last_action, Action::Chance(_))
+            && info.last_aggressor == player_opponent as i32
+        {
+            actions.push((Action::Check, player_after_check));
+
+            match donk_candidates {
+                Some(donk_sizes) => {
+                    for donk_size in &donk_sizes.donk {
+                        match donk_size {
+                            BetSize::PotRelative(ratio) => {
+                                let size = (pot as f32 * ratio).round() as i32;
+                                actions.push((Action::Bet(size), player_opponent));
+                            }
+                            BetSize::LastBetRelative(_) => panic!("unexpected bet size"),
+                        }
+                    }
+                }
+                None => println!("Donk sizes are none, they should not be!"),
+            }
+        } else if matches!(
             info.last_action,
             Action::None | Action::Check | Action::Chance(_)
         ) {
@@ -2272,9 +2288,9 @@ impl Default for GameConfig {
             effective_stack: 0,
             range: Default::default(),
             flop_bet_sizes: Default::default(),
-            turn_donk_sizes: Default::default(),
-            river_donk_sizes: Default::default(),
+            turn_donk_sizes: None,
             turn_bet_sizes: Default::default(),
+            river_donk_sizes: None,
             river_bet_sizes: Default::default(),
             add_all_in_threshold: 0.0,
             force_all_in_threshold: 0.0,
@@ -2478,6 +2494,7 @@ mod tests {
     use super::*;
     use crate::solver::*;
 
+    
     #[cfg(feature = "bincode")]
     use std::fs::File;
     #[cfg(feature = "bincode")]
@@ -2745,5 +2762,82 @@ mod tests {
         // verified by PioSOLVER Free
         assert!((root_equity - 0.55347).abs() < 1e-5);
         assert!((root_ev - 105.11).abs() < 0.2);
+    }
+
+    #[test]
+    fn donk_sizes() {
+        use crate::Action::Bet;
+        let oop_range = "88+,A8s+,A5s-A2s:0.5,AJo+,ATo:0.75,K9s+,KQo,KJo:0.75,KTo:0.25,Q9s+,QJo:0.5,J8s+,JTo:0.25,T8s+,T7s:0.45,97s+,96s:0.45,87s,86s:0.75,85s:0.45,75s+:0.75,74s:0.45,65s:0.75,64s:0.5,63s:0.45,54s:0.75,53s:0.5,52s:0.45,43s:0.5,42s:0.45,32s:0.45";
+        let ip_range = "AA:0.25,99-22,AJs-A2s,AQo-A8o,K2s+,K9o+,Q2s+,Q9o+,J6s+,J9o+,T6s+,T9o,96s+,95s:0.5,98o,86s+,85s:0.5,75s+,74s:0.5,64s+,63s:0.5,54s,53s:0.5,43s";
+
+        let donk_sizes = DonkSizeCandidates::try_from("50%").unwrap();
+        let config = GameConfig {
+            flop: flop_from_str("Td9d6h").unwrap(),
+            starting_pot: 60,
+            effective_stack: 970,
+            range: [oop_range.parse().unwrap(), ip_range.parse().unwrap()],
+            flop_bet_sizes: [
+                ("52%", "45%").try_into().unwrap(),
+                ("52%", "45%").try_into().unwrap(),
+            ],
+            turn_bet_sizes: [
+                ("55%", "45%").try_into().unwrap(),
+                ("55%", "45%").try_into().unwrap(),
+            ],
+            river_bet_sizes: [
+                ("70%", "45%").try_into().unwrap(),
+                ("70%", "45%").try_into().unwrap(),
+            ],
+            turn_donk_sizes: Some(donk_sizes.clone()),
+            river_donk_sizes: Some(donk_sizes.clone()),
+            ..Default::default()
+        };
+        let mut game = PostFlopGame::with_config(&config).unwrap();
+        println!(
+            "memory usage: {:.2}GB",
+            game.memory_usage().0 as f64 / (1024.0 * 1024.0 * 1024.0)
+        );
+        game.allocate_memory(false);
+        
+        game.play(0);
+        
+        game.play(1);
+        
+        game.play(1);
+        
+        assert!(game.is_chance_node());
+
+        let card = card_from_str("7s").unwrap();
+        assert!(game.possible_cards() & (1 << card) != 0);
+
+        game.play(card as usize);
+
+        let actions = game.available_actions();
+
+        println!("Pot Size: {:?}", game.node().amount);
+        println!("Available actions: {:?}", actions); // [Fold, Call, Raise(300)]
+
+        assert!(matches!(game.available_actions()[1], Bet(61)));
+
+        game.play(1);
+
+        game.play(2);
+        game.play(1);
+
+        assert!(game.is_chance_node());
+
+        let card = card_from_str("3s").unwrap();
+        assert!(game.possible_cards() & (1 << card) != 0);
+
+        game.play(card as usize);
+
+        let actions = game.available_actions();
+
+        println!("Pot Size: {:?}", game.node().amount);
+        println!("Available actions: {:?}", actions); // [Fold, Call, Raise(300)]
+
+        assert!(matches!(game.available_actions()[1], Bet(232)));
+
+
     }
 }
