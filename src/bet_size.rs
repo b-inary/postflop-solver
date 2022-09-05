@@ -41,7 +41,7 @@ pub struct BetSizeCandidates {
 /// let donk_size = DonkSizeCandidates::try_from("50%, 150%").unwrap();
 ///
 /// assert_eq!(donk_size.donk, vec![PotRelative(0.5), PotRelative(1.5)]);
-/// 
+///
 /// ```
 #[derive(Debug, Clone, Default, PartialEq)]
 #[cfg_attr(feature = "bincode", derive(Decode, Encode))]
@@ -73,7 +73,7 @@ impl TryFrom<&str> for DonkSizeCandidates {
     /// let donk_size = DonkSizeCandidates::try_from("50%, 150%").unwrap();
     ///
     /// assert_eq!(donk_size.donk, vec![PotRelative(0.5), PotRelative(1.5)]);
-    /// 
+    ///
     /// ```
     fn try_from(donk_str: &str) -> Result<Self, Self::Error> {
         let donk_string = TRIM_REGEX.replace_all(donk_str, "$1").trim().to_string();

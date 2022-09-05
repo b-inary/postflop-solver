@@ -2494,7 +2494,6 @@ mod tests {
     use super::*;
     use crate::solver::*;
 
-    
     #[cfg(feature = "bincode")]
     use std::fs::File;
     #[cfg(feature = "bincode")]
@@ -2798,13 +2797,13 @@ mod tests {
             game.memory_usage().0 as f64 / (1024.0 * 1024.0 * 1024.0)
         );
         game.allocate_memory(false);
-        
+
         game.play(0);
-        
+
         game.play(1);
-        
+
         game.play(1);
-        
+
         assert!(game.is_chance_node());
 
         let card = card_from_str("7s").unwrap();
@@ -2837,7 +2836,5 @@ mod tests {
         println!("Available actions: {:?}", actions); // [Fold, Call, Raise(300)]
 
         assert!(matches!(game.available_actions()[1], Bet(232)));
-
-
     }
 }

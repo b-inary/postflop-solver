@@ -9,7 +9,7 @@
 //! let ip_range = "QQ-22,AQs-A2s,ATo+,K5s+,KJo+,Q8s+,J8s+,T7s+,96s+,86s+,75s+,64s+,53s+";
 //! let bet_sizes = BetSizeCandidates::try_from(("50%", "50%")).unwrap();
 //! let donk_sizes = DonkSizeCandidates::try_from("50%, 150%").unwrap();
-//! 
+//!
 //! let config = GameConfig {
 //!     flop: flop_from_str("Td9d6h").unwrap(),
 //!     turn: card_from_str("Qh").unwrap(),
