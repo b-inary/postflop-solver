@@ -136,7 +136,7 @@
 //! [Discounted CFR]: https://arxiv.org/abs/1809.04040
 //!
 //! # Crate features
-//! - `bincode`: Uses [bincode] crate (2.0.0-rc.1) to serialize and deserialize the `PostFlopGame` struct.
+//! - `bincode`: Uses [bincode] crate (2.0.0-rc.2) to serialize and deserialize the `PostFlopGame` struct.
 //!   Disabled by default.
 //! - `custom-alloc`: Uses custom memory allocator in solving process (only available in nightly Rust).
 //!   It significantly reduces the number of calls of the default allocator,
