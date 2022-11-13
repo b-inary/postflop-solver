@@ -31,16 +31,17 @@ pub struct BetSizeCandidates {
     /// Bet size candidates for raise.
     pub raise: Vec<BetSize>,
 }
-/// Bet size candidates for the first bet and raise.
+/// Bet size candidates for the donk bet, i.e., the bet action by OOP in a situation where IP was
+/// the last aggressor on the previous street.
 ///
 /// # Examples
 /// ```
 /// use postflop_solver::DonkSizeCandidates;
-/// use postflop_solver::BetSize::{PotRelative, LastBetRelative};
+/// use postflop_solver::BetSize::PotRelative;
 ///
-/// let donk_size = DonkSizeCandidates::try_from("50%, 150%").unwrap();
+/// let donk_size = DonkSizeCandidates::try_from("0.5, 75%").unwrap();
 ///
-/// assert_eq!(donk_size.donk, vec![PotRelative(0.5), PotRelative(1.5)]);
+/// assert_eq!(donk_size.donk, vec![PotRelative(0.5), PotRelative(0.75)]);
 ///
 /// ```
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -58,41 +59,6 @@ pub enum BetSize {
 
     /// Bet size relative to the last bet size. This is only valid for raise actions.
     LastBetRelative(f32),
-}
-
-impl TryFrom<&str> for DonkSizeCandidates {
-    type Error = String;
-
-    /// Bet size candidates for the first bet and raise.
-    ///
-    /// # Examples
-    /// ```
-    /// use postflop_solver::DonkSizeCandidates;
-    /// use postflop_solver::BetSize::{PotRelative, LastBetRelative};
-    ///
-    /// let donk_size = DonkSizeCandidates::try_from("50%, 150%").unwrap();
-    ///
-    /// assert_eq!(donk_size.donk, vec![PotRelative(0.5), PotRelative(1.5)]);
-    ///
-    /// ```
-    fn try_from(donk_str: &str) -> Result<Self, Self::Error> {
-        let donk_string = TRIM_REGEX.replace_all(donk_str, "$1").trim().to_string();
-        let mut donk_sizes = donk_string.split(',').collect::<Vec<_>>();
-
-        if donk_sizes.last().unwrap().is_empty() {
-            donk_sizes.pop();
-        }
-
-        let mut donk = Vec::new();
-
-        for donk_size in donk_sizes {
-            donk.push(bet_size_from_str(donk_size, false)?);
-        }
-
-        donk.sort_unstable_by(|l, r| l.partial_cmp(r).unwrap());
-
-        Ok(DonkSizeCandidates { donk })
-    }
 }
 
 impl TryFrom<(&str, &str)> for BetSizeCandidates {
@@ -140,6 +106,41 @@ impl TryFrom<(&str, &str)> for BetSizeCandidates {
         raise.sort_unstable_by(|l, r| l.partial_cmp(r).unwrap());
 
         Ok(BetSizeCandidates { bet, raise })
+    }
+}
+
+impl TryFrom<&str> for DonkSizeCandidates {
+    type Error = String;
+
+    /// Attempts to convert comma-separated strings into bet sizes.
+    ///
+    /// # Examples
+    /// ```
+    /// use postflop_solver::DonkSizeCandidates;
+    /// use postflop_solver::BetSize::PotRelative;
+    ///
+    /// let donk_size = DonkSizeCandidates::try_from("0.5, 75%").unwrap();
+    ///
+    /// assert_eq!(donk_size.donk, vec![PotRelative(0.5), PotRelative(0.75)]);
+    ///
+    /// ```
+    fn try_from(donk_str: &str) -> Result<Self, Self::Error> {
+        let donk_string = TRIM_REGEX.replace_all(donk_str, "$1").trim().to_string();
+        let mut donk_sizes = donk_string.split(',').collect::<Vec<_>>();
+
+        if donk_sizes.last().unwrap().is_empty() {
+            donk_sizes.pop();
+        }
+
+        let mut donk = Vec::new();
+
+        for donk_size in donk_sizes {
+            donk.push(bet_size_from_str(donk_size, false)?);
+        }
+
+        donk.sort_unstable_by(|l, r| l.partial_cmp(r).unwrap());
+
+        Ok(DonkSizeCandidates { donk })
     }
 }
 

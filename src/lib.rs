@@ -4,11 +4,16 @@
 //! ```
 //! use postflop_solver::*;
 //!
-//! // configure game specification
+//! // ranges of OOP and IP in string format
 //! let oop_range = "66+,A8s+,A5s-A4s,AJo+,K9s+,KQo,QTs+,JTs,96s+,85s+,75s+,65s,54s";
 //! let ip_range = "QQ-22,AQs-A2s,ATo+,K5s+,KJo+,Q8s+,J8s+,T7s+,96s+,86s+,75s+,64s+,53s+";
-//! let bet_sizes = BetSizeCandidates::try_from(("50%", "50%")).unwrap();
-//! let donk_sizes = DonkSizeCandidates::try_from("50%, 150%").unwrap();
+//!
+//! // bet size -> 70% of pot / raise size -> 45% of pot
+//! // (multiple sizes can be specified by using a comma-separated string)
+//! let bet_sizes = BetSizeCandidates::try_from(("70%", "45%")).unwrap();
+//!
+//! // donk size -> 50% of pot
+//! let donk_sizes = DonkSizeCandidates::try_from("50%").unwrap();
 //!
 //! let config = GameConfig {
 //!     flop: flop_from_str("Td9d6h").unwrap(),
@@ -20,11 +25,11 @@
 //!     flop_bet_sizes: [bet_sizes.clone(), bet_sizes.clone()],
 //!     turn_bet_sizes: [bet_sizes.clone(), bet_sizes.clone()],
 //!     river_bet_sizes: [bet_sizes.clone(), bet_sizes.clone()],
-//!     turn_donk_sizes: Some(donk_sizes.clone()),
-//!     river_donk_sizes: Some(donk_sizes.clone()),
+//!     turn_donk_sizes: None, // do not distinguish between donk bets and other bets
+//!     river_donk_sizes: Some(donk_sizes.clone()), // use 50% size for donk bets
 //!     add_all_in_threshold: 1.2,
 //!     force_all_in_threshold: 0.1,
-//!     adjust_last_two_bet_sizes: true,
+//!     adjust_last_two_bet_sizes: false,
 //! };
 //!
 //! // build game tree
@@ -90,14 +95,14 @@
 //!
 //! // get available actions
 //! let actions = game.available_actions();
-//! println!("Available actions: {:?}", actions); // [Check, Bet(100)]
+//! println!("Available actions: {:?}", actions); // [Check, Bet(140)]
 //!
 //! // play `Bet(100)`
 //! game.play(1);
 //!
 //! // get available actions
 //! let actions = game.available_actions();
-//! println!("Available actions: {:?}", actions); // [Fold, Call, Raise(300)]
+//! println!("Available actions: {:?}", actions); // [Fold, Call, Raise(356)]
 //!
 //! // play `Call`
 //! game.play(1);
