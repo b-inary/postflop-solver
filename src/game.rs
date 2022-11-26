@@ -109,19 +109,13 @@ unsafe impl Sync for PostFlopNode {}
 /// ```
 /// use postflop_solver::*;
 ///
-/// // ranges of OOP and IP in string format
 /// let oop_range = "66+,A8s+,A5s-A4s,AJo+,K9s+,KQo,QTs+,JTs,96s+,85s+,75s+,65s,54s";
 /// let ip_range = "QQ-22,AQs-A2s,ATo+,K5s+,KJo+,Q8s+,J8s+,T7s+,96s+,86s+,75s+,64s+,53s+";
-///
-/// // bet sizes -> 33% and 75% of pot / raise size -> 45% of pot
-/// let bet_sizes = BetSizeCandidates::try_from(("33%,75%", "45%")).unwrap();
-///
-/// // donk size -> 50% of pot
-/// let donk_sizes = DonkSizeCandidates::try_from("50%").unwrap();
+/// let bet_sizes = BetSizeCandidates::try_from(("60%, e, a", "2.5x")).unwrap();
 ///
 /// let config = GameConfig {
 ///     flop: flop_from_str("Td9d6h").unwrap(),
-///     turn: NOT_DEALT, // or `card_from_str("As").unwrap()`
+///     turn: card_from_str("Qc").unwrap(),
 ///     river: NOT_DEALT,
 ///     starting_pot: 200,
 ///     effective_stack: 900,
@@ -129,11 +123,11 @@ unsafe impl Sync for PostFlopNode {}
 ///     flop_bet_sizes: [bet_sizes.clone(), bet_sizes.clone()],
 ///     turn_bet_sizes: [bet_sizes.clone(), bet_sizes.clone()],
 ///     river_bet_sizes: [bet_sizes.clone(), bet_sizes.clone()],
-///     turn_donk_sizes: None, // do not distinguish between donk bets and other bets
-///     river_donk_sizes: Some(donk_sizes.clone()), // use 50% size for donk bets
+///     turn_donk_sizes: None,
+///     river_donk_sizes: Some(DonkSizeCandidates::try_from("50%").unwrap()),
 ///     add_all_in_threshold: 1.2,
 ///     force_all_in_threshold: 0.1,
-///     adjust_last_two_bet_sizes: true,
+///     adjust_bet_size_before_all_in: false,
 /// };
 /// ```
 #[derive(Debug, Clone)]
@@ -166,21 +160,21 @@ pub struct GameConfig {
     /// Bet size candidates of each player for the river.
     pub river_bet_sizes: [BetSizeCandidates; 2],
 
-    /// Donk size candidates for the turn (set `None` to disable).
+    /// Donk size candidates for the turn (set `None` to use default sizes).
     pub turn_donk_sizes: Option<DonkSizeCandidates>,
 
-    /// Donk size candidates for the river (set `None` to disable).
+    /// Donk size candidates for the river (set `None` to use default sizes).
     pub river_donk_sizes: Option<DonkSizeCandidates>,
 
-    /// Add all-in action when SPR is below this value (set `0.0` to disable).
+    /// Add all-in action if the current SPR is below this value (set `0.0` to disable).
     pub add_all_in_threshold: f32,
 
-    /// Force all-in action when the ratio of opponent's next raise size to the pot size will be
-    /// less than this value (set `0.0` to disable).
+    /// Force all-in action if the SPR after the opponent's call is below this value
+    /// (set `0.0` to disable).
     pub force_all_in_threshold: f32,
 
-    /// Enable bet size adjustment of last two bets.
-    pub adjust_last_two_bet_sizes: bool,
+    /// Enable bet size adjustment for the bet just before the opponent's all-in.
+    pub adjust_bet_size_before_all_in: bool,
 }
 
 /// Available actions in a postflop game.
@@ -1286,23 +1280,26 @@ impl PostFlopGame {
         let max_bet = self.config.effective_stack - node.amount + player_bet;
         let min_bet = (opponent_bet + bet_diff).clamp(1, max_bet);
 
-        let (candidates, donk_candidates, is_river) = if node.turn == NOT_DEALT {
-            (&self.config.flop_bet_sizes, &None, false)
+        let stack_after_call = self.config.effective_stack - node.amount - bet_diff;
+        let spr_after_call = stack_after_call as f64 / pot as f64;
+        let compute_geometric = |num_streets: i32, max_ratio: f32| {
+            let ratio = ((2.0 * spr_after_call + 1.0).powf(1.0 / num_streets as f64) - 1.0) / 2.0;
+            (pot as f64 * f64::min(ratio, max_ratio as f64)).round() as i32
+        };
+
+        let (candidates, donk_candidates, num_remaining_streets) = if node.turn == NOT_DEALT {
+            (&self.config.flop_bet_sizes, &None, 3)
         } else if node.river == NOT_DEALT {
-            (
-                &self.config.turn_bet_sizes,
-                &self.config.turn_donk_sizes,
-                false,
-            )
+            (&self.config.turn_bet_sizes, &self.config.turn_donk_sizes, 2)
         } else {
             (
                 &self.config.river_bet_sizes,
                 &self.config.river_donk_sizes,
-                true,
+                1,
             )
         };
 
-        let player_after_call = if is_river {
+        let player_after_call = if num_remaining_streets == 1 {
             PLAYER_TERMINAL_FLAG
         } else {
             PLAYER_CHANCE
@@ -1330,7 +1327,18 @@ impl PostFlopGame {
                         let size = (pot as f32 * ratio).round() as i32;
                         actions.push((Action::Bet(size), player_opponent));
                     }
-                    BetSize::LastBetRelative(_) => panic!("unexpected bet size"),
+                    BetSize::PrevBetRelative(_) => panic!("Unexpected `PrevBetRelative`"),
+                    BetSize::Additive(adder) => actions.push((Action::Bet(adder), player_opponent)),
+                    BetSize::Geometric(num_streets, max_ratio) => {
+                        let num_streets = if num_streets == 0 {
+                            num_remaining_streets
+                        } else {
+                            num_streets
+                        };
+                        let size = compute_geometric(num_streets, max_ratio);
+                        actions.push((Action::Bet(size), player_opponent));
+                    }
+                    BetSize::AllIn => actions.push((Action::AllIn(max_bet), player_opponent)),
                 }
             }
 
@@ -1352,7 +1360,18 @@ impl PostFlopGame {
                         let size = (pot as f32 * ratio).round() as i32;
                         actions.push((Action::Bet(size), player_opponent));
                     }
-                    BetSize::LastBetRelative(_) => panic!("unexpected bet size"),
+                    BetSize::PrevBetRelative(_) => panic!("Unexpected `PrevBetRelative`"),
+                    BetSize::Additive(adder) => actions.push((Action::Bet(adder), player_opponent)),
+                    BetSize::Geometric(num_streets, max_ratio) => {
+                        let num_streets = if num_streets == 0 {
+                            num_remaining_streets
+                        } else {
+                            num_streets
+                        };
+                        let size = compute_geometric(num_streets, max_ratio);
+                        actions.push((Action::Bet(size), player_opponent));
+                    }
+                    BetSize::AllIn => actions.push((Action::AllIn(max_bet), player_opponent)),
                 }
             }
 
@@ -1375,10 +1394,23 @@ impl PostFlopGame {
                             let size = opponent_bet + (pot as f32 * ratio).round() as i32;
                             actions.push((Action::Raise(size), player_opponent));
                         }
-                        BetSize::LastBetRelative(ratio) => {
+                        BetSize::PrevBetRelative(ratio) => {
                             let size = (opponent_bet as f32 * ratio).round() as i32;
                             actions.push((Action::Raise(size), player_opponent));
                         }
+                        BetSize::Additive(adder) => {
+                            actions.push((Action::Raise(opponent_bet + adder), player_opponent))
+                        }
+                        BetSize::Geometric(num_streets, max_ratio) => {
+                            let num_streets = if num_streets == 0 {
+                                num_remaining_streets
+                            } else {
+                                num_streets
+                            };
+                            let size = compute_geometric(num_streets, max_ratio);
+                            actions.push((Action::Raise(opponent_bet + size), player_opponent));
+                        }
+                        BetSize::AllIn => actions.push((Action::AllIn(max_bet), player_opponent)),
                     }
                 }
 
@@ -1399,7 +1431,7 @@ impl PostFlopGame {
                 return max_bet;
             }
 
-            if !self.config.adjust_last_two_bet_sizes {
+            if !self.config.adjust_bet_size_before_all_in {
                 return size;
             }
 
@@ -1410,16 +1442,16 @@ impl PostFlopGame {
 
             let mut min_opponent_ratio = f32::MAX;
             for &bet_size in raise_candidates {
-                match bet_size {
-                    BetSize::PotRelative(ratio) => {
-                        min_opponent_ratio = min_opponent_ratio.min(ratio);
-                    }
-                    BetSize::LastBetRelative(ratio) => {
-                        let pot_ratio = size as f32 * (ratio - 1.0) / new_pot as f32;
-                        min_opponent_ratio = min_opponent_ratio.min(pot_ratio);
-                    }
-                }
+                let ratio = match bet_size {
+                    BetSize::PotRelative(ratio) => ratio,
+                    BetSize::PrevBetRelative(ratio) => size as f32 * (ratio - 1.0) / new_pot as f32,
+                    BetSize::Additive(adder) => adder as f32 / new_pot as f32,
+                    // how to deal with geometric bet size?
+                    BetSize::Geometric(_, _) | BetSize::AllIn => f32::MAX,
+                };
+                min_opponent_ratio = min_opponent_ratio.min(ratio);
             }
+
             let min_opponent_bet = size + (new_pot as f32 * min_opponent_ratio).round() as i32;
             let next_bet_diff = min_opponent_bet - size;
             let next_pot = new_pot + 2 * next_bet_diff;
@@ -1433,6 +1465,9 @@ impl PostFlopGame {
                 let c = (max_bet - opponent_bet) as f32;
                 // solve quadratic equation
                 let coef = ((4.0 * a * c + b * b).sqrt() - b) / (2.0 * a);
+
+                // FIXME: When `PrevBetRelative` is the minimum oppponent bet size, this size may
+                // not force the opponent to all-in?
                 return opponent_bet + (new_bet_diff as f32 * coef).round() as i32;
             }
 
@@ -2293,13 +2328,13 @@ impl Default for GameConfig {
             river_donk_sizes: None,
             add_all_in_threshold: 0.0,
             force_all_in_threshold: 0.0,
-            adjust_last_two_bet_sizes: false,
+            adjust_bet_size_before_all_in: false,
         }
     }
 }
 
 #[cfg(feature = "bincode")]
-static VERSION_STR: &str = "2022-11-14";
+static VERSION_STR: &str = "2022-11-26";
 
 #[cfg(feature = "bincode")]
 thread_local! {

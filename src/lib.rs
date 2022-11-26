@@ -8,40 +8,37 @@
 //! let oop_range = "66+,A8s+,A5s-A4s,AJo+,K9s+,KQo,QTs+,JTs,96s+,85s+,75s+,65s,54s";
 //! let ip_range = "QQ-22,AQs-A2s,ATo+,K5s+,KJo+,Q8s+,J8s+,T7s+,96s+,86s+,75s+,64s+,53s+";
 //!
-//! // bet size -> 70% of pot / raise size -> 45% of pot
-//! // (multiple sizes can be specified by using a comma-separated string)
-//! let bet_sizes = BetSizeCandidates::try_from(("70%", "45%")).unwrap();
-//!
-//! // donk size -> 50% of pot
-//! let donk_sizes = DonkSizeCandidates::try_from("50%").unwrap();
+//! // bet sizes -> 60% of the pot, geometric size, and all-in
+//! // raise sizes -> 2.5x of the previous bet
+//! // see the documentation of `BetSizeCandidates` for more details
+//! let bet_sizes = BetSizeCandidates::try_from(("60%, e, a", "2.5x")).unwrap();
 //!
 //! let config = GameConfig {
 //!     flop: flop_from_str("Td9d6h").unwrap(),
-//!     turn: card_from_str("Qh").unwrap(),
+//!     turn: card_from_str("Qc").unwrap(),
 //!     river: NOT_DEALT,
 //!     starting_pot: 200,
 //!     effective_stack: 900,
 //!     range: [oop_range.parse().unwrap(), ip_range.parse().unwrap()],
-//!     flop_bet_sizes: [bet_sizes.clone(), bet_sizes.clone()],
+//!     flop_bet_sizes: [bet_sizes.clone(), bet_sizes.clone()], // [OOP, IP]
 //!     turn_bet_sizes: [bet_sizes.clone(), bet_sizes.clone()],
 //!     river_bet_sizes: [bet_sizes.clone(), bet_sizes.clone()],
-//!     turn_donk_sizes: None, // do not distinguish between donk bets and other bets
-//!     river_donk_sizes: Some(donk_sizes.clone()), // use 50% size for donk bets
-//!     add_all_in_threshold: 1.2,
-//!     force_all_in_threshold: 0.1,
-//!     adjust_last_two_bet_sizes: false,
+//!     turn_donk_sizes: None, // use default bet sizes
+//!     river_donk_sizes: Some(DonkSizeCandidates::try_from("50%").unwrap()),
+//!     add_all_in_threshold: 1.2, // add all-in if the current SPR is less than 1.2
+//!     force_all_in_threshold: 0.1, // force all-in if the SPR after call is less than 0.1
+//!     adjust_bet_size_before_all_in: false,
 //! };
 //!
-//! // build game tree
+//! // build the game tree
 //! let mut game = PostFlopGame::with_config(&config).unwrap();
 //!
-//! // obtain private hands
+//! // obtain the private hands
 //! let oop_hands = game.private_hand_cards(0);
-//! println!(
-//!     "oop_hands[0]: {}{}",
-//!     card_to_string(oop_hands[0].1).unwrap(), // 5c
-//!     card_to_string(oop_hands[0].0).unwrap()  // 4c
-//! );
+//!
+//! // check oop_hands[0]
+//! assert_eq!(card_to_string(oop_hands[0].0).unwrap(), "4c");
+//! assert_eq!(card_to_string(oop_hands[0].1).unwrap(), "5c");
 //!
 //! // check memory usage
 //! let (mem_usage, mem_usage_compressed) = game.memory_usage();
@@ -95,14 +92,14 @@
 //!
 //! // get available actions
 //! let actions = game.available_actions();
-//! println!("Available actions: {:?}", actions); // [Check, Bet(140)]
+//! assert_eq!(format!("{:?}", actions), "[Check, Bet(120), Bet(216), AllIn(900)]");
 //!
-//! // play `Bet(100)`
+//! // play `Bet(120)`
 //! game.play(1);
 //!
 //! // get available actions
 //! let actions = game.available_actions();
-//! println!("Available actions: {:?}", actions); // [Fold, Call, Raise(356)]
+//! assert_eq!(format!("{:?}", actions), "[Fold, Call, Raise(300)]");
 //!
 //! // play `Call`
 //! game.play(1);
@@ -111,11 +108,11 @@
 //! assert!(game.is_chance_node());
 //!
 //! // confirm that "7s" may be dealt
-//! let card = card_from_str("7s").unwrap();
-//! assert!(game.possible_cards() & (1 << card) != 0);
+//! let card_7s = card_from_str("7s").unwrap();
+//! assert!(game.possible_cards() & (1 << card_7s) != 0);
 //!
 //! // deal "7s"
-//! game.play(card as usize);
+//! game.play(card_7s as usize);
 //!
 //! // back to the root node
 //! game.back_to_root();

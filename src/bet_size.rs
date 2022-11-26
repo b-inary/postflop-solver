@@ -1,26 +1,38 @@
-use once_cell::sync::Lazy;
-use regex::Regex;
-
 #[cfg(feature = "bincode")]
 use bincode::{Decode, Encode};
 
-const FLOAT_PAT: &str = r"(?P<float>(?:[1-9]\d*(?:\.\d*)?)|(?:0?\.\d+))";
-
-static SIZE_REGEX: Lazy<Regex> =
-    Lazy::new(|| Regex::new(&format!(r"^({FLOAT_PAT}[%x]?)$")).unwrap());
-static TRIM_REGEX: Lazy<Regex> = Lazy::new(|| Regex::new(r"\s*(,)\s*").unwrap());
-
-/// Bet size candidates for the first bet and raise.
+/// Bet size candidates for the first bets and raises.
+///
+/// In the `try_from()` method, multiple bet sizes can be specified using a comma-separated string.
+/// Each element must be a string ending in one of the following characters: %, x, c, e, a.
+///
+/// - %: Percentage of the pot. Example: "70%"
+/// - x: Multiple of the previous bet. Valid for only raises. Example: "2.5x"
+/// - c: Constant value. Must be an integer. Example: "100c"
+/// - e: Geometric size.
+///   - e: Same as "3e" for the flop, "2e" for the turn, and "1e" (equivalent to "a") for the river.
+///   - Xe: The geometric size with X streets remaining. X must be a positive integer. Example: "2e"
+///   - XeY%: Same as Xe, but the maximum size is Y% of the pot. Example: "3e200%".
+/// - a: All-in. Example: "a"
 ///
 /// # Examples
 /// ```
+/// use postflop_solver::BetSize::*;
 /// use postflop_solver::BetSizeCandidates;
-/// use postflop_solver::BetSize::{PotRelative, LastBetRelative};
 ///
-/// let bet_size = BetSizeCandidates::try_from(("0.5", "75%, 2.5x")).unwrap();
+/// let bet_size = BetSizeCandidates::try_from(("50%, 100c, 2e, a", "2.5x")).unwrap();
 ///
-/// assert_eq!(bet_size.bet, vec![PotRelative(0.5)]);
-/// assert_eq!(bet_size.raise, vec![PotRelative(0.75), LastBetRelative(2.5)]);
+/// assert_eq!(
+///     bet_size.bet,
+///     vec![
+///         PotRelative(0.5),
+///         Additive(100),
+///         Geometric(2, f32::INFINITY),
+///         AllIn
+///    ]
+/// );
+///
+/// assert_eq!(bet_size.raise, vec![PrevBetRelative(2.5)]);
 /// ```
 #[derive(Debug, Clone, Default, PartialEq)]
 #[cfg_attr(feature = "bincode", derive(Decode, Encode))]
@@ -31,19 +43,10 @@ pub struct BetSizeCandidates {
     /// Bet size candidates for raise.
     pub raise: Vec<BetSize>,
 }
-/// Bet size candidates for the donk bet, i.e., the bet action by OOP in a situation where IP was
-/// the last aggressor on the previous street.
+
+/// Bet size candidates for the donk bets.
 ///
-/// # Examples
-/// ```
-/// use postflop_solver::DonkSizeCandidates;
-/// use postflop_solver::BetSize::PotRelative;
-///
-/// let donk_size = DonkSizeCandidates::try_from("0.5, 75%").unwrap();
-///
-/// assert_eq!(donk_size.donk, vec![PotRelative(0.5), PotRelative(0.75)]);
-///
-/// ```
+/// See the [`BetSizeCandidates`] struct for the description and examples.
 #[derive(Debug, Clone, Default, PartialEq)]
 #[cfg_attr(feature = "bincode", derive(Decode, Encode))]
 pub struct DonkSizeCandidates {
@@ -57,8 +60,19 @@ pub enum BetSize {
     /// Bet size relative to the current pot size.
     PotRelative(f32),
 
-    /// Bet size relative to the last bet size. This is only valid for raise actions.
-    LastBetRelative(f32),
+    /// Bet size relative to the previous bet size (only valid for raise actions).
+    PrevBetRelative(f32),
+
+    /// Bet size specifying constant addition.
+    Additive(i32),
+
+    /// Geometric bet size for `i32` streets with maximum pot-relative size of `f32`.
+    ///
+    /// If `i32 == 0`, the number of streets is as follows: flop = 3, turn = 2, river = 1.
+    Geometric(i32, f32),
+
+    /// Bet size representing all-in.
+    AllIn,
 }
 
 impl TryFrom<(&str, &str)> for BetSizeCandidates {
@@ -66,22 +80,10 @@ impl TryFrom<(&str, &str)> for BetSizeCandidates {
 
     /// Attempts to convert comma-separated strings into bet sizes.
     ///
-    /// # Examples
-    /// ```
-    /// use postflop_solver::BetSizeCandidates;
-    /// use postflop_solver::BetSize::{PotRelative, LastBetRelative};
-    ///
-    /// let bet_size = BetSizeCandidates::try_from(("0.5", "75%, 2.5x")).unwrap();
-    ///
-    /// assert_eq!(bet_size.bet, vec![PotRelative(0.5)]);
-    /// assert_eq!(bet_size.raise, vec![PotRelative(0.75), LastBetRelative(2.5)]);
-    /// ```
+    /// See the [`BetSizeCandidates`] struct for the description and examples.
     fn try_from((bet_str, raise_str): (&str, &str)) -> Result<Self, Self::Error> {
-        let bet_string = TRIM_REGEX.replace_all(bet_str, "$1").trim().to_string();
-        let mut bet_sizes = bet_string.split(',').collect::<Vec<_>>();
-
-        let raise_string = TRIM_REGEX.replace_all(raise_str, "$1").trim().to_string();
-        let mut raise_sizes = raise_string.split(',').collect::<Vec<_>>();
+        let mut bet_sizes = bet_str.split(',').map(str::trim).collect::<Vec<_>>();
+        let mut raise_sizes = raise_str.split(',').map(str::trim).collect::<Vec<_>>();
 
         if bet_sizes.last().unwrap().is_empty() {
             bet_sizes.pop();
@@ -114,19 +116,9 @@ impl TryFrom<&str> for DonkSizeCandidates {
 
     /// Attempts to convert comma-separated strings into bet sizes.
     ///
-    /// # Examples
-    /// ```
-    /// use postflop_solver::DonkSizeCandidates;
-    /// use postflop_solver::BetSize::PotRelative;
-    ///
-    /// let donk_size = DonkSizeCandidates::try_from("0.5, 75%").unwrap();
-    ///
-    /// assert_eq!(donk_size.donk, vec![PotRelative(0.5), PotRelative(0.75)]);
-    ///
-    /// ```
+    /// See the [`BetSizeCandidates`] struct for the description and examples.
     fn try_from(donk_str: &str) -> Result<Self, Self::Error> {
-        let donk_string = TRIM_REGEX.replace_all(donk_str, "$1").trim().to_string();
-        let mut donk_sizes = donk_string.split(',').collect::<Vec<_>>();
+        let mut donk_sizes = donk_str.split(',').map(str::trim).collect::<Vec<_>>();
 
         if donk_sizes.last().unwrap().is_empty() {
             donk_sizes.pop();
@@ -144,58 +136,120 @@ impl TryFrom<&str> for DonkSizeCandidates {
     }
 }
 
-fn bet_size_from_str(s: &str, allow_last_bet_rel: bool) -> Result<BetSize, String> {
-    let caps = SIZE_REGEX
-        .captures(s)
-        .ok_or_else(|| format!("failed to parse bet size: {s}"))?;
-    let float = caps.name("float").unwrap().as_str().parse::<f32>().unwrap();
-    match caps.get(1).unwrap().as_str().chars().last().unwrap() {
-        '%' => {
-            if float <= 1000.0 {
-                Ok(BetSize::PotRelative(float / 100.0))
+fn parse_float(s: &str) -> Option<f64> {
+    if s.contains('+') || s.contains('-') || s.contains(|c: char| c.is_ascii_alphabetic()) {
+        None
+    } else {
+        s.parse::<f64>().ok()
+    }
+}
+
+fn bet_size_from_str(s: &str, allow_prev_bet_rel: bool) -> Result<BetSize, String> {
+    let s_lower = s.to_lowercase();
+    let err_msg = format!("Invalid bet size: {}", s);
+
+    if let Some(prev_bet_rel) = s_lower.strip_suffix('x') {
+        // Previous bet relative
+        if !allow_prev_bet_rel {
+            let err_msg = format!("Relative size to the previous bet is not allowed: {}", s);
+            Err(err_msg)
+        } else {
+            let float = parse_float(prev_bet_rel).ok_or(&err_msg)?;
+            if float <= 1.0 {
+                let err_msg = format!("Multiplier must be greater than 1.0: {}", s);
+                Err(err_msg)
             } else {
-                Err(format!("bet size too large: {s}"))
+                Ok(BetSize::PrevBetRelative(float as f32))
             }
         }
-        'x' => {
-            if !allow_last_bet_rel {
-                Err(format!("last bet relative not allowed: {s}"))
-            } else if float < 2.0 {
-                Err(format!("bet size too small: {s}"))
-            } else if float > 10.0 {
-                Err(format!("bet size too large: {s}"))
-            } else {
-                Ok(BetSize::LastBetRelative(float))
-            }
+    } else if let Some(add) = s_lower.strip_suffix('c') {
+        // Additive
+        let float = parse_float(add).ok_or(&err_msg)?;
+        if float.trunc() != float {
+            Err(format!("Additional size must be an integer: {}", s))
+        } else if float > i32::MAX as f64 {
+            Err(format!("Additional size must be less than 2^31: {}", s))
+        } else {
+            Ok(BetSize::Additive(float as i32))
         }
-        _ => {
-            if float <= 10.0 {
-                Ok(BetSize::PotRelative(float))
+    } else if s_lower.contains('e') {
+        // Geometric
+        let mut split = s_lower.split('e');
+        let num_streets_str = split.next().ok_or(&err_msg)?;
+        let max_pot_rel_str = split.next().ok_or(&err_msg)?;
+
+        let num_streets = if num_streets_str.is_empty() {
+            0
+        } else {
+            let float = parse_float(num_streets_str).ok_or(&err_msg)?;
+            if float.trunc() != float || float == 0.0 {
+                let err_msg = format!("Number of streets must be a positive integer: {}", s);
+                return Err(err_msg);
+            } else if float > 100.0 {
+                let err_msg = format!("Number of streets must be less than or equal to 100: {}", s);
+                return Err(err_msg);
             } else {
-                Err(format!("bet size too large: {s}"))
+                float as i32
             }
+        };
+
+        let max_pot_rel = if max_pot_rel_str.is_empty() {
+            f32::INFINITY
+        } else {
+            let max_pot_rel_str = max_pot_rel_str.strip_suffix('%').ok_or(&err_msg)?;
+            (parse_float(max_pot_rel_str).ok_or(&err_msg)? / 100.0) as f32
+        };
+
+        if split.next().is_some() {
+            Err(err_msg)
+        } else {
+            Ok(BetSize::Geometric(num_streets, max_pot_rel))
         }
+    } else if let Some(pot_rel) = s_lower.strip_suffix('%') {
+        // Pot relative (must be after the geometric check)
+        let float = parse_float(pot_rel).ok_or(&err_msg)?;
+        Ok(BetSize::PotRelative((float / 100.0) as f32))
+    } else if s_lower == "a" {
+        // All-in
+        Ok(BetSize::AllIn)
+    } else {
+        // Parse error
+        Err(err_msg)
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::BetSize::*;
     use super::*;
 
     #[test]
     fn test_bet_size_from_str() {
         let tests = [
-            (".75", BetSize::PotRelative(0.75)),
-            ("100%", BetSize::PotRelative(1.0)),
-            ("112.5%", BetSize::PotRelative(1.125)),
-            ("3.5x", BetSize::LastBetRelative(3.5)),
+            ("0%", PotRelative(0.0)),
+            ("75%", PotRelative(0.75)),
+            ("112.5%", PotRelative(1.125)),
+            ("1.001x", PrevBetRelative(1.001)),
+            ("3.5X", PrevBetRelative(3.5)),
+            ("0c", Additive(0)),
+            ("123C", Additive(123)),
+            ("e", Geometric(0, f32::INFINITY)),
+            ("E", Geometric(0, f32::INFINITY)),
+            ("2e", Geometric(2, f32::INFINITY)),
+            ("E37.5%", Geometric(0, 0.375)),
+            ("100e.5%", Geometric(100, 0.005)),
+            ("a", AllIn),
+            ("A", AllIn),
         ];
 
         for (s, expected) in tests {
             assert_eq!(bet_size_from_str(s, true), Ok(expected));
         }
 
-        let error_tests = ["", "0", "10.1", "1001%", "10.1x", "-30%"];
+        let error_tests = [
+            "", "0", "1.23", "%", "+42%", "-30%", "x", "0x", "1x", "c", "12.3c", "0e", "2.7e",
+            "101e", "3e7", "E%", "1e2e3", "bet", "1a", "a1",
+        ];
 
         for s in error_tests {
             assert!(bet_size_from_str(s, true).is_err());
@@ -209,20 +263,16 @@ mod tests {
                 "40%, 70%",
                 "",
                 BetSizeCandidates {
-                    bet: vec![BetSize::PotRelative(0.4), BetSize::PotRelative(0.7)],
+                    bet: vec![PotRelative(0.4), PotRelative(0.7)],
                     raise: Vec::new(),
                 },
             ),
             (
-                "0.4,",
-                "2.5x, 70%, 40%",
+                "50c, e, a,",
+                "25%, 2.5x, e200%",
                 BetSizeCandidates {
-                    bet: vec![BetSize::PotRelative(0.4)],
-                    raise: vec![
-                        BetSize::PotRelative(0.4),
-                        BetSize::PotRelative(0.7),
-                        BetSize::LastBetRelative(2.5),
-                    ],
+                    bet: vec![Additive(50), Geometric(0, f32::INFINITY), AllIn],
+                    raise: vec![PotRelative(0.25), PrevBetRelative(2.5), Geometric(0, 2.0)],
                 },
             ),
         ];
@@ -235,6 +285,34 @@ mod tests {
 
         for (bet, raise) in error_tests {
             assert!(BetSizeCandidates::try_from((bet, raise)).is_err());
+        }
+    }
+
+    #[test]
+    fn test_donk_sizes_from_str() {
+        let tests = [
+            (
+                "40%, 70%",
+                DonkSizeCandidates {
+                    donk: vec![PotRelative(0.4), PotRelative(0.7)],
+                },
+            ),
+            (
+                "50c, e, a,",
+                DonkSizeCandidates {
+                    donk: vec![Additive(50), Geometric(0, f32::INFINITY), AllIn],
+                },
+            ),
+        ];
+
+        for (donk, expected) in tests {
+            assert_eq!(donk.try_into(), Ok(expected));
+        }
+
+        let error_tests = ["2.5x", ","];
+
+        for donk in error_tests {
+            assert!(DonkSizeCandidates::try_from(donk).is_err());
         }
     }
 }
