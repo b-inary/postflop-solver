@@ -5,8 +5,17 @@ An open-source postflop solver library written in Rust
 Documentation: https://b-inary.github.io/postflop_solver/postflop_solver/
 
 **Related repositories**
-- Web application: https://github.com/b-inary/wasm-postflop
-- Desktop application: https://github.com/b-inary/desktop-postflop
+- Web app (WASM Postflop): https://github.com/b-inary/wasm-postflop
+- Desktop app (Desktop Postflop): https://github.com/b-inary/desktop-postflop
+
+**Note:**
+The primary purpose of this library is to serve as a backend engine for the GUI applications ([WASM Postflop] and [Desktop Postflop]).
+The direct use of this library by the users/developers is not a critical purpose by design.
+Therefore, breaking changes are often made without version changes.
+See [CHANGES.md](CHANGES.md) for details about breaking changes.
+
+[WASM Postflop]: https://github.com/b-inary/wasm-postflop
+[Desktop Postflop]: https://github.com/b-inary/desktop-postflop
 
 ## Usage
 
