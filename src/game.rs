@@ -524,6 +524,19 @@ impl PostFlopGame {
             }
         }
 
+        let expected_state = match (turn != NOT_DEALT, river != NOT_DEALT) {
+            (false, _) => BoardState::Flop,
+            (true, false) => BoardState::Turn,
+            (true, true) => BoardState::River,
+        };
+
+        if self.tree_config.initial_state != expected_state {
+            return Err(format!(
+                "Invalid initial state of `tree_config`: expected = {:?}, actual = {:?}",
+                expected_state, self.tree_config.initial_state
+            ));
+        }
+
         if range[0].is_empty() {
             return Err("OOP range is empty".to_string());
         }
