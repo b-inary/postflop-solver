@@ -8,30 +8,34 @@
 //! let oop_range = "66+,A8s+,A5s-A4s,AJo+,K9s+,KQo,QTs+,JTs,96s+,85s+,75s+,65s,54s";
 //! let ip_range = "QQ-22,AQs-A2s,ATo+,K5s+,KJo+,Q8s+,J8s+,T7s+,96s+,86s+,75s+,64s+,53s+";
 //!
+//! let card_config = CardConfig {
+//!     range: [oop_range.parse().unwrap(), ip_range.parse().unwrap()],
+//!     flop: flop_from_str("Td9d6h").unwrap(),
+//!     turn: card_from_str("Qc").unwrap(),
+//!     river: NOT_DEALT,
+//! };
+//!
 //! // bet sizes -> 60% of the pot, geometric size, and all-in
 //! // raise sizes -> 2.5x of the previous bet
 //! // see the documentation of `BetSizeCandidates` for more details
 //! let bet_sizes = BetSizeCandidates::try_from(("60%, e, a", "2.5x")).unwrap();
 //!
-//! let config = GameConfig {
-//!     flop: flop_from_str("Td9d6h").unwrap(),
-//!     turn: card_from_str("Qc").unwrap(),
-//!     river: NOT_DEALT,
+//! let tree_config = TreeConfig {
+//!     initial_state: BoardState::Turn,
 //!     starting_pot: 200,
 //!     effective_stack: 900,
-//!     range: [oop_range.parse().unwrap(), ip_range.parse().unwrap()],
 //!     flop_bet_sizes: [bet_sizes.clone(), bet_sizes.clone()], // [OOP, IP]
 //!     turn_bet_sizes: [bet_sizes.clone(), bet_sizes.clone()],
 //!     river_bet_sizes: [bet_sizes.clone(), bet_sizes.clone()],
 //!     turn_donk_sizes: None, // use default bet sizes
 //!     river_donk_sizes: Some(DonkSizeCandidates::try_from("50%").unwrap()),
-//!     add_all_in_threshold: 1.2, // add all-in if the current SPR is less than 1.2
-//!     force_all_in_threshold: 0.1, // force all-in if the SPR after call is less than 0.1
-//!     adjust_bet_size_before_all_in: false,
+//!     add_allin_threshold: 1.5, // add all-in if (maximum bet size) <= 1.5x pot
+//!     force_allin_threshold: 0.15, // force all-in if (SPR after the opponent's call) <= 0.15
 //! };
 //!
 //! // build the game tree
-//! let mut game = PostFlopGame::with_config(&config).unwrap();
+//! let action_tree = ActionTree::with_config(tree_config).unwrap();
+//! let mut game = PostFlopGame::with_config(card_config, action_tree).unwrap();
 //!
 //! // obtain the private hands
 //! let oop_hands = game.private_hand_cards(0);
@@ -59,7 +63,7 @@
 //!
 //! // solve the game
 //! let max_num_iterations = 1000;
-//! let target_exploitability = config.starting_pot as f32 * 0.005;
+//! let target_exploitability = game.tree_config().starting_pot as f32 * 0.005;
 //! let exploitability = solve(&mut game, max_num_iterations, target_exploitability, true);
 //! println!("Exploitability: {:.2}", exploitability);
 //!
@@ -149,6 +153,10 @@
 
 #![cfg_attr(feature = "custom-alloc", feature(allocator_api))]
 
+#[cfg(feature = "custom-alloc")]
+mod alloc;
+
+mod action_tree;
 mod bet_size;
 mod game;
 mod hand;
@@ -160,9 +168,7 @@ mod sliceop;
 mod solver;
 mod utility;
 
-#[cfg(feature = "custom-alloc")]
-mod alloc;
-
+pub use action_tree::*;
 pub use bet_size::*;
 pub use game::*;
 pub use interface::*;

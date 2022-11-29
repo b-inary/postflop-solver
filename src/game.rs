@@ -1,4 +1,4 @@
-use crate::bet_size::*;
+use crate::action_tree::*;
 use crate::hand::*;
 use crate::interface::*;
 use crate::mutex_like::*;
@@ -34,10 +34,14 @@ type SwapList = [Vec<(u16, u16)>; 2];
 
 /// A struct representing a postflop game.
 pub struct PostFlopGame {
-    // Postflop game configuration.
-    config: GameConfig,
+    // Postflop game configurations
+    card_config: CardConfig,
+    tree_config: TreeConfig,
+    added_lines: Vec<Vec<Action>>,
+    removed_lines: Vec<Vec<Action>>,
+    action_root: Box<MutexLike<ActionTreeNode>>,
 
-    // computed from `config`
+    // computed from configurations
     root: Box<MutexLike<PostFlopNode>>,
     num_combinations_inv: f64,
     initial_weight: [Vec<f32>; 2],
@@ -85,9 +89,9 @@ pub struct PostFlopGame {
 unsafe impl Send for PostFlopGame {}
 unsafe impl Sync for PostFlopGame {}
 
-/// A struct representing a node in postflop game tree.
+/// A struct representing a node in a postflop game tree.
 pub struct PostFlopNode {
-    player: u16,
+    player: u8,
     turn: u8,
     river: u8,
     amount: i32,
@@ -103,7 +107,7 @@ pub struct PostFlopNode {
 unsafe impl Send for PostFlopNode {}
 unsafe impl Sync for PostFlopNode {}
 
-/// A struct for postflop game configuration.
+/// A struct containing the card configuration.
 ///
 /// # Examples
 /// ```
@@ -111,28 +115,20 @@ unsafe impl Sync for PostFlopNode {}
 ///
 /// let oop_range = "66+,A8s+,A5s-A4s,AJo+,K9s+,KQo,QTs+,JTs,96s+,85s+,75s+,65s,54s";
 /// let ip_range = "QQ-22,AQs-A2s,ATo+,K5s+,KJo+,Q8s+,J8s+,T7s+,96s+,86s+,75s+,64s+,53s+";
-/// let bet_sizes = BetSizeCandidates::try_from(("60%, e, a", "2.5x")).unwrap();
 ///
-/// let config = GameConfig {
+/// let card_config = CardConfig {
+///     range: [oop_range.parse().unwrap(), ip_range.parse().unwrap()],
 ///     flop: flop_from_str("Td9d6h").unwrap(),
 ///     turn: card_from_str("Qc").unwrap(),
 ///     river: NOT_DEALT,
-///     starting_pot: 200,
-///     effective_stack: 900,
-///     range: [oop_range.parse().unwrap(), ip_range.parse().unwrap()],
-///     flop_bet_sizes: [bet_sizes.clone(), bet_sizes.clone()],
-///     turn_bet_sizes: [bet_sizes.clone(), bet_sizes.clone()],
-///     river_bet_sizes: [bet_sizes.clone(), bet_sizes.clone()],
-///     turn_donk_sizes: None,
-///     river_donk_sizes: Some(DonkSizeCandidates::try_from("50%").unwrap()),
-///     add_all_in_threshold: 1.2,
-///     force_all_in_threshold: 0.1,
-///     adjust_bet_size_before_all_in: false,
 /// };
 /// ```
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "bincode", derive(Decode, Encode))]
-pub struct GameConfig {
+pub struct CardConfig {
+    /// Initial range of each player.
+    pub range: [Range; 2],
+
     /// Flop cards: each card must be unique and in range [`0`, `52`).
     pub flop: [u8; 3],
 
@@ -141,90 +137,14 @@ pub struct GameConfig {
 
     /// River card: must be in range [`0`, `52`) or `NOT_DEALT`.
     pub river: u8,
-
-    /// Initial pot size: must be greater than `0`.
-    pub starting_pot: i32,
-
-    /// Initial effective stack size: must be greater than `0`.
-    pub effective_stack: i32,
-
-    /// Initial range of each player.
-    pub range: [Range; 2],
-
-    /// Bet size candidates of each player for the flop.
-    pub flop_bet_sizes: [BetSizeCandidates; 2],
-
-    /// Bet size candidates of each player for the turn.
-    pub turn_bet_sizes: [BetSizeCandidates; 2],
-
-    /// Bet size candidates of each player for the river.
-    pub river_bet_sizes: [BetSizeCandidates; 2],
-
-    /// Donk size candidates for the turn (set `None` to use default sizes).
-    pub turn_donk_sizes: Option<DonkSizeCandidates>,
-
-    /// Donk size candidates for the river (set `None` to use default sizes).
-    pub river_donk_sizes: Option<DonkSizeCandidates>,
-
-    /// Add all-in action if the current SPR is below this value (set `0.0` to disable).
-    pub add_all_in_threshold: f32,
-
-    /// Force all-in action if the SPR after the opponent's call is below this value
-    /// (set `0.0` to disable).
-    pub force_all_in_threshold: f32,
-
-    /// Enable bet size adjustment for the bet just before the opponent's all-in.
-    pub adjust_bet_size_before_all_in: bool,
-}
-
-/// Available actions in a postflop game.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-#[cfg_attr(feature = "bincode", derive(Decode, Encode))]
-pub enum Action {
-    /// Only used for the previous action of the root node.
-    None,
-
-    /// Fold action.
-    Fold,
-
-    /// Check action.
-    Check,
-
-    /// Call action.
-    Call,
-
-    /// Bet action with a specified amount.
-    Bet(i32),
-
-    /// Raise action with a specified amount.
-    Raise(i32),
-
-    /// All-in action with a specified amount.
-    AllIn(i32),
-
-    /// Chance action with a card ID (in range [`0`, `52`)).
-    Chance(u8),
 }
 
 struct BuildTreeInfo<'a> {
-    last_action: Action,
-    last_bet: [i32; 2],
-    allin_flag: bool,
     current_memory_usage: &'a AtomicU64,
     num_storage_elements: &'a AtomicU64,
     stack_size: [usize; 2],
     max_stack_size: &'a [AtomicUsize; 2],
-    last_aggressor: i32,
 }
-
-const PLAYER_OOP: u16 = 0;
-const PLAYER_CHANCE: u16 = 0xff;
-const PLAYER_MASK: u16 = 0xff;
-const PLAYER_TERMINAL_FLAG: u16 = 0x100;
-const PLAYER_FOLD_FLAG: u16 = 0x300;
-
-/// Constant representing that the card is not yet dealt.
-pub const NOT_DEALT: u8 = 0xff;
 
 #[cfg(not(feature = "custom-alloc"))]
 #[inline]
@@ -289,7 +209,7 @@ impl Game for PostFlopGame {
     }
 
     fn evaluate(&self, result: &mut [f32], node: &Self::Node, player: usize, cfreach: &[f32]) {
-        let amount_raw = self.config.starting_pot as f64 * 0.5 + node.amount as f64;
+        let amount_raw = self.tree_config.starting_pot as f64 * 0.5 + node.amount as f64;
         let amount = amount_raw * self.num_combinations_inv;
 
         let player_cards = &self.private_hand_cards[player];
@@ -439,33 +359,61 @@ impl Game for PostFlopGame {
 }
 
 impl PostFlopGame {
-    /// Constructs a new empty [`PostFlopGame`] (needs `update_config()` before solving).
+    /// Creates a new empty [`PostFlopGame`] (needs `update_config()` before solving).
     #[inline]
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Constructs a new [`PostFlopGame`] instance with the given configuration.
+    /// Creates a new [`PostFlopGame`] with the specified configuration.
     #[inline]
-    pub fn with_config(config: &GameConfig) -> Result<Self, String> {
-        let mut game = Self::default();
-        game.update_config(config)?;
+    pub fn with_config(card_config: CardConfig, action_tree: ActionTree) -> Result<Self, String> {
+        let mut game = Self::new();
+        game.update_config(card_config, action_tree)?;
         Ok(game)
     }
 
     /// Updates the game configuration. The solved result will be lost.
     #[inline]
-    pub fn update_config(&mut self, config: &GameConfig) -> Result<(), String> {
-        self.config = config.clone();
-        self.check_config()?;
+    pub fn update_config(
+        &mut self,
+        card_config: CardConfig,
+        action_tree: ActionTree,
+    ) -> Result<(), String> {
+        self.card_config = card_config;
+        (
+            self.tree_config,
+            self.added_lines,
+            self.removed_lines,
+            self.action_root,
+        ) = action_tree.export();
+        self.check_card_config()?;
         self.init();
         Ok(())
     }
 
-    /// Obtains the game configuration.
+    /// Obtains the card configuration.
     #[inline]
-    pub fn config(&self) -> &GameConfig {
-        &self.config
+    pub fn card_config(&self) -> &CardConfig {
+        &self.card_config
+    }
+
+    /// Obtains the action tree.
+    #[inline]
+    pub fn tree_config(&self) -> &TreeConfig {
+        &self.tree_config
+    }
+
+    /// Obtains the added lines.
+    #[inline]
+    pub fn added_lines(&self) -> &[Vec<Action>] {
+        &self.added_lines
+    }
+
+    /// Obtains the removed lines.
+    #[inline]
+    pub fn removed_lines(&self) -> &[Vec<Action>] {
+        &self.removed_lines
     }
 
     /// Returns the card list of private hands of the given player.
@@ -522,9 +470,11 @@ impl PostFlopGame {
         }
     }
 
-    /// Checks the configuration for errors.
-    fn check_config(&mut self) -> Result<(), String> {
-        let flop = &self.config.flop;
+    /// Checks the card configuration.
+    fn check_card_config(&mut self) -> Result<(), String> {
+        let config = &self.card_config;
+        let (flop, turn, river) = (config.flop, config.turn, config.river);
+        let range = &config.range;
 
         if flop.contains(&NOT_DEALT) {
             return Err("Flop cards not initialized".to_string());
@@ -538,92 +488,68 @@ impl PostFlopGame {
             return Err(format!("Flop cards must be unique: flop = {:?}", flop));
         }
 
-        if self.config.turn != NOT_DEALT {
-            if 52 <= self.config.turn {
-                return Err(format!(
-                    "Turn card must be in [0, 52): turn = {}",
-                    self.config.turn
-                ));
+        if turn != NOT_DEALT {
+            if 52 <= turn {
+                return Err(format!("Turn card must be in [0, 52): turn = {turn}"));
             }
 
-            if flop.contains(&self.config.turn) {
+            if flop.contains(&turn) {
                 return Err(format!(
-                    "Turn card must be different from flop cards: turn = {}",
-                    self.config.turn
+                    "Turn card must be different from flop cards: turn = {turn}"
                 ));
             }
         }
 
-        if self.config.river != NOT_DEALT {
-            if 52 <= self.config.river {
+        if river != NOT_DEALT {
+            if 52 <= river {
+                return Err(format!("River card must be in [0, 52): river = {river}"));
+            }
+
+            if flop.contains(&river) {
                 return Err(format!(
-                    "River card must be in [0, 52): river = {}",
-                    self.config.river
+                    "River card must be different from flop cards: river = {river}"
                 ));
             }
 
-            if flop.contains(&self.config.river) {
+            if turn == river {
                 return Err(format!(
-                    "River card must be different from flop cards: river = {}",
-                    self.config.river
+                    "River card must be different from turn card: river = {river}"
                 ));
             }
 
-            if self.config.turn == self.config.river {
+            if turn == NOT_DEALT {
                 return Err(format!(
-                    "River card must be different from turn card: river = {}",
-                    self.config.river
-                ));
-            }
-
-            if self.config.turn == NOT_DEALT {
-                return Err(format!(
-                    "River card specified without turn card: river = {}",
-                    self.config.river
+                    "River card specified without turn card: river = {river}"
                 ));
             }
         }
 
-        if self.config.starting_pot <= 0 {
-            return Err(format!(
-                "Initial pot must be positive: starting_pot = {}",
-                self.config.starting_pot
-            ));
-        }
-
-        if self.config.effective_stack <= 0 {
-            return Err(format!(
-                "Initial stack must be positive: effective_stack = {}",
-                self.config.effective_stack
-            ));
-        }
-
-        if self.config.range[0].is_empty() {
+        if range[0].is_empty() {
             return Err("OOP range is empty".to_string());
         }
 
-        if self.config.range[1].is_empty() {
+        if range[1].is_empty() {
             return Err("IP range is empty".to_string());
         }
 
         let mut board_mask: u64 = (1 << flop[0]) | (1 << flop[1]) | (1 << flop[2]);
-        if self.config.turn != NOT_DEALT {
-            board_mask |= 1 << self.config.turn;
+        if turn != NOT_DEALT {
+            board_mask |= 1 << turn;
         }
-        if self.config.river != NOT_DEALT {
-            board_mask |= 1 << self.config.river;
+        if river != NOT_DEALT {
+            board_mask |= 1 << river;
         }
 
         let mut num_combinations = 0.0;
         for c1 in 0..52 {
             for c2 in c1 + 1..52 {
                 let oop_mask: u64 = (1 << c1) | (1 << c2);
-                let oop_weight = self.config.range[0].get_weight_by_cards(c1, c2);
+                let oop_weight = range[0].get_weight_by_cards(c1, c2);
                 if oop_mask & board_mask == 0 && oop_weight > 0.0 {
                     for c3 in 0..52 {
                         for c4 in c3 + 1..52 {
                             let ip_mask: u64 = (1 << c3) | (1 << c4);
-                            let ip_weight = self.config.range[1].get_weight_by_cards(c3, c4);
+                            let ip_weight = range[1].get_weight_by_cards(c3, c4);
                             if ip_mask & (board_mask | oop_mask) == 0 {
                                 num_combinations += oop_weight as f64 * ip_weight as f64;
                             }
@@ -662,16 +588,18 @@ impl PostFlopGame {
     /// Initializes fields `initial_weight`, `private_hand_cards`, `same_hand_index`, and related to
     /// valid indices.
     fn init_range(&mut self) {
-        let flop = &self.config.flop;
+        let config = &self.card_config;
+        let flop = config.flop;
+
         let mut board_mask: u64 = (1 << flop[0]) | (1 << flop[1]) | (1 << flop[2]);
-        if self.config.turn != NOT_DEALT {
-            board_mask |= 1 << self.config.turn;
+        if config.turn != NOT_DEALT {
+            board_mask |= 1 << config.turn;
         }
-        if self.config.river != NOT_DEALT {
-            board_mask |= 1 << self.config.river;
+        if config.river != NOT_DEALT {
+            board_mask |= 1 << config.river;
         }
 
-        let ranges = &self.config.range;
+        let ranges = &config.range;
         for player in 0..2 {
             let range = ranges[player];
             let (hands, weights) = range.get_hands_weights(board_mask);
@@ -690,7 +618,7 @@ impl PostFlopGame {
             }
         }
 
-        if self.config.turn == NOT_DEALT {
+        if config.turn == NOT_DEALT {
             self.valid_indices_flop = self.valid_indices(NOT_DEALT, NOT_DEALT);
         } else {
             self.valid_indices_flop = Default::default();
@@ -699,8 +627,8 @@ impl PostFlopGame {
         self.valid_indices_turn = vec![Default::default(); 52];
         for turn in 0..52 {
             if !flop.contains(&turn)
-                && (self.config.turn == NOT_DEALT || turn == self.config.turn)
-                && self.config.river == NOT_DEALT
+                && (config.turn == NOT_DEALT || config.turn == turn)
+                && config.river == NOT_DEALT
             {
                 self.valid_indices_turn[turn as usize] = self.valid_indices(turn, NOT_DEALT);
             }
@@ -711,12 +639,10 @@ impl PostFlopGame {
             for board2 in board1 + 1..52 {
                 if !flop.contains(&board1)
                     && !flop.contains(&board2)
-                    && (self.config.turn == NOT_DEALT
-                        || board1 == self.config.turn
-                        || board2 == self.config.turn)
-                    && (self.config.river == NOT_DEALT
-                        || board1 == self.config.river
-                        || board2 == self.config.river)
+                    && (config.turn == NOT_DEALT || board1 == config.turn || board2 == config.turn)
+                    && (config.river == NOT_DEALT
+                        || board1 == config.river
+                        || board2 == config.river)
                 {
                     let index = card_pair_index(board1, board2);
                     self.valid_indices_river[index] = self.valid_indices(board1, board2);
@@ -762,8 +688,11 @@ impl PostFlopGame {
 
     /// Initializes a field `hand_strength`.
     fn init_hand_strength(&mut self) {
+        let config = &self.card_config;
+        let (turn, river) = (config.turn, config.river);
+
         let mut flop = Hand::new();
-        for &card in &self.config.flop {
+        for &card in &config.flop {
             flop = flop.add_card(card as usize);
         }
 
@@ -774,12 +703,8 @@ impl PostFlopGame {
             for board2 in board1 + 1..52 {
                 if !flop.contains(board1 as usize)
                     && !flop.contains(board2 as usize)
-                    && (self.config.turn == NOT_DEALT
-                        || board1 == self.config.turn
-                        || board2 == self.config.turn)
-                    && (self.config.river == NOT_DEALT
-                        || board1 == self.config.river
-                        || board2 == self.config.river)
+                    && (turn == NOT_DEALT || board1 == turn || board2 == turn)
+                    && (river == NOT_DEALT || board1 == river || board2 == river)
                 {
                     let board = flop.add_card(board1 as usize).add_card(board2 as usize);
                     let mut strength = [
@@ -827,7 +752,8 @@ impl PostFlopGame {
 
     /// Initializes fields related to isomorphism.
     fn init_isomorphism(&mut self) {
-        let range = &self.config.range;
+        let config = &self.card_config;
+        let range = &config.range;
         let mut suit_isomorphism = [0; 4];
         let mut next_index = 1;
         'outer: for suit2 in 1..4 {
@@ -843,11 +769,11 @@ impl PostFlopGame {
             next_index += 1;
         }
 
-        let flop = &self.config.flop;
+        let flop = config.flop;
         let flop_mask: u64 = (1 << flop[0]) | (1 << flop[1]) | (1 << flop[2]);
 
         let mut flop_rankset = [0; 4];
-        for &card in flop {
+        for &card in &flop {
             let rank = card >> 2;
             let suit = card & 3;
             flop_rankset[suit as usize] |= 1 << rank;
@@ -864,7 +790,7 @@ impl PostFlopGame {
         let mut reverse_table = [usize::MAX; 52 * 51 / 2];
 
         // turn isomorphism
-        if self.config.turn == NOT_DEALT {
+        if config.turn == NOT_DEALT {
             for suit1 in 1..4 {
                 for suit2 in 0..suit1 {
                     if flop_rankset[suit1 as usize] == flop_rankset[suit2 as usize]
@@ -932,14 +858,13 @@ impl PostFlopGame {
         self.river_isomorphism_swap.clear();
 
         // river isomorphism
-        if self.config.river == NOT_DEALT {
+        if config.river == NOT_DEALT {
             for turn in 0..52 {
                 self.river_isomorphism.push(Vec::new());
                 self.river_isomorphism_cards.push(Vec::new());
                 self.river_isomorphism_swap.push(Default::default());
 
-                if (1 << turn) & flop_mask != 0
-                    || (self.config.turn != NOT_DEALT && turn != self.config.turn)
+                if (1 << turn) & flop_mask != 0 || (config.turn != NOT_DEALT && config.turn != turn)
                 {
                     continue;
                 }
@@ -957,7 +882,7 @@ impl PostFlopGame {
                 for suit1 in 1..4 {
                     for suit2 in 0..suit1 {
                         if (flop_rankset[suit1 as usize] == flop_rankset[suit2 as usize]
-                            || self.config.turn != NOT_DEALT)
+                            || config.turn != NOT_DEALT)
                             && turn_rankset[suit1 as usize] == turn_rankset[suit2 as usize]
                             && suit_isomorphism[suit1 as usize] == suit_isomorphism[suit2 as usize]
                         {
@@ -1027,22 +952,18 @@ impl PostFlopGame {
         let max_stack_size = [AtomicUsize::new(0), AtomicUsize::new(0)];
 
         let info = BuildTreeInfo {
-            last_action: Action::None,
-            last_bet: [0, 0],
-            allin_flag: false,
             current_memory_usage: &current_memory_usage,
             num_storage_elements: &num_storage_elements,
             stack_size: [0, 0],
             max_stack_size: &max_stack_size,
-            last_aggressor: -1,
         };
 
         let mut root = self.root();
         *root = PostFlopNode::default();
-        root.turn = self.config.turn;
-        root.river = self.config.river;
+        root.turn = self.card_config.turn;
+        root.river = self.card_config.river;
 
-        self.build_tree_recursive(&mut root, &info);
+        self.build_tree_recursive(&mut root, &self.action_root.lock(), info);
 
         let current_memory_usage = current_memory_usage.load(Ordering::Relaxed);
         let num_storage_elements = num_storage_elements.load(Ordering::Relaxed);
@@ -1117,7 +1038,15 @@ impl PostFlopGame {
     }
 
     /// Builds the game tree recursively.
-    fn build_tree_recursive(&self, node: &mut PostFlopNode, info: &BuildTreeInfo) {
+    fn build_tree_recursive(
+        &self,
+        node: &mut PostFlopNode,
+        action_node: &ActionTreeNode,
+        info: BuildTreeInfo,
+    ) {
+        node.player = action_node.player;
+        node.amount = action_node.amount;
+
         if node.is_terminal() {
             for i in 0..2 {
                 atomic_set_max(&info.max_stack_size[i], info.stack_size[i]);
@@ -1125,11 +1054,12 @@ impl PostFlopGame {
             return;
         }
 
+        let mut stack_size = info.stack_size;
+
         // chance node
         if node.is_chance() {
-            self.push_chances(node, info);
+            self.push_chances(node, &info);
 
-            let mut stack_size = info.stack_size;
             let f32_size = mem::size_of::<f32>();
             let f64_size = mem::size_of::<f64>();
             let col_size = f32_size * node.num_actions();
@@ -1139,23 +1069,18 @@ impl PostFlopGame {
                 *s += align_up(f32_size * self.num_private_hands(i ^ 1));
             }
 
-            for (action, child) in node.actions.iter().zip(node.children.iter()) {
+            for child in &node.children {
                 self.build_tree_recursive(
                     &mut child.lock(),
-                    &BuildTreeInfo {
-                        last_action: *action,
-                        last_bet: [0, 0],
-                        stack_size,
-                        ..*info
-                    },
+                    &action_node.children[0].lock(),
+                    BuildTreeInfo { stack_size, ..info },
                 );
             }
         }
         // player node
         else {
-            self.push_actions(node, info);
+            self.push_actions(node, action_node, &info);
 
-            let mut stack_size = info.stack_size;
             let col_size = mem::size_of::<f32>() * node.num_actions();
             for (i, s) in stack_size.iter_mut().enumerate() {
                 let n = if i == node.player() { 2 } else { 1 };
@@ -1163,57 +1088,23 @@ impl PostFlopGame {
                 *s += n * align_up(col_size * self.num_private_hands(node.player()));
             }
 
-            for (action, child) in node.actions.iter().zip(node.children.iter()) {
-                let mut last_bet = info.last_bet;
-                let mut allin_flag = info.allin_flag;
-                let mut last_aggressor: i32 = info.last_aggressor;
-
-                match *action {
-                    Action::Check => {
-                        last_aggressor = -1;
-                    }
-                    Action::Call => {
-                        last_bet[node.player as usize] = last_bet[node.player as usize ^ 1];
-                    }
-                    Action::Bet(size) | Action::Raise(size) => {
-                        last_bet[node.player as usize] = size;
-                        last_aggressor = node.player as i32;
-                    }
-                    Action::AllIn(size) => {
-                        last_bet[node.player as usize] = size;
-                        allin_flag = true;
-                    }
-                    _ => {}
-                }
-
+            for (child, action_child) in node.children.iter().zip(action_node.children.iter()) {
                 self.build_tree_recursive(
                     &mut child.lock(),
-                    &BuildTreeInfo {
-                        last_action: *action,
-                        last_bet,
-                        allin_flag,
-                        stack_size,
-                        last_aggressor,
-                        ..*info
-                    },
-                )
+                    &action_child.lock(),
+                    BuildTreeInfo { stack_size, ..info },
+                );
             }
         }
     }
 
     /// Pushes the chance actions to the `node`.
     fn push_chances(&self, node: &mut PostFlopNode, info: &BuildTreeInfo) {
-        let flop = self.config.flop;
+        let flop = self.card_config.flop;
         let flop_mask: u64 = (1 << flop[0]) | (1 << flop[1]) | (1 << flop[2]);
 
         // deal turn
         if node.turn == NOT_DEALT {
-            let next_player = if !info.allin_flag {
-                PLAYER_OOP
-            } else {
-                PLAYER_CHANCE
-            };
-
             node.actions.reserve(49);
             node.children.reserve(49);
 
@@ -1221,9 +1112,7 @@ impl PostFlopGame {
                 if (1 << card) & flop_mask == 0 && !self.turn_isomorphism_cards.contains(&card) {
                     node.actions.push(Action::Chance(card));
                     node.children.push(MutexLike::new(PostFlopNode {
-                        player: next_player,
                         turn: card,
-                        amount: node.amount,
                         ..Default::default()
                     }));
                 }
@@ -1232,12 +1121,6 @@ impl PostFlopGame {
         // deal river
         else {
             let turn_mask = flop_mask | (1 << node.turn);
-
-            let next_player = if !info.allin_flag {
-                PLAYER_OOP
-            } else {
-                PLAYER_TERMINAL_FLAG
-            };
 
             node.actions.reserve(48);
             node.children.reserve(48);
@@ -1248,10 +1131,8 @@ impl PostFlopGame {
                 {
                     node.actions.push(Action::Chance(card));
                     node.children.push(MutexLike::new(PostFlopNode {
-                        player: next_player,
                         turn: node.turn,
                         river: card,
-                        amount: node.amount,
                         ..Default::default()
                     }));
                 }
@@ -1267,256 +1148,17 @@ impl PostFlopGame {
     }
 
     /// Pushes the actions to the `node`.
-    fn push_actions(&self, node: &mut PostFlopNode, info: &BuildTreeInfo) {
-        let player = node.player;
-        let player_opponent = node.player ^ 1;
-
-        let player_bet = info.last_bet[player as usize];
-        let opponent_bet = info.last_bet[player_opponent as usize];
-
-        let bet_diff = opponent_bet - player_bet;
-        let pot = self.config.starting_pot + 2 * (node.amount + bet_diff);
-
-        let max_bet = self.config.effective_stack - node.amount + player_bet;
-        let min_bet = (opponent_bet + bet_diff).clamp(1, max_bet);
-
-        let stack_after_call = self.config.effective_stack - node.amount - bet_diff;
-        let spr_after_call = stack_after_call as f64 / pot as f64;
-        let compute_geometric = |num_streets: i32, max_ratio: f32| {
-            let ratio = ((2.0 * spr_after_call + 1.0).powf(1.0 / num_streets as f64) - 1.0) / 2.0;
-            (pot as f64 * f64::min(ratio, max_ratio as f64)).round() as i32
-        };
-
-        let (candidates, donk_candidates, num_remaining_streets) = if node.turn == NOT_DEALT {
-            (&self.config.flop_bet_sizes, &None, 3)
-        } else if node.river == NOT_DEALT {
-            (&self.config.turn_bet_sizes, &self.config.turn_donk_sizes, 2)
-        } else {
-            (
-                &self.config.river_bet_sizes,
-                &self.config.river_donk_sizes,
-                1,
-            )
-        };
-
-        let player_after_call = if num_remaining_streets == 1 {
-            PLAYER_TERMINAL_FLAG
-        } else {
-            PLAYER_CHANCE
-        };
-
-        let player_after_check = if player == PLAYER_OOP {
-            player_opponent
-        } else {
-            player_after_call
-        };
-
-        let mut actions = Vec::new();
-
-        if donk_candidates.is_some()
-            && matches!(info.last_action, Action::Chance(_))
-            && info.last_aggressor == player_opponent as i32
-        {
-            // check
-            actions.push((Action::Check, player_after_check));
-
-            // donk bet
-            for &donk_size in &donk_candidates.as_ref().unwrap().donk {
-                match donk_size {
-                    BetSize::PotRelative(ratio) => {
-                        let size = (pot as f32 * ratio).round() as i32;
-                        actions.push((Action::Bet(size), player_opponent));
-                    }
-                    BetSize::PrevBetRelative(_) => panic!("Unexpected `PrevBetRelative`"),
-                    BetSize::Additive(adder) => actions.push((Action::Bet(adder), player_opponent)),
-                    BetSize::Geometric(num_streets, max_ratio) => {
-                        let num_streets = if num_streets == 0 {
-                            num_remaining_streets
-                        } else {
-                            num_streets
-                        };
-                        let size = compute_geometric(num_streets, max_ratio);
-                        actions.push((Action::Bet(size), player_opponent));
-                    }
-                    BetSize::AllIn => actions.push((Action::AllIn(max_bet), player_opponent)),
-                }
-            }
-
-            // all-in
-            if max_bet <= (pot as f32 * self.config.add_all_in_threshold) as i32 {
-                actions.push((Action::AllIn(max_bet), player_opponent));
-            }
-        } else if matches!(
-            info.last_action,
-            Action::None | Action::Check | Action::Chance(_)
-        ) {
-            // check
-            actions.push((Action::Check, player_after_check));
-
-            // first bet
-            for &bet_size in &candidates[player as usize].bet {
-                match bet_size {
-                    BetSize::PotRelative(ratio) => {
-                        let size = (pot as f32 * ratio).round() as i32;
-                        actions.push((Action::Bet(size), player_opponent));
-                    }
-                    BetSize::PrevBetRelative(_) => panic!("Unexpected `PrevBetRelative`"),
-                    BetSize::Additive(adder) => actions.push((Action::Bet(adder), player_opponent)),
-                    BetSize::Geometric(num_streets, max_ratio) => {
-                        let num_streets = if num_streets == 0 {
-                            num_remaining_streets
-                        } else {
-                            num_streets
-                        };
-                        let size = compute_geometric(num_streets, max_ratio);
-                        actions.push((Action::Bet(size), player_opponent));
-                    }
-                    BetSize::AllIn => actions.push((Action::AllIn(max_bet), player_opponent)),
-                }
-            }
-
-            // all-in
-            if max_bet <= (pot as f32 * self.config.add_all_in_threshold) as i32 {
-                actions.push((Action::AllIn(max_bet), player_opponent));
-            }
-        } else {
-            // fold
-            actions.push((Action::Fold, PLAYER_FOLD_FLAG | player));
-
-            // call
-            actions.push((Action::Call, player_after_call));
-
-            if !info.allin_flag {
-                // raise
-                for &bet_size in &candidates[player as usize].raise {
-                    match bet_size {
-                        BetSize::PotRelative(ratio) => {
-                            let size = opponent_bet + (pot as f32 * ratio).round() as i32;
-                            actions.push((Action::Raise(size), player_opponent));
-                        }
-                        BetSize::PrevBetRelative(ratio) => {
-                            let size = (opponent_bet as f32 * ratio).round() as i32;
-                            actions.push((Action::Raise(size), player_opponent));
-                        }
-                        BetSize::Additive(adder) => {
-                            actions.push((Action::Raise(opponent_bet + adder), player_opponent))
-                        }
-                        BetSize::Geometric(num_streets, max_ratio) => {
-                            let num_streets = if num_streets == 0 {
-                                num_remaining_streets
-                            } else {
-                                num_streets
-                            };
-                            let size = compute_geometric(num_streets, max_ratio);
-                            actions.push((Action::Raise(opponent_bet + size), player_opponent));
-                        }
-                        BetSize::AllIn => actions.push((Action::AllIn(max_bet), player_opponent)),
-                    }
-                }
-
-                // all-in
-                let all_in_threshold = (pot as f32 * self.config.add_all_in_threshold) as i32;
-                if max_bet <= opponent_bet + all_in_threshold {
-                    actions.push((Action::AllIn(max_bet), player_opponent));
-                }
-            }
-        }
-
-        let adjust_size = |size: i32| {
-            let new_bet_diff = size - opponent_bet;
-            let new_pot = pot + 2 * new_bet_diff;
-
-            let threshold = (new_pot as f32 * self.config.force_all_in_threshold).round() as i32;
-            if max_bet <= size + threshold {
-                return max_bet;
-            }
-
-            if !self.config.adjust_bet_size_before_all_in {
-                return size;
-            }
-
-            let raise_candidates = &candidates[player_opponent as usize].raise;
-            if raise_candidates.is_empty() {
-                return size;
-            }
-
-            let mut min_opponent_ratio = f32::MAX;
-            for &bet_size in raise_candidates {
-                let ratio = match bet_size {
-                    BetSize::PotRelative(ratio) => ratio,
-                    BetSize::PrevBetRelative(ratio) => size as f32 * (ratio - 1.0) / new_pot as f32,
-                    BetSize::Additive(adder) => adder as f32 / new_pot as f32,
-                    // how to deal with geometric bet size?
-                    BetSize::Geometric(_, _) | BetSize::AllIn => f32::MAX,
-                };
-                min_opponent_ratio = min_opponent_ratio.min(ratio);
-            }
-
-            let min_opponent_bet = size + (new_pot as f32 * min_opponent_ratio).round() as i32;
-            let next_bet_diff = min_opponent_bet - size;
-            let next_pot = new_pot + 2 * next_bet_diff;
-
-            let threshold = (next_pot as f32 * self.config.force_all_in_threshold).round() as i32;
-            if max_bet <= min_opponent_bet + threshold {
-                // next opponent bet will be always all-in
-                let ratio = new_bet_diff as f32 / pot as f32;
-                let a = 2.0 * pot as f32 * ratio * min_opponent_ratio;
-                let b = pot as f32 * (ratio + min_opponent_ratio);
-                let c = (max_bet - opponent_bet) as f32;
-                // solve quadratic equation
-                let coef = ((4.0 * a * c + b * b).sqrt() - b) / (2.0 * a);
-
-                // FIXME: When `PrevBetRelative` is the minimum oppponent bet size, this size may
-                // not force the opponent to all-in?
-                return opponent_bet + (new_bet_diff as f32 * coef).round() as i32;
-            }
-
-            size
-        };
-
-        // adjust bet sizes
-        for (action, _) in actions.iter_mut() {
-            match *action {
-                Action::Bet(size) => {
-                    let adjusted_size = adjust_size(size).clamp(min_bet, max_bet);
-                    if adjusted_size == max_bet {
-                        *action = Action::AllIn(max_bet);
-                    } else if size != adjusted_size {
-                        *action = Action::Bet(adjusted_size);
-                    }
-                }
-                Action::Raise(size) => {
-                    let adjusted_size = adjust_size(size).clamp(min_bet, max_bet);
-                    if adjusted_size == max_bet {
-                        *action = Action::AllIn(max_bet);
-                    } else if size != adjusted_size {
-                        *action = Action::Raise(adjusted_size);
-                    }
-                }
-                _ => {}
-            }
-        }
-
-        // remove duplicates
-        actions.sort_unstable();
-        actions.dedup();
-
-        // push actions
-        for (action, next_player) in actions {
-            let mut amount = node.amount;
-            if matches!(
-                action,
-                Action::Call | Action::Bet(_) | Action::Raise(_) | Action::AllIn(_)
-            ) {
-                amount += bet_diff;
-            }
-
-            node.actions.push(action);
+    fn push_actions(
+        &self,
+        node: &mut PostFlopNode,
+        action_node: &ActionTreeNode,
+        info: &BuildTreeInfo,
+    ) {
+        for action in &action_node.actions {
+            node.actions.push(*action);
             node.children.push(MutexLike::new(PostFlopNode {
-                player: next_player,
                 turn: node.turn,
                 river: node.river,
-                amount,
                 ..Default::default()
             }));
         }
@@ -1528,7 +1170,7 @@ impl PostFlopGame {
             Ordering::Relaxed,
         );
 
-        let num_elems = node.num_actions() * self.num_private_hands(player as usize);
+        let num_elems = node.num_actions() * self.num_private_hands(node.player as usize);
         node.num_elements = num_elems;
         info.num_storage_elements
             .fetch_add(num_elems as u64, Ordering::Relaxed);
@@ -1567,8 +1209,8 @@ impl PostFlopGame {
     pub fn back_to_root(&mut self) {
         self.history.clear();
         self.node_ptr = &*self.root();
-        self.turn = self.config.turn;
-        self.river = self.config.river;
+        self.turn = self.card_config.turn;
+        self.river = self.card_config.river;
         self.weights = self.initial_weight.clone();
         self.normalized_weights_cached = false;
         self.normalize_factor = 1.0 / self.num_combinations_inv as f32;
@@ -1612,7 +1254,7 @@ impl PostFlopGame {
             .actions()
             .map(|action| {
                 let child = self.node().play(action);
-                child.is_terminal() || child.amount == self.config.effective_stack
+                child.is_terminal() || child.amount == self.tree_config.effective_stack
             })
             .collect()
     }
@@ -1635,7 +1277,7 @@ impl PostFlopGame {
             return 0;
         }
 
-        let flop = self.config.flop;
+        let flop = self.card_config.flop;
         let mut board_mask: u64 = (1 << flop[0]) | (1 << flop[1]) | (1 << flop[2]);
         if self.turn != NOT_DEALT {
             board_mask |= 1 << self.turn;
@@ -1768,7 +1410,7 @@ impl PostFlopGame {
             self.node_ptr = &*self.node().play(action);
         }
 
-        if self.node().is_terminal() || self.node().amount == self.config.effective_stack {
+        if self.node().is_terminal() || self.node().amount == self.tree_config.effective_stack {
             panic!("playing a terminal action is not allowed");
         }
 
@@ -1975,6 +1617,7 @@ impl PostFlopGame {
         };
 
         let num_hands = self.num_private_hands(player);
+        let starting_pot = self.tree_config.starting_pot;
         ret.chunks_exact_mut(num_hands).for_each(|row| {
             self.apply_swap(row, player);
             row.iter_mut()
@@ -1982,7 +1625,7 @@ impl PostFlopGame {
                 .for_each(|(v, &w)| {
                     if w > 0.0 {
                         *v *= self.normalize_factor / w;
-                        *v += self.config.starting_pot as f32 * 0.5 + self.node().amount as f32;
+                        *v += starting_pot as f32 * 0.5 + self.node().amount as f32;
                     } else {
                         *v = 0.0;
                     }
@@ -2251,7 +1894,11 @@ impl Default for PostFlopGame {
     #[inline]
     fn default() -> Self {
         Self {
-            config: GameConfig::default(),
+            card_config: CardConfig::default(),
+            tree_config: TreeConfig::default(),
+            added_lines: Vec::default(),
+            removed_lines: Vec::default(),
+            action_root: Box::default(),
             root: Box::default(),
             num_combinations_inv: 0.0,
             initial_weight: Default::default(),
@@ -2311,30 +1958,20 @@ impl Default for PostFlopNode {
     }
 }
 
-impl Default for GameConfig {
+impl Default for CardConfig {
     #[inline]
     fn default() -> Self {
         Self {
+            range: Default::default(),
             flop: [NOT_DEALT; 3],
             turn: NOT_DEALT,
             river: NOT_DEALT,
-            starting_pot: 0,
-            effective_stack: 0,
-            range: Default::default(),
-            flop_bet_sizes: Default::default(),
-            turn_bet_sizes: Default::default(),
-            river_bet_sizes: Default::default(),
-            turn_donk_sizes: None,
-            river_donk_sizes: None,
-            add_all_in_threshold: 0.0,
-            force_all_in_threshold: 0.0,
-            adjust_bet_size_before_all_in: false,
         }
     }
 }
 
 #[cfg(feature = "bincode")]
-static VERSION_STR: &str = "2022-11-26";
+static VERSION_STR: &str = "2022-11-29";
 
 #[cfg(feature = "bincode")]
 thread_local! {
@@ -2362,7 +1999,11 @@ impl Encode for PostFlopGame {
         VERSION_STR.to_string().encode(encoder)?;
 
         // contents
-        self.config.encode(encoder)?;
+        self.card_config.encode(encoder)?;
+        self.tree_config.encode(encoder)?;
+        self.added_lines.encode(encoder)?;
+        self.removed_lines.encode(encoder)?;
+        self.action_root.encode(encoder)?;
         self.num_combinations_inv.encode(encoder)?;
         self.is_memory_allocated.encode(encoder)?;
         self.is_compression_enabled.encode(encoder)?;
@@ -2426,7 +2067,11 @@ impl Decode for PostFlopGame {
 
         // game instance
         let mut game = Self {
-            config: Decode::decode(decoder)?,
+            card_config: Decode::decode(decoder)?,
+            tree_config: Decode::decode(decoder)?,
+            added_lines: Decode::decode(decoder)?,
+            removed_lines: Decode::decode(decoder)?,
+            action_root: Decode::decode(decoder)?,
             num_combinations_inv: Decode::decode(decoder)?,
             is_memory_allocated: Decode::decode(decoder)?,
             is_compression_enabled: Decode::decode(decoder)?,
@@ -2543,15 +2188,21 @@ mod tests {
 
     #[test]
     fn all_check_all_range() {
-        let config = GameConfig {
-            flop: flop_from_str("Td9d6h").unwrap(),
-            starting_pot: 60,
-            effective_stack: 970,
+        let card_config = CardConfig {
             range: [Range::ones(); 2],
+            flop: flop_from_str("Td9d6h").unwrap(),
             ..Default::default()
         };
 
-        let mut game = PostFlopGame::with_config(&config).unwrap();
+        let tree_config = TreeConfig {
+            starting_pot: 60,
+            effective_stack: 970,
+            ..Default::default()
+        };
+
+        let action_tree = ActionTree::with_config(tree_config).unwrap();
+        let mut game = PostFlopGame::with_config(card_config, action_tree).unwrap();
+
         game.allocate_memory(false);
         finalize(&mut game);
 
@@ -2567,16 +2218,22 @@ mod tests {
 
     #[test]
     fn one_raise_all_range() {
-        let config = GameConfig {
+        let card_config = CardConfig {
+            range: [Range::ones(); 2],
             flop: flop_from_str("Td9d6h").unwrap(),
+            ..Default::default()
+        };
+
+        let tree_config = TreeConfig {
             starting_pot: 60,
             effective_stack: 970,
-            range: [Range::ones(); 2],
             river_bet_sizes: [("50%", "").try_into().unwrap(), Default::default()],
             ..Default::default()
         };
 
-        let mut game = PostFlopGame::with_config(&config).unwrap();
+        let action_tree = ActionTree::with_config(tree_config).unwrap();
+        let mut game = PostFlopGame::with_config(card_config, action_tree).unwrap();
+
         game.allocate_memory(false);
         finalize(&mut game);
 
@@ -2592,16 +2249,22 @@ mod tests {
 
     #[test]
     fn one_raise_all_range_compressed() {
-        let config = GameConfig {
+        let card_config = CardConfig {
+            range: [Range::ones(); 2],
             flop: flop_from_str("Td9d6h").unwrap(),
+            ..Default::default()
+        };
+
+        let tree_config = TreeConfig {
             starting_pot: 60,
             effective_stack: 970,
-            range: [Range::ones(); 2],
             river_bet_sizes: [("50%", "").try_into().unwrap(), Default::default()],
             ..Default::default()
         };
 
-        let mut game = PostFlopGame::with_config(&config).unwrap();
+        let action_tree = ActionTree::with_config(tree_config).unwrap();
+        let mut game = PostFlopGame::with_config(card_config, action_tree).unwrap();
+
         game.allocate_memory(true);
         finalize(&mut game);
 
@@ -2617,17 +2280,24 @@ mod tests {
 
     #[test]
     fn one_raise_all_range_with_turn() {
-        let config = GameConfig {
+        let card_config = CardConfig {
             flop: flop_from_str("Td9d6h").unwrap(),
+            range: [Range::ones(); 2],
             turn: card_from_str("Qc").unwrap(),
+            ..Default::default()
+        };
+
+        let tree_config = TreeConfig {
+            initial_state: BoardState::Turn,
             starting_pot: 60,
             effective_stack: 970,
-            range: [Range::ones(); 2],
             river_bet_sizes: [("50%", "").try_into().unwrap(), Default::default()],
             ..Default::default()
         };
 
-        let mut game = PostFlopGame::with_config(&config).unwrap();
+        let action_tree = ActionTree::with_config(tree_config).unwrap();
+        let mut game = PostFlopGame::with_config(card_config, action_tree).unwrap();
+
         game.allocate_memory(false);
         finalize(&mut game);
 
@@ -2643,18 +2313,24 @@ mod tests {
 
     #[test]
     fn one_raise_all_range_with_river() {
-        let config = GameConfig {
+        let card_config = CardConfig {
+            range: [Range::ones(); 2],
             flop: flop_from_str("Td9d6h").unwrap(),
             turn: card_from_str("Qc").unwrap(),
             river: card_from_str("7s").unwrap(),
+        };
+
+        let tree_config = TreeConfig {
+            initial_state: BoardState::River,
             starting_pot: 60,
             effective_stack: 970,
-            range: [Range::ones(); 2],
             river_bet_sizes: [("50%", "").try_into().unwrap(), Default::default()],
             ..Default::default()
         };
 
-        let mut game = PostFlopGame::with_config(&config).unwrap();
+        let action_tree = ActionTree::with_config(tree_config).unwrap();
+        let mut game = PostFlopGame::with_config(card_config, action_tree).unwrap();
+
         game.allocate_memory(false);
         finalize(&mut game);
 
@@ -2672,15 +2348,21 @@ mod tests {
     fn always_win() {
         // be careful for straight flushes
         let lose_range_str = "KK-22,K9-K2,Q8-Q2,J8-J2,T8-T2,92+,82+,72+,62+";
-        let config = GameConfig {
-            flop: flop_from_str("AcAdKh").unwrap(),
-            starting_pot: 60,
-            effective_stack: 970,
+        let card_config = CardConfig {
             range: ["AA".parse().unwrap(), lose_range_str.parse().unwrap()],
+            flop: flop_from_str("AcAdKh").unwrap(),
             ..Default::default()
         };
 
-        let mut game = PostFlopGame::with_config(&config).unwrap();
+        let tree_config = TreeConfig {
+            starting_pot: 60,
+            effective_stack: 970,
+            ..Default::default()
+        };
+
+        let action_tree = ActionTree::with_config(tree_config).unwrap();
+        let mut game = PostFlopGame::with_config(card_config, action_tree).unwrap();
+
         game.allocate_memory(false);
         finalize(&mut game);
 
@@ -2696,30 +2378,42 @@ mod tests {
 
     #[test]
     fn no_assignment() {
-        let config = GameConfig {
-            flop: flop_from_str("Td9d6h").unwrap(),
-            starting_pot: 60,
-            effective_stack: 970,
+        let card_config = CardConfig {
             range: ["TT".parse().unwrap(), "TT".parse().unwrap()],
+            flop: flop_from_str("Td9d6h").unwrap(),
             ..Default::default()
         };
-        let game = PostFlopGame::with_config(&config);
+
+        let tree_config = TreeConfig {
+            starting_pot: 60,
+            effective_stack: 970,
+            ..Default::default()
+        };
+
+        let action_tree = ActionTree::with_config(tree_config).unwrap();
+        let game = PostFlopGame::with_config(card_config, action_tree);
         assert!(game.is_err());
     }
 
     #[test]
     #[cfg(feature = "bincode")]
     fn serialize_and_deserialize() {
-        let config = GameConfig {
+        let card_config = CardConfig {
+            range: [Range::ones(); 2],
             flop: flop_from_str("Td9d6h").unwrap(),
+            ..Default::default()
+        };
+
+        let tree_config = TreeConfig {
             starting_pot: 60,
             effective_stack: 970,
-            range: [Range::ones(); 2],
             river_bet_sizes: [("50%", "").try_into().unwrap(), Default::default()],
             ..Default::default()
         };
 
-        let mut game = PostFlopGame::with_config(&config).unwrap();
+        let action_tree = ActionTree::with_config(tree_config).unwrap();
+        let mut game = PostFlopGame::with_config(card_config, action_tree).unwrap();
+
         game.allocate_memory(false);
         finalize(&mut game);
 
@@ -2755,13 +2449,15 @@ mod tests {
         let oop_range = "88+,A8s+,A5s-A2s:0.5,AJo+,ATo:0.75,K9s+,KQo,KJo:0.75,KTo:0.25,Q9s+,QJo:0.5,J8s+,JTo:0.25,T8s+,T7s:0.45,97s+,96s:0.45,87s,86s:0.75,85s:0.45,75s+:0.75,74s:0.45,65s:0.75,64s:0.5,63s:0.45,54s:0.75,53s:0.5,52s:0.45,43s:0.5,42s:0.45,32s:0.45";
         let ip_range = "AA:0.25,99-22,AJs-A2s,AQo-A8o,K2s+,K9o+,Q2s+,Q9o+,J6s+,J9o+,T6s+,T9o,96s+,95s:0.5,98o,86s+,85s:0.5,75s+,74s:0.5,64s+,63s:0.5,54s,53s:0.5,43s";
 
-        let config = GameConfig {
+        let card_config = CardConfig {
+            range: [oop_range.parse().unwrap(), ip_range.parse().unwrap()],
             flop: flop_from_str("QsJh2h").unwrap(),
-            turn: NOT_DEALT,
-            river: NOT_DEALT,
+            ..Default::default()
+        };
+
+        let tree_config = TreeConfig {
             starting_pot: 180,
             effective_stack: 910,
-            range: [oop_range.parse().unwrap(), ip_range.parse().unwrap()],
             flop_bet_sizes: [
                 ("52%", "45%").try_into().unwrap(),
                 ("52%", "45%").try_into().unwrap(),
@@ -2777,7 +2473,8 @@ mod tests {
             ..Default::default()
         };
 
-        let mut game = PostFlopGame::with_config(&config).unwrap();
+        let action_tree = ActionTree::with_config(tree_config).unwrap();
+        let mut game = PostFlopGame::with_config(card_config, action_tree).unwrap();
         println!(
             "memory usage: {:.2}GB",
             game.memory_usage().0 as f64 / (1024.0 * 1024.0 * 1024.0)
