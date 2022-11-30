@@ -39,9 +39,7 @@
 //! let mut game = PostFlopGame::with_config(card_config, action_tree).unwrap();
 //!
 //! // obtain the private hands
-//! let oop_hands = game.private_hand_cards(0);
-//!
-//! // check oop_hands[0]
+//! let oop_hands = game.private_cards(0);
 //! assert_eq!(card_to_string(oop_hands[0].0).unwrap(), "4c");
 //! assert_eq!(card_to_string(oop_hands[0].1).unwrap(), "5c");
 //!
@@ -159,6 +157,7 @@ mod alloc;
 
 mod action_tree;
 mod bet_size;
+mod card;
 mod game;
 mod hand;
 mod hand_table;
@@ -171,6 +170,7 @@ mod utility;
 
 pub use action_tree::*;
 pub use bet_size::*;
+pub use card::*;
 pub use game::*;
 pub use interface::*;
 pub use mutex_like::*;

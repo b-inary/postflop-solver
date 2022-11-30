@@ -31,7 +31,7 @@ pub trait Game: Send + Sync {
     #[doc(hidden)]
     fn set_solved(&mut self);
 
-    /// Returns the list of isomorphic chances.
+    /// Returns the list of indices that isomorphic chances refer to.
     #[doc(hidden)]
     fn isomorphic_chances(&self, _node: &Self::Node) -> &[u8] {
         &[]

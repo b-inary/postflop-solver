@@ -66,9 +66,7 @@ let action_tree = ActionTree::with_config(tree_config).unwrap();
 let mut game = PostFlopGame::with_config(card_config, action_tree).unwrap();
 
 // obtain the private hands
-let oop_hands = game.private_hand_cards(0);
-
-// check oop_hands[0]
+let oop_hands = game.private_cards(0);
 assert_eq!(card_to_string(oop_hands[0].0).unwrap(), "4c");
 assert_eq!(card_to_string(oop_hands[0].1).unwrap(), "5c");
 

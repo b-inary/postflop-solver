@@ -2,7 +2,8 @@
 
 ## 2022-11-30
 
-- add `merging_threshold` field to `TreeConfig` struct.
+- `merging_threshold` field is added to `TreeConfig` struct.
+- `private_hand_cards` method is renamed to `private_cards` (`PostFlopGame` struct).
 
 ## 2022-11-29
 

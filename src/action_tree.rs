@@ -11,9 +11,6 @@ pub(crate) const PLAYER_MASK: u8 = 3;
 pub(crate) const PLAYER_TERMINAL_FLAG: u8 = 4;
 pub(crate) const PLAYER_FOLD_FLAG: u8 = 12;
 
-/// Constant representing that the card is not yet dealt.
-pub const NOT_DEALT: u8 = 0xff;
-
 /// Available actions of the postflop game.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
 #[cfg_attr(feature = "bincode", derive(Decode, Encode))]
@@ -476,7 +473,7 @@ impl ActionTree {
                 (true, _) => PLAYER_TERMINAL_FLAG,
             };
 
-            node.actions.push(Action::Chance(NOT_DEALT));
+            node.actions.push(Action::Chance(0));
             node.children.push(MutexLike::new(ActionTreeNode {
                 player: next_player,
                 board_state: next_state,
@@ -486,7 +483,7 @@ impl ActionTree {
 
             self.build_tree_recursive(
                 &mut node.children[0].lock(),
-                info.create_next(PLAYER_CHANCE, Action::Chance(NOT_DEALT)),
+                info.create_next(PLAYER_CHANCE, Action::Chance(0)),
             );
         } else {
             self.push_actions(node, &info);
@@ -736,7 +733,7 @@ impl ActionTree {
                 &mut node.children[0].lock(),
                 line,
                 was_removed,
-                info.create_next(PLAYER_CHANCE, Action::Chance(NOT_DEALT)),
+                info.create_next(PLAYER_CHANCE, Action::Chance(0)),
             );
         }
 

@@ -1,7 +1,7 @@
+use crate::card::card_pair_index;
 use once_cell::sync::Lazy;
 use regex::Regex;
 use std::fmt::Write;
-use std::mem;
 use std::str::FromStr;
 
 #[cfg(feature = "bincode")]
@@ -52,17 +52,6 @@ static RANGE_REGEX: Lazy<Regex> = Lazy::new(|| {
 });
 
 static TRIM_REGEX: Lazy<Regex> = Lazy::new(|| Regex::new(r"\s*([-:,])\s*").unwrap());
-
-/// Returns an index of the given card pair.
-///
-/// `"2d2c"` => `0`, `"2h2c"` => `1`, ..., `"AsAh"` => `1325`.
-#[inline]
-pub(crate) fn card_pair_index(mut card1: u8, mut card2: u8) -> usize {
-    if card1 > card2 {
-        mem::swap(&mut card1, &mut card2);
-    }
-    card1 as usize * (101 - card1 as usize) / 2 + card2 as usize - 1
-}
 
 #[inline]
 fn pair_indices(rank: u8) -> Vec<usize> {
@@ -585,6 +574,8 @@ impl Range {
 
     /// Returns whether the two suits are isomorphic.
     pub(crate) fn is_suit_isomorphic(&self, suit1: u8, suit2: u8) -> bool {
+        const EPS: f32 = 1e-5;
+
         let replace_suit = |suit| {
             if suit == suit1 {
                 suit2
@@ -601,7 +592,7 @@ impl Range {
                 let card2_replaced = (card2 & !3) | replace_suit(card2 & 3);
                 let weight = self.get_weight_by_cards(card1, card2);
                 let weight_replaced = self.get_weight_by_cards(card1_replaced, card2_replaced);
-                if (weight - weight_replaced).abs() >= 1e-4 {
+                if (weight - weight_replaced).abs() >= EPS {
                     return false;
                 }
             }
