@@ -75,6 +75,7 @@ pub enum BoardState {
 ///     river_donk_sizes: Some(donk_sizes),
 ///     add_allin_threshold: 1.5,
 ///     force_allin_threshold: 0.15,
+///     merging_threshold: 0.1,
 /// };
 /// ```
 #[derive(Debug, Clone, Default)]
@@ -113,15 +114,16 @@ pub struct TreeConfig {
     ///
     /// Personal recommendation: between `0.1` and `0.2`
     pub force_allin_threshold: f32,
-    // /// Merge bet actions if there are bet actions with "close" values (set `0.0` to disable).
-    // ///
-    // /// Algorithm: The same as PioSOLVER. That is, select the highest bet size (= X% of the pot) and
-    // /// remove all bet actions with a value (= Y% of the pot) satisfying the following inequality:
-    // ///   (100 + X) / (100 + Y) < 1.0 + threshold.
-    // /// Continue this process with the next highest bet size.
-    // ///
-    // /// Personal recommendation: around `0.1`
-    // pub merging_threshold: f32,
+
+    /// Merge bet actions if there are bet actions with "close" values (set `0.0` to disable).
+    ///
+    /// Algorithm: The same as PioSOLVER. That is, select the highest bet size (= X% of the pot) and
+    /// remove all bet actions with a value (= Y% of the pot) satisfying the following inequality:
+    ///   (100 + X) / (100 + Y) < 1.0 + threshold.
+    /// Continue this process with the next highest bet size.
+    ///
+    /// Personal recommendation: around `0.1`
+    pub merging_threshold: f32,
 }
 
 /// A struct representing an abstract game tree.
@@ -438,12 +440,12 @@ impl ActionTree {
             ));
         }
 
-        // if config.merging_threshold < 0.0 {
-        //     return Err(format!(
-        //         "Merging threshold must be non-negative: {}",
-        //         config.merging_threshold
-        //     ));
-        // }
+        if config.merging_threshold < 0.0 {
+            return Err(format!(
+                "Merging threshold must be non-negative: {}",
+                config.merging_threshold
+            ));
+        }
 
         Ok(())
     }
@@ -670,7 +672,8 @@ impl ActionTree {
         actions.sort_unstable();
         actions.dedup();
 
-        // TODO: remove redundant actions
+        // merge bet actions with close amounts
+        actions = merge_bet_actions(actions, pot, opponent_amount, self.config.merging_threshold);
 
         let player_after_call = match num_remaining_streets {
             1 => PLAYER_TERMINAL_FLAG,
@@ -954,6 +957,37 @@ impl Decode for ActionTreeNode {
             children: Decode::decode(decoder)?,
         })
     }
+}
+
+fn merge_bet_actions(actions: Vec<Action>, pot: i32, offset: i32, param: f32) -> Vec<Action> {
+    const EPS: f32 = 2e-7; // 2 ulps
+
+    let get_amount = |action: Action| match action {
+        Action::Bet(amount) | Action::Raise(amount) | Action::AllIn(amount) => amount,
+        _ => -1,
+    };
+
+    let mut cur_amount = i32::MAX;
+    let mut ret = Vec::new();
+
+    for i in (0..actions.len()).rev() {
+        let action = actions[i];
+        let amount = get_amount(action);
+        if amount > 0 {
+            let ratio = (amount - offset) as f32 / pot as f32;
+            let cur_ratio = (cur_amount - offset) as f32 / pot as f32;
+            let threshold_ratio = (cur_ratio - param) / (1.0 + param);
+            if ratio < threshold_ratio * (1.0 - EPS) {
+                ret.push(action);
+                cur_amount = amount;
+            }
+        } else {
+            ret.push(action);
+        }
+    }
+
+    ret.reverse();
+    ret
 }
 
 #[cfg(test)]

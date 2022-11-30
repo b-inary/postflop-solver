@@ -1,5 +1,9 @@
 # List of breaking changes
 
+## 2022-11-30
+
+- add `merging_threshold` field to `TreeConfig` struct.
+
 ## 2022-11-29
 
 - struct `GameConfig` is split into `CardConfig` and `TreeConfig`.

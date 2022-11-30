@@ -31,6 +31,7 @@
 //!     river_donk_sizes: Some(DonkSizeCandidates::try_from("50%").unwrap()),
 //!     add_allin_threshold: 1.5, // add all-in if (maximum bet size) <= 1.5x pot
 //!     force_allin_threshold: 0.15, // force all-in if (SPR after the opponent's call) <= 0.15
+//!     merging_threshold: 0.1,
 //! };
 //!
 //! // build the game tree
