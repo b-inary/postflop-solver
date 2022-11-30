@@ -14,7 +14,7 @@ jobs:
     - name: Install nightly
       run: |
         rustup toolchain install nightly
-        rustup component add clippy --toolchain nightly
+        rustup +nightly component add clippy
     - name: Build
       run: |
         cargo build --release --features bincode

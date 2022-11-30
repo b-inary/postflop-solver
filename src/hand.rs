@@ -70,23 +70,23 @@ impl Hand {
             rankset_of_count[rank_count[rank] as usize] |= 1 << rank;
         }
 
-        let mut is_flush: i32 = -1;
+        let mut flush_suit: i32 = -1;
         for suit in 0..4 {
             if rankset_suit[suit as usize].count_ones() >= 5 {
-                is_flush = suit;
+                flush_suit = suit;
             }
         }
 
         let is_straight = find_straight(rankset);
 
-        if is_flush >= 0 {
-            let is_straight_flush = find_straight(rankset_suit[is_flush as usize]);
+        if flush_suit >= 0 {
+            let is_straight_flush = find_straight(rankset_suit[flush_suit as usize]);
             if is_straight_flush != 0 {
                 // straight flush
                 (8 << 26) | is_straight_flush
             } else {
                 // flush
-                (5 << 26) | keep_n_msb(rankset_suit[is_flush as usize], 5)
+                (5 << 26) | keep_n_msb(rankset_suit[flush_suit as usize], 5)
             }
         } else if rankset_of_count[4] != 0 {
             // four of a kind

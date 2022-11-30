@@ -46,6 +46,7 @@ pub enum Action {
 
 /// An enum representing the board state.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
+#[repr(u8)]
 #[cfg_attr(feature = "bincode", derive(Decode, Encode))]
 pub enum BoardState {
     #[default]
@@ -140,8 +141,8 @@ pub struct ActionTree {
 #[cfg_attr(feature = "bincode", derive(Encode))]
 pub(crate) struct ActionTreeNode {
     pub(crate) player: u8,
-    pub(crate) amount: i32,
     pub(crate) board_state: BoardState,
+    pub(crate) amount: i32,
     pub(crate) actions: Vec<Action>,
     pub(crate) children: Vec<MutexLike<ActionTreeNode>>,
 }
@@ -154,7 +155,7 @@ struct BuildTreeInfo {
     bet_amount: [i32; 2],
 }
 
-type Exported = (
+type EjectedActionTree = (
     TreeConfig,
     Vec<Vec<Action>>,
     Vec<Vec<Action>>,
@@ -381,9 +382,9 @@ impl ActionTree {
         self.remove_line(&action_history)
     }
 
-    /// Exports the fields.
+    /// Ejects the fields.
     #[inline]
-    pub(crate) fn export(self) -> Exported {
+    pub(crate) fn eject(self) -> EjectedActionTree {
         (self.config, self.added_lines, self.removed_lines, self.root)
     }
 
@@ -476,8 +477,8 @@ impl ActionTree {
             node.actions.push(Action::Chance(NOT_DEALT));
             node.children.push(MutexLike::new(ActionTreeNode {
                 player: next_player,
-                amount: node.amount,
                 board_state: next_state,
+                amount: node.amount,
                 ..Default::default()
             }));
 
@@ -701,8 +702,8 @@ impl ActionTree {
             node.actions.push(action);
             node.children.push(MutexLike::new(ActionTreeNode {
                 player: next_player,
-                amount,
                 board_state: node.board_state,
+                amount,
                 ..Default::default()
             }));
         }
@@ -838,8 +839,8 @@ impl ActionTree {
             index,
             MutexLike::new(ActionTreeNode {
                 player: next_player,
-                amount,
                 board_state: node.board_state,
+                amount,
                 ..Default::default()
             }),
         );
@@ -947,8 +948,8 @@ impl Decode for ActionTreeNode {
     fn decode<D: bincode::de::Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
         Ok(ActionTreeNode {
             player: Decode::decode(decoder)?,
-            amount: Decode::decode(decoder)?,
             board_state: Decode::decode(decoder)?,
+            amount: Decode::decode(decoder)?,
             actions: Decode::decode(decoder)?,
             children: Decode::decode(decoder)?,
         })

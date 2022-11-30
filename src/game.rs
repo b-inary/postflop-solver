@@ -386,7 +386,7 @@ impl PostFlopGame {
             self.added_lines,
             self.removed_lines,
             self.action_root,
-        ) = action_tree.export();
+        ) = action_tree.eject();
         self.check_card_config()?;
         self.init();
         Ok(())
