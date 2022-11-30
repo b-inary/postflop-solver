@@ -6,6 +6,7 @@ pub(crate) struct Hand {
     num_cards: usize,
 }
 
+#[inline]
 fn keep_n_msb(mut x: i32, n: i32) -> i32 {
     let mut ret = 0;
     for _ in 0..n {
@@ -16,6 +17,7 @@ fn keep_n_msb(mut x: i32, n: i32) -> i32 {
     ret
 }
 
+#[inline]
 fn find_straight(rankset: i32) -> i32 {
     const WHEEL: i32 = 0b1_0000_0000_1111;
     let is_straight = rankset & (rankset << 1) & (rankset << 2) & (rankset << 3) & (rankset << 4);
@@ -127,11 +129,10 @@ impl Hand {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashSet;
 
     #[test]
     fn test_all_hands() {
-        let mut value_set = HashSet::new();
+        let mut appeared = vec![false; HAND_TABLE.len()];
         let mut counter = [0; 9];
 
         for i in 0..52 {
@@ -148,10 +149,11 @@ mod tests {
                                 let hand = hand.add_card(p);
                                 for q in (p + 1)..52 {
                                     let hand = hand.add_card(q);
-                                    let value = hand.evaluate_internal();
-                                    value_set.insert(value);
-                                    counter[(value >> 26) as usize] += 1;
-                                    assert!(HAND_TABLE.binary_search(&value).is_ok());
+                                    let raw_value = hand.evaluate_internal();
+                                    let index_result = HAND_TABLE.binary_search(&raw_value);
+                                    assert!(index_result.is_ok());
+                                    appeared[index_result.unwrap()] = true;
+                                    counter[(raw_value >> 26) as usize] += 1;
                                 }
                             }
                         }
@@ -160,7 +162,7 @@ mod tests {
             }
         }
 
-        assert_eq!(value_set.len(), 4824);
+        assert!(appeared.iter().all(|&x| x));
         assert_eq!(counter[8], 41584); // straight flush
         assert_eq!(counter[7], 224848); // four of a kind
         assert_eq!(counter[6], 3473184); // full house
