@@ -6,9 +6,7 @@ use std::io::{self, Write};
 use std::ptr;
 
 #[cfg(feature = "custom-alloc")]
-use crate::alloc::*;
-#[cfg(feature = "custom-alloc")]
-use std::vec;
+use {crate::alloc::*, std::vec};
 
 struct DiscountParams {
     alpha_t: f32,

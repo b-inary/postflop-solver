@@ -4,9 +4,7 @@ use crate::sliceop::*;
 use std::ptr;
 
 #[cfg(feature = "custom-alloc")]
-use crate::alloc::*;
-#[cfg(feature = "custom-alloc")]
-use std::vec;
+use {crate::alloc::*, std::vec};
 
 #[cfg(feature = "rayon")]
 use rayon::prelude::*;

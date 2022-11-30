@@ -236,15 +236,12 @@ impl CardConfig {
             flop_rankset[suit as usize] |= 1 << rank;
         }
 
+        let mut isomorphic_suit = [None; 4];
+        let mut reverse_table = [usize::MAX; 52 * 51 / 2];
+
         let mut turn_isomorphism_ref = Vec::new();
         let mut turn_isomorphism_card = Vec::new();
         let mut turn_isomorphism_swap = Default::default();
-        let mut river_isomorphism_ref = vec![Vec::new(); 52];
-        let mut river_isomorphism_card = vec![Vec::new(); 52];
-        let mut river_isomorphism_swap = vec![Default::default(); 52];
-
-        let mut isomorphic_suit = [None; 4];
-        let mut reverse_table = [usize::MAX; 52 * 51 / 2];
 
         // turn isomorphism
         if self.turn == NOT_DEALT {
@@ -273,6 +270,10 @@ impl CardConfig {
                 &isomorphic_suit,
             );
         }
+
+        let mut river_isomorphism_ref = vec![Vec::new(); 52];
+        let mut river_isomorphism_card = vec![Vec::new(); 52];
+        let mut river_isomorphism_swap = vec![Default::default(); 52];
 
         // river isomorphism
         if self.river == NOT_DEALT {
@@ -347,6 +348,7 @@ impl CardConfig {
         for player in 0..2 {
             reverse_table.fill(usize::MAX);
             let cards = &private_cards[player];
+
             for i in 0..cards.len() {
                 reverse_table[card_pair_index(cards[i].0, cards[i].1)] = i;
             }
@@ -355,7 +357,7 @@ impl CardConfig {
                 let c1 = replacer(c1);
                 let c2 = replacer(c2);
                 let index = reverse_table[card_pair_index(c1, c2)];
-                if index != usize::MAX && i < index {
+                if i < index {
                     swap_list[player].push((i as u16, index as u16));
                 }
             }
@@ -392,5 +394,161 @@ impl CardConfig {
 
 #[cfg(test)]
 mod tests {
-    // TODO
+    use super::*;
+
+    #[test]
+    fn test_card_pair_index() {
+        assert_eq!(card_pair_index(0, 1), 0);
+        assert_eq!(card_pair_index(0, 2), 1);
+        assert_eq!(card_pair_index(0, 51), 50);
+        assert_eq!(card_pair_index(1, 2), 51);
+        assert_eq!(card_pair_index(1, 51), 100);
+        assert_eq!(card_pair_index(50, 51), 1325);
+    }
+
+    #[test]
+    fn test_card_pair_index_reverse() {
+        for i in 0..52 {
+            for j in (i + 1)..52 {
+                assert_eq!(card_pair_index(i, j), card_pair_index(j, i));
+            }
+        }
+    }
+
+    #[test]
+    fn test_valid_indices() {
+        let oop_range_str = "66+,A8s+,A5s-A4s,AJo+,K9s+,KQo,QTs+,JTs,96s+,85s+,75s+,65s,54s";
+        let ip_range_str = "QQ-22,AQs-A2s,ATo+,K5s+,KJo+,Q8s+,J8s+,T7s+,96s+,86s+,75s+,64s+,53s+";
+
+        let oop_range = oop_range_str.parse::<Range>().unwrap();
+        let ip_range = ip_range_str.parse::<Range>().unwrap();
+
+        let card_config = CardConfig {
+            range: [oop_range, ip_range],
+            flop: flop_from_str("Td9d6h").unwrap(),
+            turn: card_from_str("Qc").unwrap(),
+            river: NOT_DEALT,
+        };
+
+        let dead_cards_mask = (1 << card_config.flop[0])
+            | (1 << card_config.flop[1])
+            | (1 << card_config.flop[2])
+            | (1 << card_config.turn);
+
+        let private_cards = [
+            oop_range.get_hands_weights(dead_cards_mask).0,
+            ip_range.get_hands_weights(dead_cards_mask).0,
+        ];
+
+        let (ret_flop, ret_turn, ret_river) = card_config.valid_indices(&private_cards);
+
+        let hand_mask = |(c1, c2): (u8, u8)| -> u64 { (1 << c1) | (1 << c2) };
+
+        for player in 0..2 {
+            assert!(ret_flop[player].is_empty());
+
+            for turn in 0..52 {
+                if turn != card_config.turn {
+                    assert!(ret_turn[turn as usize][player].is_empty());
+                }
+            }
+
+            assert!(!ret_turn[card_config.turn as usize][player].is_empty());
+
+            // specific for this test case
+            assert_eq!(ret_turn[card_config.turn as usize][player][0], 0);
+            assert_eq!(
+                *ret_turn[card_config.turn as usize][player].last().unwrap() as usize,
+                private_cards[player].len() - 1
+            );
+
+            for w in ret_turn[card_config.turn as usize][player].windows(2) {
+                let (i, j) = (w[0] as usize, w[1] as usize);
+                assert!(i < j);
+                assert_eq!(hand_mask(private_cards[player][i]) & dead_cards_mask, 0);
+                for k in (i + 1)..j {
+                    assert_ne!(hand_mask(private_cards[player][k]) & dead_cards_mask, 0);
+                }
+            }
+
+            for board1 in 0..52 {
+                for board2 in (board1 + 1)..52 {
+                    let index = card_pair_index(board1, board2);
+                    let river = match (board1, board2) {
+                        (c1, c2) if c1 == card_config.turn => c2,
+                        (c1, c2) if c2 == card_config.turn => c1,
+                        _ => NOT_DEALT,
+                    };
+
+                    if river == NOT_DEALT || (1 << river) & dead_cards_mask != 0 {
+                        assert!(ret_river[index][player].is_empty());
+                    } else {
+                        assert!(!ret_river[index][player].is_empty());
+
+                        let dead_cards_mask = dead_cards_mask | (1 << river);
+                        for w in ret_river[index][player].windows(2) {
+                            let (i, j) = (w[0] as usize, w[1] as usize);
+                            assert!(i < j);
+                            assert_eq!(hand_mask(private_cards[player][i]) & dead_cards_mask, 0);
+                            assert_eq!(hand_mask(private_cards[player][j]) & dead_cards_mask, 0);
+                            for k in (i + 1)..j {
+                                assert_ne!(
+                                    hand_mask(private_cards[player][k]) & dead_cards_mask,
+                                    0
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_hand_strength() {
+        let oop_range_str = "66+,A8s+,A5s-A4s,AJo+,K9s+,KQo,QTs+,JTs,96s+,85s+,75s+,65s,54s";
+        let ip_range_str = "QQ-22,AQs-A2s,ATo+,K5s+,KJo+,Q8s+,J8s+,T7s+,96s+,86s+,75s+,64s+,53s+";
+
+        let oop_range = oop_range_str.parse::<Range>().unwrap();
+        let ip_range = ip_range_str.parse::<Range>().unwrap();
+
+        let card_config = CardConfig {
+            range: [oop_range, ip_range],
+            flop: flop_from_str("Td9d6h").unwrap(),
+            turn: card_from_str("Qc").unwrap(),
+            river: NOT_DEALT,
+        };
+
+        let dead_cards_mask = (1 << card_config.flop[0])
+            | (1 << card_config.flop[1])
+            | (1 << card_config.flop[2])
+            | (1 << card_config.turn);
+
+        let private_cards = [
+            oop_range.get_hands_weights(dead_cards_mask).0,
+            ip_range.get_hands_weights(dead_cards_mask).0,
+        ];
+
+        let (_, _, ret_river) = card_config.valid_indices(&private_cards);
+        let hand_strength = card_config.hand_strength(&private_cards);
+
+        for board1 in 0..52 {
+            for board2 in (board1 + 1)..52 {
+                let index = card_pair_index(board1, board2);
+                let river = match (board1, board2) {
+                    (c1, c2) if c1 == card_config.turn => c2,
+                    (c1, c2) if c2 == card_config.turn => c1,
+                    _ => NOT_DEALT,
+                };
+
+                if river == NOT_DEALT || (1 << river) & dead_cards_mask != 0 {
+                    assert!(hand_strength[index][0].is_empty());
+                    assert!(hand_strength[index][1].is_empty());
+                } else {
+                    assert_eq!(hand_strength[index][0].len(), ret_river[index][0].len() + 2);
+                    assert_eq!(hand_strength[index][1].len(), ret_river[index][1].len() + 2);
+                }
+            }
+        }
+    }
 }

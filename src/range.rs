@@ -191,6 +191,7 @@ fn suit_to_char(suit: u8) -> Result<char, String> {
 /// assert_eq!(card_to_string(5), Ok("3d".to_string()));
 /// assert_eq!(card_to_string(10), Ok("4h".to_string()));
 /// assert_eq!(card_to_string(51), Ok("As".to_string()));
+/// assert!(card_to_string(52).is_err());
 /// ```
 #[inline]
 pub fn card_to_string(card: u8) -> Result<String, String> {
@@ -213,6 +214,7 @@ pub fn card_to_string(card: u8) -> Result<String, String> {
 /// assert_eq!(card_from_chars(&mut chars), Ok(5));
 /// assert_eq!(card_from_chars(&mut chars), Ok(10));
 /// assert_eq!(card_from_chars(&mut chars), Ok(51));
+/// assert!(card_from_chars(&mut chars).is_err());
 /// ```
 #[inline]
 pub fn card_from_chars<T: Iterator<Item = char>>(chars: &mut T) -> Result<u8, String> {
@@ -260,6 +262,7 @@ pub fn card_from_str(s: &str) -> Result<u8, String> {
 ///
 /// assert_eq!(flop_from_str("2c3d4h"), Ok([0, 5, 10]));
 /// assert_eq!(flop_from_str("As Ah Ks"), Ok([47, 50, 51]));
+/// assert!(flop_from_str("2c3d4h5s").is_err());
 /// ```
 #[inline]
 pub fn flop_from_str(s: &str) -> Result<[u8; 3], String> {

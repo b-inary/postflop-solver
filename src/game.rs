@@ -11,17 +11,16 @@ use std::slice;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
 #[cfg(feature = "bincode")]
-use bincode::{
-    error::{DecodeError, EncodeError},
-    Decode, Encode,
+use {
+    bincode::{
+        error::{DecodeError, EncodeError},
+        Decode, Encode,
+    },
+    std::cell::Cell,
 };
-#[cfg(feature = "bincode")]
-use std::cell::Cell;
 
 #[cfg(feature = "custom-alloc")]
-use crate::alloc::*;
-#[cfg(feature = "custom-alloc")]
-use std::vec;
+use {crate::alloc::*, std::vec};
 
 /// A struct representing a postflop game.
 pub struct PostFlopGame {
@@ -1833,17 +1832,10 @@ mod tests {
     use crate::solver::*;
 
     #[cfg(feature = "bincode")]
-    use std::fs::File;
-    #[cfg(feature = "bincode")]
-    use std::io::{BufReader, BufWriter, Write};
-
-    #[test]
-    fn test_flop_from_str() {
-        let tests = [("Qs Jh 2h", [2, 38, 43]), ("Td9d6h", [18, 29, 33])];
-        for test in tests {
-            assert_eq!(flop_from_str(test.0).unwrap(), test.1);
-        }
-    }
+    use std::{
+        fs::File,
+        io::{BufReader, BufWriter, Write},
+    };
 
     #[test]
     fn all_check_all_range() {
