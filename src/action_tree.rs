@@ -970,8 +970,7 @@ fn merge_bet_actions(actions: Vec<Action>, pot: i32, offset: i32, param: f32) ->
     let mut cur_amount = i32::MAX;
     let mut ret = Vec::new();
 
-    for i in (0..actions.len()).rev() {
-        let action = actions[i];
+    for &action in actions.iter().rev() {
         let amount = get_amount(action);
         if amount > 0 {
             let ratio = (amount - offset) as f32 / pot as f32;
