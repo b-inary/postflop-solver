@@ -132,7 +132,6 @@ pub struct ActionTree {
     root: Box<MutexLike<ActionTreeNode>>,
     action_history: Vec<Action>,
     node_history: Vec<*const ActionTreeNode>,
-    info_history: Vec<BuildTreeInfo>,
 }
 
 // automatic derive of `Decode` does not work (2.0.0-rc.2)
@@ -188,7 +187,6 @@ impl ActionTree {
 
         self.action_history.clear();
         self.node_history = vec![&*self.root.lock()];
-        self.info_history = vec![BuildTreeInfo::default()];
 
         Ok(())
     }
@@ -249,7 +247,6 @@ impl ActionTree {
         if self.action_history.starts_with(line) {
             self.action_history.truncate(line.len() - 1);
             self.node_history.truncate(line.len());
-            self.info_history.truncate(line.len());
         }
         Ok(())
     }
@@ -289,12 +286,8 @@ impl ActionTree {
         }
 
         let index = search_result.unwrap();
-        let current_info = self.info_history.last().unwrap();
-        let next_info = current_info.create_next(node.player, action);
-
         self.node_history.push(&*node.children[index].lock());
         self.action_history.push(action);
-        self.info_history.push(next_info);
 
         Ok(())
     }
@@ -308,7 +301,6 @@ impl ActionTree {
 
         self.action_history.pop();
         self.node_history.pop();
-        self.info_history.pop();
 
         Ok(())
     }
@@ -318,7 +310,6 @@ impl ActionTree {
     pub fn back_to_root(&mut self) {
         self.action_history.clear();
         self.node_history = vec![&*self.root.lock()];
-        self.info_history = vec![BuildTreeInfo::default()];
     }
 
     /// Obtains the current action history.
@@ -406,6 +397,7 @@ impl ActionTree {
     }
 
     /// Checks the configuration.
+    #[inline]
     fn check_config(&self) -> Result<(), String> {
         let config = &self.config;
 
@@ -945,6 +937,7 @@ impl BuildTreeInfo {
 
 #[cfg(feature = "bincode")]
 impl Decode for ActionTreeNode {
+    #[inline]
     fn decode<D: bincode::de::Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
         Ok(ActionTreeNode {
             player: Decode::decode(decoder)?,
@@ -984,9 +977,4 @@ fn merge_bet_actions(actions: Vec<Action>, pot: i32, offset: i32, param: f32) ->
 
     ret.reverse();
     ret
-}
-
-#[cfg(test)]
-mod tests {
-    // TODO
 }

@@ -86,6 +86,7 @@ impl<'a, T: ?Sized + 'a> DerefMut for MutexGuardLike<'a, T> {
 
 #[cfg(feature = "bincode")]
 impl<T: Encode> Encode for MutexLike<T> {
+    #[inline]
     fn encode<E: bincode::enc::Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
         self.lock().encode(encoder)
     }
@@ -93,6 +94,7 @@ impl<T: Encode> Encode for MutexLike<T> {
 
 #[cfg(feature = "bincode")]
 impl<T: Decode> Decode for MutexLike<T> {
+    #[inline]
     fn decode<D: bincode::de::Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
         Ok(Self::new(T::decode(decoder)?))
     }
