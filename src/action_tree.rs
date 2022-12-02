@@ -192,6 +192,15 @@ impl ActionTree {
         &self.removed_lines
     }
 
+    /// Returns a list of all terminal nodes that should not be.
+    #[inline]
+    pub fn invalid_terminals(&self) -> Vec<Vec<Action>> {
+        let mut ret = Vec::new();
+        let mut line = Vec::new();
+        Self::invalid_terminals_recursive(&self.root.lock(), &mut ret, &mut line);
+        ret
+    }
+
     /// Adds a given line to the action tree.
     ///
     /// - `line` except the last action must exist in the current tree.
@@ -255,6 +264,12 @@ impl ActionTree {
             .collect()
     }
 
+    /// Returns whether the current node is a chance node.
+    #[inline]
+    pub fn is_chance_node(&self) -> bool {
+        self.current_node().is_chance()
+    }
+
     /// Plays the given action. Returns `Ok(())` if the action is valid.
     ///
     /// The `action` must be one of the possible actions at the current node.
@@ -309,12 +324,6 @@ impl ActionTree {
             self.play(*action)?;
         }
         Ok(())
-    }
-
-    /// Returns whether the current node is a chance node.
-    #[inline]
-    pub fn is_chance_node(&self) -> bool {
-        self.current_node().is_chance()
     }
 
     /// Adds a given action to the current node.
@@ -683,6 +692,25 @@ impl ActionTree {
 
         node.actions.shrink_to_fit();
         node.children.shrink_to_fit();
+    }
+
+    /// Recursive function to enumerate all invalid terminal nodes.
+    fn invalid_terminals_recursive(
+        node: &ActionTreeNode,
+        result: &mut Vec<Vec<Action>>,
+        line: &mut Vec<Action>,
+    ) {
+        if node.is_terminal() {
+            // Do nothing
+        } else if node.children.is_empty() {
+            result.push(line.clone());
+        } else {
+            for (&action, child) in node.actions.iter().zip(node.children.iter()) {
+                line.push(action);
+                Self::invalid_terminals_recursive(&child.lock(), result, line);
+                line.pop();
+            }
+        }
     }
 
     /// Recursive function to add a given line to the tree.
