@@ -1,14 +1,19 @@
 # List of breaking changes
 
+## 2022-12-02
+
+- `ActionTree`: `new` constructor now takes a `TreeConfig` argument.
+- `ActionTree`: `with_config` and `update_config` methods are removed.
+
 ## 2022-11-30
 
-- `merging_threshold` field is added to `TreeConfig` struct.
-- `private_hand_cards` method is renamed to `private_cards` (`PostFlopGame` struct).
+- `TreeConfig`: `merging_threshold` field is added.
+- `PostFlopGame`: `private_hand_cards` method is renamed to `private_cards`.
 
 ## 2022-11-29
 
 - struct `GameConfig` is split into `CardConfig` and `TreeConfig`.
-- new struct `ActionTree` that takes `TreeConfig` for instantiation.
+- new struct `ActionTree` is added: takes `TreeConfig` for instantiation.
 - now `PostFlopGame` takes `CardConfig` and `ActionTree` for instantiation.
 - `add_all_in_threshold` and `force_all_in_threshold` are renamed to `add_allin_threshold` and `force_allin_threshold`, respectively (`all_in` -> `allin`).
 - `adjust_bet_size_before_all_in` (renamed from `adjust_last_two_bet_sizes`) is removed.
