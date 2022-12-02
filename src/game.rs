@@ -1851,7 +1851,7 @@ mod tests {
             ..Default::default()
         };
 
-        let action_tree = ActionTree::with_config(tree_config).unwrap();
+        let action_tree = ActionTree::new(tree_config).unwrap();
         let mut game = PostFlopGame::with_config(card_config, action_tree).unwrap();
 
         game.allocate_memory(false);
@@ -1882,7 +1882,7 @@ mod tests {
             ..Default::default()
         };
 
-        let action_tree = ActionTree::with_config(tree_config).unwrap();
+        let action_tree = ActionTree::new(tree_config).unwrap();
         let mut game = PostFlopGame::with_config(card_config, action_tree).unwrap();
 
         game.allocate_memory(false);
@@ -1913,7 +1913,7 @@ mod tests {
             ..Default::default()
         };
 
-        let action_tree = ActionTree::with_config(tree_config).unwrap();
+        let action_tree = ActionTree::new(tree_config).unwrap();
         let mut game = PostFlopGame::with_config(card_config, action_tree).unwrap();
 
         game.allocate_memory(true);
@@ -1946,7 +1946,7 @@ mod tests {
             ..Default::default()
         };
 
-        let action_tree = ActionTree::with_config(tree_config).unwrap();
+        let action_tree = ActionTree::new(tree_config).unwrap();
         let mut game = PostFlopGame::with_config(card_config, action_tree).unwrap();
 
         game.allocate_memory(false);
@@ -1979,7 +1979,7 @@ mod tests {
             ..Default::default()
         };
 
-        let action_tree = ActionTree::with_config(tree_config).unwrap();
+        let action_tree = ActionTree::new(tree_config).unwrap();
         let mut game = PostFlopGame::with_config(card_config, action_tree).unwrap();
 
         game.allocate_memory(false);
@@ -2011,7 +2011,7 @@ mod tests {
             ..Default::default()
         };
 
-        let action_tree = ActionTree::with_config(tree_config).unwrap();
+        let action_tree = ActionTree::new(tree_config).unwrap();
         let mut game = PostFlopGame::with_config(card_config, action_tree).unwrap();
 
         game.allocate_memory(false);
@@ -2041,7 +2041,7 @@ mod tests {
             ..Default::default()
         };
 
-        let action_tree = ActionTree::with_config(tree_config).unwrap();
+        let action_tree = ActionTree::new(tree_config).unwrap();
         let game = PostFlopGame::with_config(card_config, action_tree);
         assert!(game.is_err());
     }
@@ -2062,7 +2062,7 @@ mod tests {
             ..Default::default()
         };
 
-        let action_tree = ActionTree::with_config(tree_config).unwrap();
+        let action_tree = ActionTree::new(tree_config).unwrap();
         let mut game = PostFlopGame::with_config(card_config, action_tree).unwrap();
 
         game.allocate_memory(false);
@@ -2124,7 +2124,7 @@ mod tests {
             ..Default::default()
         };
 
-        let action_tree = ActionTree::with_config(tree_config).unwrap();
+        let action_tree = ActionTree::new(tree_config).unwrap();
         let mut game = PostFlopGame::with_config(card_config, action_tree).unwrap();
         println!(
             "memory usage: {:.2}GB",

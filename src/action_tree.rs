@@ -161,34 +161,17 @@ type EjectedActionTree = (
 );
 
 impl ActionTree {
-    /// Creates a new empty [`ActionTree`] (needs `update_config()` to build a tree).
-    #[inline]
-    pub fn new() -> Self {
-        Self::default()
-    }
-
     /// Creates a new [`ActionTree`] with the specified configuration.
     #[inline]
-    pub fn with_config(config: TreeConfig) -> Result<Self, String> {
-        let mut tree = Self::new();
-        tree.update_config(config)?;
-        Ok(tree)
-    }
-
-    /// Updates the configuration of the game tree.
-    #[inline]
-    pub fn update_config(&mut self, config: TreeConfig) -> Result<(), String> {
-        self.config = config;
-        self.added_lines.clear();
-        self.removed_lines.clear();
-
-        self.check_config()?;
-        self.build_tree();
-
-        self.action_history.clear();
-        self.node_history = vec![&*self.root.lock()];
-
-        Ok(())
+    pub fn new(config: TreeConfig) -> Result<Self, String> {
+        Self::check_config(&config)?;
+        let mut ret = Self {
+            config,
+            ..Default::default()
+        };
+        ret.build_tree();
+        ret.node_history.push(&*ret.root.lock());
+        Ok(ret)
     }
 
     /// Obtains the configuration of the game tree.
@@ -398,9 +381,7 @@ impl ActionTree {
 
     /// Checks the configuration.
     #[inline]
-    fn check_config(&self) -> Result<(), String> {
-        let config = &self.config;
-
+    fn check_config(config: &TreeConfig) -> Result<(), String> {
         if config.starting_pot <= 0 {
             return Err(format!(
                 "Starting pot must be positive: {}",
