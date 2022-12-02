@@ -35,7 +35,7 @@
 //! };
 //!
 //! // build the game tree
-//! let action_tree = ActionTree::with_config(tree_config).unwrap();
+//! let action_tree = ActionTree::new(tree_config).unwrap();
 //! let mut game = PostFlopGame::with_config(card_config, action_tree).unwrap();
 //!
 //! // obtain the private hands
