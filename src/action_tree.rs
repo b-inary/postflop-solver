@@ -130,8 +130,7 @@ pub struct ActionTree {
     added_lines: Vec<Vec<Action>>,
     removed_lines: Vec<Vec<Action>>,
     root: Box<MutexLike<ActionTreeNode>>,
-    action_history: Vec<Action>,
-    node_history: Vec<*const ActionTreeNode>,
+    history: Vec<Action>,
 }
 
 // automatic derive of `Decode` does not work (2.0.0-rc.2)
@@ -170,7 +169,6 @@ impl ActionTree {
             ..Default::default()
         };
         ret.build_tree();
-        ret.node_history.push(&*ret.root.lock());
         Ok(ret)
     }
 
@@ -236,9 +234,8 @@ impl ActionTree {
         } else {
             self.removed_lines.push(line.to_vec());
         }
-        if self.action_history.starts_with(line) {
-            self.action_history.truncate(line.len() - 1);
-            self.node_history.truncate(line.len());
+        if self.history.starts_with(line) {
+            self.history.truncate(line.len() - 1);
         }
         Ok(())
     }
@@ -278,50 +275,43 @@ impl ActionTree {
     #[inline]
     pub fn play(&mut self, action: Action) -> Result<(), String> {
         let node = self.current_node_skip_chance();
-        let search_result = node.actions.binary_search(&action);
-        if search_result.is_err() {
+        if !node.actions.contains(&action) {
             return Err(format!("Action `{:?}` is not available", action));
         }
 
-        let index = search_result.unwrap();
-        self.node_history.push(&*node.children[index].lock());
-        self.action_history.push(action);
-
+        self.history.push(action);
         Ok(())
     }
 
     /// Undoes the last action. Returns `Ok(())` if the action is successfully undone.
     #[inline]
     pub fn undo(&mut self) -> Result<(), String> {
-        if self.action_history.is_empty() {
+        if self.history.is_empty() {
             return Err("No action to undo".to_string());
         }
 
-        self.action_history.pop();
-        self.node_history.pop();
-
+        self.history.pop();
         Ok(())
     }
 
     /// Moves back to the root node.
     #[inline]
     pub fn back_to_root(&mut self) {
-        self.action_history.clear();
-        self.node_history = vec![&*self.root.lock()];
+        self.history.clear();
     }
 
     /// Obtains the current action history.
     #[inline]
     pub fn history(&self) -> &[Action] {
-        &self.action_history
+        &self.history
     }
 
     /// Applies the given action history from the root node.
     #[inline]
     pub fn apply_history(&mut self, history: &[Action]) -> Result<(), String> {
         self.back_to_root();
-        for action in history {
-            self.play(*action)?;
+        for &action in history {
+            self.play(action)?;
         }
         Ok(())
     }
@@ -334,7 +324,7 @@ impl ActionTree {
     /// [`add_line`]: #method.add_line
     #[inline]
     pub fn add_action(&mut self, action: Action) -> Result<(), String> {
-        let mut action_line = self.action_history.clone();
+        let mut action_line = self.history.clone();
         action_line.push(action);
         self.add_line(&action_line)
     }
@@ -347,7 +337,7 @@ impl ActionTree {
     /// [`remove_line`]: #method.remove_line
     #[inline]
     pub fn remove_action(&mut self, action: Action) -> Result<(), String> {
-        let mut action_line = self.action_history.clone();
+        let mut action_line = self.history.clone();
         action_line.push(action);
         self.remove_line(&action_line)
     }
@@ -360,8 +350,8 @@ impl ActionTree {
     /// [`remove_line`]: #method.remove_line
     #[inline]
     pub fn remove_current_node(&mut self) -> Result<(), String> {
-        let action_history = self.action_history.clone();
-        self.remove_line(&action_history)
+        let history = self.history.clone();
+        self.remove_line(&history)
     }
 
     /// Ejects the fields.
@@ -373,14 +363,21 @@ impl ActionTree {
     /// Returns the reference to the current node.
     #[inline]
     fn current_node(&self) -> &ActionTreeNode {
-        unsafe { &**self.node_history.last().unwrap() }
+        unsafe {
+            let mut node = &*self.root.lock() as *const ActionTreeNode;
+            for action in &self.history {
+                let index = (*node).actions.iter().position(|x| x == action).unwrap();
+                node = &*(*node).children[index].lock();
+            }
+            &*node
+        }
     }
 
     /// Returns the reference to the current node skipping chance nodes.
     #[inline]
     fn current_node_skip_chance(&self) -> &ActionTreeNode {
         unsafe {
-            let mut node = *self.node_history.last().unwrap();
+            let mut node = self.current_node() as *const ActionTreeNode;
             while (*node).is_chance() {
                 node = &*(*node).children[0].lock();
             }
