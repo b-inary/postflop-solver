@@ -55,8 +55,8 @@ pub fn solve<T: Game>(
     let mut exploitability = compute_exploitability(game);
 
     if print_progress {
-        print!("iteration: 0 / {} ", max_num_iterations);
-        print!("(exploitability = {:.4e}[bb])", exploitability);
+        print!("iteration: 0 / {max_num_iterations} ");
+        print!("(exploitability = {exploitability:.4e}[bb])");
         io::stdout().flush().unwrap();
     }
 
@@ -86,7 +86,7 @@ pub fn solve<T: Game>(
 
         if print_progress {
             print!("\riteration: {} / {} ", t + 1, max_num_iterations);
-            print!("(exploitability = {:.4e}[bb])", exploitability);
+            print!("(exploitability = {exploitability:.4e}[bb])");
             io::stdout().flush().unwrap();
         }
     }

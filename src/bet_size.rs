@@ -146,17 +146,17 @@ fn parse_float(s: &str) -> Option<f64> {
 
 fn bet_size_from_str(s: &str, allow_prev_bet_rel: bool) -> Result<BetSize, String> {
     let s_lower = s.to_lowercase();
-    let err_msg = format!("Invalid bet size: {}", s);
+    let err_msg = format!("Invalid bet size: {s}");
 
     if let Some(prev_bet_rel) = s_lower.strip_suffix('x') {
         // Previous bet relative
         if !allow_prev_bet_rel {
-            let err_msg = format!("Relative size to the previous bet is not allowed: {}", s);
+            let err_msg = format!("Relative size to the previous bet is not allowed: {s}");
             Err(err_msg)
         } else {
             let float = parse_float(prev_bet_rel).ok_or(&err_msg)?;
             if float <= 1.0 {
-                let err_msg = format!("Multiplier must be greater than 1.0: {}", s);
+                let err_msg = format!("Multiplier must be greater than 1.0: {s}");
                 Err(err_msg)
             } else {
                 Ok(BetSize::PrevBetRelative(float as f32))
@@ -166,9 +166,9 @@ fn bet_size_from_str(s: &str, allow_prev_bet_rel: bool) -> Result<BetSize, Strin
         // Additive
         let float = parse_float(add).ok_or(&err_msg)?;
         if float.trunc() != float {
-            Err(format!("Additional size must be an integer: {}", s))
+            Err(format!("Additional size must be an integer: {s}"))
         } else if float > i32::MAX as f64 {
-            Err(format!("Additional size must be less than 2^31: {}", s))
+            Err(format!("Additional size must be less than 2^31: {s}"))
         } else {
             Ok(BetSize::Additive(float as i32))
         }
@@ -183,10 +183,10 @@ fn bet_size_from_str(s: &str, allow_prev_bet_rel: bool) -> Result<BetSize, Strin
         } else {
             let float = parse_float(num_streets_str).ok_or(&err_msg)?;
             if float.trunc() != float || float == 0.0 {
-                let err_msg = format!("Number of streets must be a positive integer: {}", s);
+                let err_msg = format!("Number of streets must be a positive integer: {s}");
                 return Err(err_msg);
             } else if float > 100.0 {
-                let err_msg = format!("Number of streets must be less than or equal to 100: {}", s);
+                let err_msg = format!("Number of streets must be less than or equal to 100: {s}");
                 return Err(err_msg);
             } else {
                 float as i32

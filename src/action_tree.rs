@@ -276,7 +276,7 @@ impl ActionTree {
     pub fn play(&mut self, action: Action) -> Result<(), String> {
         let node = self.current_node_skip_chance();
         if !node.actions.contains(&action) {
-            return Err(format!("Action `{:?}` is not available", action));
+            return Err(format!("Action `{action:?}` is not available"));
         }
 
         self.history.push(action);
@@ -677,7 +677,7 @@ impl ActionTree {
                     amount += to_call;
                     opponent
                 }
-                _ => panic!("Unexpected action: {:?}", action),
+                _ => panic!("Unexpected action: {action:?}"),
             };
 
             node.actions.push(action);
@@ -745,7 +745,7 @@ impl ActionTree {
 
         if line.len() > 1 {
             if search_result.is_err() {
-                return Err(format!("Action does not exist: {:?}", action));
+                return Err(format!("Action does not exist: {action:?}"));
             }
 
             return self.add_line_recursive(
@@ -757,12 +757,12 @@ impl ActionTree {
         }
 
         if search_result.is_ok() {
-            return Err(format!("Action already exists: {:?}", action));
+            return Err(format!("Action already exists: {action:?}"));
         }
 
         let is_bet_action = matches!(action, Action::Bet(_) | Action::Raise(_) | Action::AllIn(_));
         if info.allin_flag && is_bet_action {
-            return Err(format!("Bet action after all-in: {:?}", action));
+            return Err(format!("Bet action after all-in: {action:?}"));
         }
 
         let player_stack = info.stack[player as usize];
@@ -798,18 +798,16 @@ impl ActionTree {
             match action {
                 Action::Bet(amount) | Action::Raise(amount) => {
                     return Err(format!(
-                        "Invalid bet amount: {} (min: {}, max: {})",
-                        amount, min_amount, max_amount
+                        "Invalid bet amount: {amount} (min: {min_amount}, max: {max_amount})"
                     ));
                 }
                 Action::AllIn(amount) => {
                     return Err(format!(
-                        "Invalid all-in amount: {} (expected: {})",
-                        amount, max_amount
+                        "Invalid all-in amount: {amount} (expected: {max_amount})"
                     ));
                 }
                 _ => {
-                    return Err(format!("Invalid action: {:?}", action));
+                    return Err(format!("Invalid action: {action:?}"));
                 }
             };
         }
@@ -836,7 +834,7 @@ impl ActionTree {
                 amount += to_call;
                 opponent
             }
-            _ => panic!("Unexpected action: {:?}", action),
+            _ => panic!("Unexpected action: {action:?}"),
         };
 
         let index = search_result.unwrap_err();
@@ -879,7 +877,7 @@ impl ActionTree {
         let action = line[0];
         let search_result = node.actions.binary_search(&action);
         if search_result.is_err() {
-            return Err(format!("Action does not exist: {:?}", action));
+            return Err(format!("Action does not exist: {action:?}"));
         }
 
         if line.len() > 1 {

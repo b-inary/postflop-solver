@@ -439,11 +439,11 @@ impl PostFlopGame {
         }
 
         if flop.iter().any(|&c| 52 <= c) {
-            return Err(format!("Flop cards must be in [0, 52): flop = {:?}", flop));
+            return Err(format!("Flop cards must be in [0, 52): flop = {flop:?}"));
         }
 
         if flop[0] == flop[1] || flop[0] == flop[2] || flop[1] == flop[2] {
-            return Err(format!("Flop cards must be unique: flop = {:?}", flop));
+            return Err(format!("Flop cards must be unique: flop = {flop:?}"));
         }
 
         if turn != NOT_DEALT {
@@ -1719,8 +1719,7 @@ impl Decode for PostFlopGame {
         let version = String::decode(decoder)?;
         if version != VERSION_STR {
             return Err(DecodeError::OtherString(format!(
-                "Version mismatch: expected '{}', but got '{}'",
-                VERSION_STR, version
+                "Version mismatch: expected '{VERSION_STR}', but got '{version}'"
             )));
         }
 
