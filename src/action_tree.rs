@@ -766,7 +766,7 @@ impl ActionTree {
         }
 
         let player_stack = info.stack[player as usize];
-        let opponent_stack = info.stack[opponent as usize ^ 1];
+        let opponent_stack = info.stack[opponent as usize];
         let prev_amount = info.prev_amount;
         let to_call = player_stack - opponent_stack;
 
