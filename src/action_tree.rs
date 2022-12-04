@@ -144,12 +144,12 @@ pub(crate) struct ActionTreeNode {
     pub(crate) children: Vec<MutexLike<ActionTreeNode>>,
 }
 
-#[derive(Default)]
 struct BuildTreeInfo {
     last_action: Action,
     allin_flag: bool,
     oop_call_flag: bool,
-    bet_amount: [i32; 2],
+    stack: [i32; 2],
+    last_amount: i32,
 }
 
 type EjectedActionTree = (
@@ -209,7 +209,7 @@ impl ActionTree {
     #[inline]
     pub fn add_line(&mut self, line: &[Action]) -> Result<(), String> {
         let removed_index = self.removed_lines.iter().position(|x| x == line);
-        let info = BuildTreeInfo::default();
+        let info = BuildTreeInfo::new(self.config.effective_stack);
         self.add_line_recursive(&mut self.root.lock(), line, removed_index.is_some(), info)?;
         if let Some(index) = removed_index {
             self.removed_lines.remove(index);
@@ -435,7 +435,7 @@ impl ActionTree {
         let mut root = self.root.lock();
         *root = ActionTreeNode::default();
         root.board_state = self.config.initial_state;
-        self.build_tree_recursive(&mut root, BuildTreeInfo::default());
+        self.build_tree_recursive(&mut root, BuildTreeInfo::new(self.config.effective_stack));
     }
 
     /// Recursively builds the action tree.
@@ -483,17 +483,16 @@ impl ActionTree {
         let player = node.player;
         let opponent = node.player ^ 1;
 
-        let player_amount = info.bet_amount[player as usize];
-        let opponent_amount = info.bet_amount[opponent as usize];
+        let player_stack = info.stack[player as usize];
+        let opponent_stack = info.stack[opponent as usize];
+        let last_amount = info.last_amount;
+        let to_call = player_stack - opponent_stack;
 
-        let amount_diff = opponent_amount - player_amount;
-        let pot = self.config.starting_pot + 2 * (node.amount + amount_diff);
+        let pot = self.config.starting_pot + 2 * (node.amount + to_call);
+        let max_amount = opponent_stack + last_amount;
+        let min_amount = (last_amount + to_call).clamp(1, max_amount);
 
-        let max_amount = self.config.effective_stack - node.amount + player_amount;
-        let min_amount = (opponent_amount + amount_diff).clamp(1, max_amount);
-
-        let stack_after_call = self.config.effective_stack - node.amount - amount_diff;
-        let spr_after_call = stack_after_call as f64 / pot as f64;
+        let spr_after_call = opponent_stack as f64 / pot as f64;
         let compute_geometric = |num_streets: i32, max_ratio: f32| {
             let ratio = ((2.0 * spr_after_call + 1.0).powf(1.0 / num_streets as f64) - 1.0) / 2.0;
             (pot as f64 * ratio.min(max_ratio as f64)).round() as i32
@@ -587,15 +586,15 @@ impl ActionTree {
                 for &bet_size in &candidates[player as usize].raise {
                     match bet_size {
                         BetSize::PotRelative(ratio) => {
-                            let amount = opponent_amount + (pot as f32 * ratio).round() as i32;
+                            let amount = last_amount + (pot as f32 * ratio).round() as i32;
                             actions.push(Action::Raise(amount));
                         }
                         BetSize::PrevBetRelative(ratio) => {
-                            let amount = (opponent_amount as f32 * ratio).round() as i32;
+                            let amount = (last_amount as f32 * ratio).round() as i32;
                             actions.push(Action::Raise(amount));
                         }
                         BetSize::Additive(adder) => {
-                            actions.push(Action::Raise(opponent_amount + adder));
+                            actions.push(Action::Raise(last_amount + adder));
                         }
                         BetSize::Geometric(num_streets, max_ratio) => {
                             let num_streets = match num_streets {
@@ -603,7 +602,7 @@ impl ActionTree {
                                 _ => num_streets,
                             };
                             let amount = compute_geometric(num_streets, max_ratio);
-                            actions.push(Action::Raise(opponent_amount + amount));
+                            actions.push(Action::Raise(last_amount + amount));
                         }
                         BetSize::AllIn => actions.push(Action::AllIn(max_amount)),
                     }
@@ -611,14 +610,14 @@ impl ActionTree {
 
                 // all-in
                 let all_in_threshold = pot as f32 * self.config.add_allin_threshold;
-                if max_amount <= opponent_amount + all_in_threshold.round() as i32 {
+                if max_amount <= last_amount + all_in_threshold.round() as i32 {
                     actions.push(Action::AllIn(max_amount));
                 }
             }
         }
 
         let is_above_threshold = |amount: i32| {
-            let new_amount_diff = amount - opponent_amount;
+            let new_amount_diff = amount - last_amount;
             let new_pot = pot + 2 * new_amount_diff;
             let threshold = (new_pot as f32 * self.config.force_allin_threshold).round() as i32;
             max_amount <= amount + threshold
@@ -652,7 +651,7 @@ impl ActionTree {
         actions.dedup();
 
         // merge bet actions with close amounts
-        actions = merge_bet_actions(actions, pot, opponent_amount, self.config.merging_threshold);
+        actions = merge_bet_actions(actions, pot, last_amount, self.config.merging_threshold);
 
         let player_after_call = match num_remaining_streets {
             1 => PLAYER_TERMINAL_FLAG,
@@ -671,11 +670,11 @@ impl ActionTree {
                 Action::Fold => PLAYER_FOLD_FLAG | player,
                 Action::Check => player_after_check,
                 Action::Call => {
-                    amount += amount_diff;
+                    amount += to_call;
                     player_after_call
                 }
                 Action::Bet(_) | Action::Raise(_) | Action::AllIn(_) => {
-                    amount += amount_diff;
+                    amount += to_call;
                     opponent
                 }
                 _ => panic!("Unexpected action: {:?}", action),
@@ -761,12 +760,18 @@ impl ActionTree {
             return Err(format!("Action already exists: {:?}", action));
         }
 
-        let player_bet = info.bet_amount[player as usize];
-        let opponent_bet = info.bet_amount[opponent as usize ^ 1];
-        let bet_diff = opponent_bet - player_bet;
+        let is_bet_action = matches!(action, Action::Bet(_) | Action::Raise(_) | Action::AllIn(_));
+        if info.allin_flag && is_bet_action {
+            return Err(format!("Bet action after all-in: {:?}", action));
+        }
 
-        let max_amount = self.config.effective_stack - node.amount + player_bet;
-        let min_amount = (opponent_bet + bet_diff).clamp(1, max_amount);
+        let player_stack = info.stack[player as usize];
+        let opponent_stack = info.stack[opponent as usize ^ 1];
+        let last_amount = info.last_amount;
+        let to_call = player_stack - opponent_stack;
+
+        let max_amount = opponent_stack + last_amount;
+        let min_amount = (last_amount + to_call).clamp(1, max_amount);
 
         let action = match action {
             Action::Bet(amount) | Action::Raise(amount) if amount == max_amount => {
@@ -824,11 +829,11 @@ impl ActionTree {
             Action::Fold => PLAYER_FOLD_FLAG | player,
             Action::Check => player_after_check,
             Action::Call => {
-                amount += bet_diff;
+                amount += to_call;
                 player_after_call
             }
             Action::Bet(_) | Action::Raise(_) | Action::AllIn(_) => {
-                amount += bet_diff;
+                amount += to_call;
                 opponent
             }
             _ => panic!("Unexpected action: {:?}", action),
@@ -909,10 +914,22 @@ impl ActionTreeNode {
 
 impl BuildTreeInfo {
     #[inline]
+    fn new(stack: i32) -> Self {
+        Self {
+            last_action: Action::None,
+            allin_flag: false,
+            oop_call_flag: false,
+            stack: [stack, stack],
+            last_amount: 0,
+        }
+    }
+
+    #[inline]
     fn create_next(&self, player: u8, action: Action) -> Self {
         let mut allin_flag = self.allin_flag;
         let mut oop_call_flag = self.oop_call_flag;
-        let mut bet_amount = self.bet_amount;
+        let mut stack = self.stack;
+        let mut last_amount = self.last_amount;
 
         match action {
             Action::Check => {
@@ -920,17 +937,16 @@ impl BuildTreeInfo {
             }
             Action::Call => {
                 oop_call_flag = player == PLAYER_OOP;
-                bet_amount[player as usize] = bet_amount[player as usize ^ 1];
+                stack[player as usize] = stack[player as usize ^ 1];
             }
-            Action::Bet(amount) | Action::Raise(amount) => {
-                bet_amount[player as usize] = amount;
-            }
-            Action::AllIn(amount) => {
-                allin_flag = true;
-                bet_amount[player as usize] = amount;
+            Action::Bet(amount) | Action::Raise(amount) | Action::AllIn(amount) => {
+                let to_call = stack[player as usize] - stack[player as usize ^ 1];
+                allin_flag = matches!(action, Action::AllIn(_));
+                stack[player as usize] -= amount - last_amount + to_call;
+                last_amount = amount;
             }
             Action::Chance(_) => {
-                bet_amount = [0, 0];
+                last_amount = 0;
             }
             _ => {}
         }
@@ -939,7 +955,8 @@ impl BuildTreeInfo {
             last_action: action,
             allin_flag,
             oop_call_flag,
-            bet_amount,
+            stack,
+            last_amount,
         }
     }
 }
