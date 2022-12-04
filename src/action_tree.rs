@@ -228,7 +228,7 @@ impl ActionTree {
     #[inline]
     pub fn remove_line(&mut self, line: &[Action]) -> Result<(), String> {
         Self::remove_line_recursive(&mut self.root.lock(), line)?;
-        let was_added = self.added_lines.iter().position(|l| l == line).is_some();
+        let was_added = self.added_lines.iter().any(|l| l == line);
         self.added_lines.retain(|l| !l.starts_with(line));
         self.removed_lines.retain(|l| !l.starts_with(line));
         if !was_added {
