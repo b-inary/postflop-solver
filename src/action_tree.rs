@@ -234,6 +234,7 @@ impl ActionTree {
         } else {
             self.removed_lines.push(line.to_vec());
         }
+        self.added_lines.retain(|l| !l.starts_with(line));
         if self.history.starts_with(line) {
             self.history.truncate(line.len() - 1);
         }
