@@ -228,13 +228,12 @@ impl ActionTree {
     #[inline]
     pub fn remove_line(&mut self, line: &[Action]) -> Result<(), String> {
         Self::remove_line_recursive(&mut self.root.lock(), line)?;
-        let added_index = self.added_lines.iter().position(|x| x == line);
-        if let Some(index) = added_index {
-            self.added_lines.remove(index);
-        } else {
+        let was_added = self.added_lines.iter().position(|l| l == line).is_some();
+        self.added_lines.retain(|l| !l.starts_with(line));
+        self.removed_lines.retain(|l| !l.starts_with(line));
+        if !was_added {
             self.removed_lines.push(line.to_vec());
         }
-        self.added_lines.retain(|l| !l.starts_with(line));
         if self.history.starts_with(line) {
             self.history.truncate(line.len() - 1);
         }
