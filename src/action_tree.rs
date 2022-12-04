@@ -149,7 +149,7 @@ struct BuildTreeInfo {
     allin_flag: bool,
     oop_call_flag: bool,
     stack: [i32; 2],
-    last_amount: i32,
+    prev_amount: i32,
 }
 
 type EjectedActionTree = (
@@ -485,12 +485,12 @@ impl ActionTree {
 
         let player_stack = info.stack[player as usize];
         let opponent_stack = info.stack[opponent as usize];
-        let last_amount = info.last_amount;
+        let prev_amount = info.prev_amount;
         let to_call = player_stack - opponent_stack;
 
         let pot = self.config.starting_pot + 2 * (node.amount + to_call);
-        let max_amount = opponent_stack + last_amount;
-        let min_amount = (last_amount + to_call).clamp(1, max_amount);
+        let max_amount = opponent_stack + prev_amount;
+        let min_amount = (prev_amount + to_call).clamp(1, max_amount);
 
         let spr_after_call = opponent_stack as f64 / pot as f64;
         let compute_geometric = |num_streets: i32, max_ratio: f32| {
@@ -586,15 +586,15 @@ impl ActionTree {
                 for &bet_size in &candidates[player as usize].raise {
                     match bet_size {
                         BetSize::PotRelative(ratio) => {
-                            let amount = last_amount + (pot as f32 * ratio).round() as i32;
+                            let amount = prev_amount + (pot as f32 * ratio).round() as i32;
                             actions.push(Action::Raise(amount));
                         }
                         BetSize::PrevBetRelative(ratio) => {
-                            let amount = (last_amount as f32 * ratio).round() as i32;
+                            let amount = (prev_amount as f32 * ratio).round() as i32;
                             actions.push(Action::Raise(amount));
                         }
                         BetSize::Additive(adder) => {
-                            actions.push(Action::Raise(last_amount + adder));
+                            actions.push(Action::Raise(prev_amount + adder));
                         }
                         BetSize::Geometric(num_streets, max_ratio) => {
                             let num_streets = match num_streets {
@@ -602,7 +602,7 @@ impl ActionTree {
                                 _ => num_streets,
                             };
                             let amount = compute_geometric(num_streets, max_ratio);
-                            actions.push(Action::Raise(last_amount + amount));
+                            actions.push(Action::Raise(prev_amount + amount));
                         }
                         BetSize::AllIn => actions.push(Action::AllIn(max_amount)),
                     }
@@ -610,14 +610,14 @@ impl ActionTree {
 
                 // all-in
                 let all_in_threshold = pot as f32 * self.config.add_allin_threshold;
-                if max_amount <= last_amount + all_in_threshold.round() as i32 {
+                if max_amount <= prev_amount + all_in_threshold.round() as i32 {
                     actions.push(Action::AllIn(max_amount));
                 }
             }
         }
 
         let is_above_threshold = |amount: i32| {
-            let new_amount_diff = amount - last_amount;
+            let new_amount_diff = amount - prev_amount;
             let new_pot = pot + 2 * new_amount_diff;
             let threshold = (new_pot as f32 * self.config.force_allin_threshold).round() as i32;
             max_amount <= amount + threshold
@@ -651,7 +651,7 @@ impl ActionTree {
         actions.dedup();
 
         // merge bet actions with close amounts
-        actions = merge_bet_actions(actions, pot, last_amount, self.config.merging_threshold);
+        actions = merge_bet_actions(actions, pot, prev_amount, self.config.merging_threshold);
 
         let player_after_call = match num_remaining_streets {
             1 => PLAYER_TERMINAL_FLAG,
@@ -767,11 +767,11 @@ impl ActionTree {
 
         let player_stack = info.stack[player as usize];
         let opponent_stack = info.stack[opponent as usize ^ 1];
-        let last_amount = info.last_amount;
+        let prev_amount = info.prev_amount;
         let to_call = player_stack - opponent_stack;
 
-        let max_amount = opponent_stack + last_amount;
-        let min_amount = (last_amount + to_call).clamp(1, max_amount);
+        let max_amount = opponent_stack + prev_amount;
+        let min_amount = (prev_amount + to_call).clamp(1, max_amount);
 
         let action = match action {
             Action::Bet(amount) | Action::Raise(amount) if amount == max_amount => {
@@ -918,7 +918,7 @@ impl BuildTreeInfo {
             allin_flag: false,
             oop_call_flag: false,
             stack: [stack, stack],
-            last_amount: 0,
+            prev_amount: 0,
         }
     }
 
@@ -927,7 +927,7 @@ impl BuildTreeInfo {
         let mut allin_flag = self.allin_flag;
         let mut oop_call_flag = self.oop_call_flag;
         let mut stack = self.stack;
-        let mut last_amount = self.last_amount;
+        let mut prev_amount = self.prev_amount;
 
         match action {
             Action::Check => {
@@ -940,11 +940,11 @@ impl BuildTreeInfo {
             Action::Bet(amount) | Action::Raise(amount) | Action::AllIn(amount) => {
                 let to_call = stack[player as usize] - stack[player as usize ^ 1];
                 allin_flag = matches!(action, Action::AllIn(_));
-                stack[player as usize] -= amount - last_amount + to_call;
-                last_amount = amount;
+                stack[player as usize] -= amount - prev_amount + to_call;
+                prev_amount = amount;
             }
             Action::Chance(_) => {
-                last_amount = 0;
+                prev_amount = 0;
             }
             _ => {}
         }
@@ -954,7 +954,7 @@ impl BuildTreeInfo {
             allin_flag,
             oop_call_flag,
             stack,
-            last_amount,
+            prev_amount,
         }
     }
 }
