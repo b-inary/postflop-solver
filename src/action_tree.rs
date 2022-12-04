@@ -703,6 +703,8 @@ impl ActionTree {
             // Do nothing
         } else if node.children.is_empty() {
             result.push(line.clone());
+        } else if node.is_chance() {
+            Self::invalid_terminals_recursive(&node.children[0].lock(), result, line)
         } else {
             for (&action, child) in node.actions.iter().zip(node.children.iter()) {
                 line.push(action);
