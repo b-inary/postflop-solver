@@ -17,7 +17,7 @@ pub trait Game: Send + Sync {
 
     /// Returns the initial reach probabilities of given player.
     #[doc(hidden)]
-    fn initial_weight(&self, player: usize) -> &[f32];
+    fn initial_weights(&self, player: usize) -> &[f32];
 
     /// Computes the counterfactual values of given node.
     #[doc(hidden)]
@@ -29,7 +29,7 @@ pub trait Game: Send + Sync {
 
     /// Sets the instance to be solved.
     #[doc(hidden)]
-    fn set_solved(&mut self);
+    fn set_solved(&mut self, cfvalue_ip: &[f32]);
 
     /// Returns the list of indices that isomorphic chances refer to.
     #[doc(hidden)]
@@ -92,19 +92,19 @@ pub trait GameNode: Send + Sync {
 
     /// Returns the cumulative regrets.
     #[doc(hidden)]
-    fn cum_regret(&self) -> &[f32];
+    fn regrets(&self) -> &[f32];
 
     /// Returns the mutable reference to the cumulative regrets.
     #[doc(hidden)]
-    fn cum_regret_mut(&mut self) -> &mut [f32];
+    fn regrets_mut(&mut self) -> &mut [f32];
 
-    /// Returns the expected values.
+    /// Returns the counterfactual values.
     #[doc(hidden)]
-    fn expected_values(&self) -> &[f32];
+    fn cfvalues(&self) -> &[f32];
 
-    /// Returns the mutable reference to the expected values.
+    /// Returns the mutable reference to the counterfactual values.
     #[doc(hidden)]
-    fn expected_values_mut(&mut self) -> &mut [f32];
+    fn cfvalues_mut(&mut self) -> &mut [f32];
 
     /// Returns the [`Range`] struct of actions.
     #[doc(hidden)]
@@ -126,25 +126,25 @@ pub trait GameNode: Send + Sync {
 
     /// Returns the compressed cumulative regrets.
     #[doc(hidden)]
-    fn cum_regret_compressed(&self) -> &[i16] {
+    fn regrets_compressed(&self) -> &[i16] {
         unreachable!()
     }
 
     /// Returns the mutable reference to the compressed cumulative regrets.
     #[doc(hidden)]
-    fn cum_regret_compressed_mut(&mut self) -> &mut [i16] {
+    fn regrets_compressed_mut(&mut self) -> &mut [i16] {
         unreachable!()
     }
 
-    /// Returns the compressed expected values.
+    /// Returns the compressed counterfactual values.
     #[doc(hidden)]
-    fn expected_values_compressed(&self) -> &[i16] {
+    fn cfvalues_compressed(&self) -> &[i16] {
         unreachable!()
     }
 
-    /// Returns the mutable reference to the compressed expected values.
+    /// Returns the mutable reference to the compressed counterfactual values.
     #[doc(hidden)]
-    fn expected_values_compressed_mut(&mut self) -> &mut [i16] {
+    fn cfvalues_compressed_mut(&mut self) -> &mut [i16] {
         unreachable!()
     }
 
@@ -162,25 +162,25 @@ pub trait GameNode: Send + Sync {
 
     /// Returns the scale of the compressed cumulative regrets.
     #[doc(hidden)]
-    fn cum_regret_scale(&self) -> f32 {
+    fn regret_scale(&self) -> f32 {
         unreachable!()
     }
 
     /// Sets the scale of the compressed cumulative regrets.
     #[doc(hidden)]
-    fn set_cum_regret_scale(&mut self, _scale: f32) {
+    fn set_regret_scale(&mut self, _scale: f32) {
         unreachable!()
     }
 
-    /// Returns the scale of the compressed expected values.
+    /// Returns the scale of the compressed counterfactual values.
     #[doc(hidden)]
-    fn expected_value_scale(&self) -> f32 {
+    fn cfvalue_scale(&self) -> f32 {
         unreachable!()
     }
 
-    /// Sets the scale of the compressed expected values.
+    /// Sets the scale of the compressed counterfactual values.
     #[doc(hidden)]
-    fn set_expected_value_scale(&mut self, _scale: f32) {
+    fn set_cfvalue_scale(&mut self, _scale: f32) {
         unreachable!()
     }
 

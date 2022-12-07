@@ -50,7 +50,7 @@ impl Game for KuhnGame {
     }
 
     #[inline]
-    fn initial_weight(&self, _player: usize) -> &[f32] {
+    fn initial_weights(&self, _player: usize) -> &[f32] {
         &self.initial_weight
     }
 
@@ -89,7 +89,7 @@ impl Game for KuhnGame {
     }
 
     #[inline]
-    fn set_solved(&mut self) {
+    fn set_solved(&mut self, _cfvalue_ip: &[f32]) {
         self.is_solved = true;
     }
 }
@@ -209,22 +209,22 @@ impl GameNode for KuhnNode {
     }
 
     #[inline]
-    fn cum_regret(&self) -> &[f32] {
+    fn regrets(&self) -> &[f32] {
         &self.storage
     }
 
     #[inline]
-    fn cum_regret_mut(&mut self) -> &mut [f32] {
+    fn regrets_mut(&mut self) -> &mut [f32] {
         &mut self.storage
     }
 
     #[inline]
-    fn expected_values(&self) -> &[f32] {
+    fn cfvalues(&self) -> &[f32] {
         &self.storage
     }
 
     #[inline]
-    fn expected_values_mut(&mut self) -> &mut [f32] {
+    fn cfvalues_mut(&mut self) -> &mut [f32] {
         &mut self.storage
     }
 }
@@ -246,10 +246,10 @@ fn kuhn() {
     }
 
     let root_ev = root
-        .expected_values()
+        .cfvalues()
         .iter()
         .zip(strategy.iter())
-        .fold(0.0, |acc, (&ev, &strategy)| acc + ev * strategy);
+        .fold(0.0, |acc, (&cfv, &strategy)| acc + cfv * strategy);
 
     let expected_ev = -1.0 / 18.0;
     assert!((root_ev - expected_ev).abs() < 2.0 * target);

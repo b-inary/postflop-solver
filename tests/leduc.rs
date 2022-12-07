@@ -62,7 +62,7 @@ impl Game for LeducGame {
     }
 
     #[inline]
-    fn initial_weight(&self, _player: usize) -> &[f32] {
+    fn initial_weights(&self, _player: usize) -> &[f32] {
         &self.initial_weight
     }
 
@@ -121,7 +121,7 @@ impl Game for LeducGame {
     }
 
     #[inline]
-    fn set_solved(&mut self) {
+    fn set_solved(&mut self, _cfvalue_ip: &[f32]) {
         self.is_solved = true;
     }
 
@@ -160,7 +160,7 @@ impl LeducGame {
         MutexLike::new(root)
     }
 
-    fn build_tree_recursive(node: &mut LeducNode, last_action: Action, last_bet: [i32; 2]) {
+    fn build_tree_recursive(node: &mut LeducNode, last_action: Action, last_amount: [i32; 2]) {
         if node.is_terminal() {
             return;
         }
@@ -175,29 +175,30 @@ impl LeducGame {
 
         let actions = Self::get_actions(node, last_action, node.board != NOT_DEALT);
 
-        let mut last_bets = Vec::new();
-        let prev_min_bet = last_bet.iter().min().unwrap();
+        let mut next_amounts = Vec::new();
+        let last_amount_min = last_amount.iter().min().unwrap();
 
         for (action, next_player) in &actions {
-            let mut last_bet = last_bet;
+            let mut next_amount = last_amount;
             if *action == Action::Call {
-                last_bet[node.player] = last_bet[node.player ^ 1];
+                next_amount[node.player] = next_amount[node.player ^ 1];
             }
             if let Action::Bet(amount) = action {
-                last_bet[node.player] = *amount;
+                next_amount[node.player] = *amount;
             }
             if let Action::Raise(amount) = action {
-                last_bet[node.player] = *amount;
+                next_amount[node.player] = *amount;
             }
-            last_bets.push(last_bet);
 
-            let bet_diff = last_bet.iter().min().unwrap() - prev_min_bet;
+            next_amounts.push(next_amount);
+            let amount_diff = next_amount.iter().min().unwrap() - last_amount_min;
+
             node.children.push((
                 *action,
                 MutexLike::new(LeducNode {
                     player: *next_player,
                     board: node.board,
-                    amount: node.amount + bet_diff,
+                    amount: node.amount + amount_diff,
                     children: Vec::new(),
                     strategy: Default::default(),
                     storage: Default::default(),
@@ -211,7 +212,7 @@ impl LeducGame {
             Self::build_tree_recursive(
                 &mut node.play(action),
                 actions[action].0,
-                last_bets[action],
+                next_amounts[action],
             );
         }
     }
@@ -337,22 +338,22 @@ impl GameNode for LeducNode {
     }
 
     #[inline]
-    fn cum_regret(&self) -> &[f32] {
+    fn regrets(&self) -> &[f32] {
         &self.storage
     }
 
     #[inline]
-    fn cum_regret_mut(&mut self) -> &mut [f32] {
+    fn regrets_mut(&mut self) -> &mut [f32] {
         &mut self.storage
     }
 
     #[inline]
-    fn expected_values(&self) -> &[f32] {
+    fn cfvalues(&self) -> &[f32] {
         &self.storage
     }
 
     #[inline]
-    fn expected_values_mut(&mut self) -> &mut [f32] {
+    fn cfvalues_mut(&mut self) -> &mut [f32] {
         &mut self.storage
     }
 
@@ -369,25 +370,25 @@ impl GameNode for LeducNode {
     }
 
     #[inline]
-    fn cum_regret_compressed(&self) -> &[i16] {
+    fn regrets_compressed(&self) -> &[i16] {
         let ptr = self.storage.as_ptr() as *const i16;
         unsafe { slice::from_raw_parts(ptr, self.storage.len()) }
     }
 
     #[inline]
-    fn cum_regret_compressed_mut(&mut self) -> &mut [i16] {
+    fn regrets_compressed_mut(&mut self) -> &mut [i16] {
         let ptr = self.storage.as_mut_ptr() as *mut i16;
         unsafe { slice::from_raw_parts_mut(ptr, self.storage.len()) }
     }
 
     #[inline]
-    fn expected_values_compressed(&self) -> &[i16] {
+    fn cfvalues_compressed(&self) -> &[i16] {
         let ptr = self.storage.as_ptr() as *const i16;
         unsafe { slice::from_raw_parts(ptr, self.storage.len()) }
     }
 
     #[inline]
-    fn expected_values_compressed_mut(&mut self) -> &mut [i16] {
+    fn cfvalues_compressed_mut(&mut self) -> &mut [i16] {
         let ptr = self.storage.as_mut_ptr() as *mut i16;
         unsafe { slice::from_raw_parts_mut(ptr, self.storage.len()) }
     }
@@ -403,22 +404,22 @@ impl GameNode for LeducNode {
     }
 
     #[inline]
-    fn cum_regret_scale(&self) -> f32 {
+    fn regret_scale(&self) -> f32 {
         self.storage_scale
     }
 
     #[inline]
-    fn set_cum_regret_scale(&mut self, scale: f32) {
+    fn set_regret_scale(&mut self, scale: f32) {
         self.storage_scale = scale;
     }
 
     #[inline]
-    fn expected_value_scale(&self) -> f32 {
+    fn cfvalue_scale(&self) -> f32 {
         self.storage_scale
     }
 
     #[inline]
-    fn set_expected_value_scale(&mut self, scale: f32) {
+    fn set_cfvalue_scale(&mut self, scale: f32) {
         self.storage_scale = scale;
     }
 }
@@ -440,7 +441,7 @@ fn leduc() {
     }
 
     let root_ev = root
-        .expected_values()
+        .cfvalues()
         .iter()
         .zip(strategy.iter())
         .fold(0.0, |acc, (&ev, &strategy)| acc + ev * strategy);
@@ -466,9 +467,9 @@ fn leduc_compressed() {
         strategy[j] = raw_strategy[j] as f32 / sum;
     }
 
-    let ev_decoder = root.expected_value_scale() / i16::MAX as f32;
+    let ev_decoder = root.cfvalue_scale() / i16::MAX as f32;
     let root_ev = root
-        .expected_values_compressed()
+        .cfvalues_compressed()
         .iter()
         .zip(strategy.iter())
         .fold(0.0, |acc, (&raw_ev, &strategy)| {

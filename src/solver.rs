@@ -75,7 +75,7 @@ pub fn solve<T: Game>(
                 game,
                 &mut root,
                 player,
-                game.initial_weight(player ^ 1),
+                game.initial_weights(player ^ 1),
                 &params,
             );
         }
@@ -123,7 +123,7 @@ pub fn solve_step<T: Game>(game: &T, current_iteration: u32) {
             game,
             &mut root,
             player,
-            game.initial_weight(player ^ 1),
+            game.initial_weights(player ^ 1),
             &params,
         );
     }
@@ -234,13 +234,9 @@ fn solve_recursive<T: Game>(
     else if node.player() == player {
         // compute the strategy by regret-maching algorithm
         let mut strategy = if game.is_compression_enabled() {
-            regret_matching_compressed(
-                node.cum_regret_compressed(),
-                node.cum_regret_scale(),
-                num_actions,
-            )
+            regret_matching_compressed(node.regrets_compressed(), node.regret_scale(), num_actions)
         } else {
-            regret_matching(node.cum_regret(), num_actions)
+            regret_matching(node.regrets(), num_actions)
         };
 
         // compute the counterfactual values of each action
@@ -282,10 +278,10 @@ fn solve_recursive<T: Game>(
             node.set_strategy_scale(new_scale);
 
             // update the cumulative regret
-            let scale = node.cum_regret_scale();
+            let scale = node.regret_scale();
             let alpha_decoder = params.alpha_t * scale / i16::MAX as f32;
             let beta_decoder = params.beta_t * scale / i16::MAX as f32;
-            let cum_regret = node.cum_regret_compressed_mut();
+            let cum_regret = node.regrets_compressed_mut();
 
             cfv_actions.iter_mut().zip(&*cum_regret).for_each(|(x, y)| {
                 *x += *y as f32 * if *y >= 0 { alpha_decoder } else { beta_decoder };
@@ -296,7 +292,7 @@ fn solve_recursive<T: Game>(
             });
 
             let new_scale = encode_signed_slice(cum_regret, &cfv_actions);
-            node.set_cum_regret_scale(new_scale);
+            node.set_regret_scale(new_scale);
         } else {
             // update the cumulative strategy
             let gamma_t = params.gamma_t;
@@ -307,7 +303,7 @@ fn solve_recursive<T: Game>(
 
             // update the cumulative regret
             let (alpha_t, beta_t) = (params.alpha_t, params.beta_t);
-            let cum_regret = node.cum_regret_mut();
+            let cum_regret = node.regrets_mut();
             cum_regret.iter_mut().zip(&*cfv_actions).for_each(|(x, y)| {
                 let coef = if x.is_sign_positive() {
                     alpha_t
@@ -325,13 +321,9 @@ fn solve_recursive<T: Game>(
     else {
         // compute the strategy by regret-matching algorithm
         let mut cfreach_actions = if game.is_compression_enabled() {
-            regret_matching_compressed(
-                node.cum_regret_compressed(),
-                node.cum_regret_scale(),
-                num_actions,
-            )
+            regret_matching_compressed(node.regrets_compressed(), node.regret_scale(), num_actions)
         } else {
-            regret_matching(node.cum_regret(), num_actions)
+            regret_matching(node.regrets(), num_actions)
         };
 
         // update the reach probabilities

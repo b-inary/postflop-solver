@@ -199,23 +199,25 @@ pub fn finalize<T: Game>(game: &mut T) {
         panic!("the game is already solved");
     }
 
-    let reach = [game.initial_weight(0), game.initial_weight(1)];
+    let mut cfvalues = [
+        vec![0.0; game.num_private_hands(0)],
+        vec![0.0; game.num_private_hands(1)],
+    ];
 
     // compute the expected values and save them
     for player in 0..2 {
-        let mut cfv = vec![0.0; game.num_private_hands(player)];
-        compute_ev_recursive(
-            &mut cfv,
+        let cfreach = game.initial_weights(player ^ 1);
+        compute_cfvalue_recursive(
+            &mut cfvalues[player],
             game,
             &mut game.root(),
             player,
-            reach[player],
-            reach[player ^ 1],
+            cfreach,
         );
     }
 
     // set the game is solved
-    game.set_solved();
+    game.set_solved(&cfvalues[1]);
 }
 
 /// Computes the exploitability of the current strategy.
@@ -225,16 +227,16 @@ pub fn compute_exploitability<T: Game>(game: &T) -> f32 {
         panic!("the game is not ready");
     }
 
-    let mut cfv = [
+    let mut cfvalues = [
         vec![0.0; game.num_private_hands(0)],
         vec![0.0; game.num_private_hands(1)],
     ];
 
-    let reach = [game.initial_weight(0), game.initial_weight(1)];
+    let reach = [game.initial_weights(0), game.initial_weights(1)];
 
     for player in 0..2 {
         compute_best_cfv_recursive(
-            &mut cfv[player],
+            &mut cfvalues[player],
             game,
             &game.root(),
             player,
@@ -243,7 +245,7 @@ pub fn compute_exploitability<T: Game>(game: &T) -> f32 {
     }
 
     let get_sum = |player: usize| {
-        cfv[player]
+        cfvalues[player]
             .iter()
             .zip(reach[player])
             .fold(0.0, |sum, (&cfv, &reach)| sum + cfv as f64 * reach as f64)
@@ -253,12 +255,11 @@ pub fn compute_exploitability<T: Game>(game: &T) -> f32 {
 }
 
 /// The recursive helper function for computing the counterfactual values of the given strategy.
-fn compute_ev_recursive<T: Game>(
+fn compute_cfvalue_recursive<T: Game>(
     result: &mut [f32],
     game: &T,
     node: &mut T::Node,
     player: usize,
-    reach: &[f32],
     cfreach: &[f32],
 ) {
     // terminal node
@@ -293,12 +294,11 @@ fn compute_ev_recursive<T: Game>(
 
         // compute the counterfactual values of each action
         for_each_child(node, |action| {
-            compute_ev_recursive(
+            compute_cfvalue_recursive(
                 row_mut(&mut cfv_actions.lock(), action, num_hands),
                 game,
                 &mut node.play(action),
                 player,
-                reach,
                 &cfreach,
             );
         });
@@ -375,46 +375,36 @@ fn compute_ev_recursive<T: Game>(
         // normalize the strategy
         normalize_strategy(&mut strategy, node.num_actions());
 
-        // update the reach probabilities
-        let mut reach_actions = strategy.clone();
-        reach_actions.chunks_exact_mut(num_hands).for_each(|row| {
-            mul_slice(row, reach);
-        });
-
         // compute the counterfactual values of each action
         for_each_child(node, |action| {
-            compute_ev_recursive(
+            compute_cfvalue_recursive(
                 row_mut(&mut cfv_actions.lock(), action, num_hands),
                 game,
                 &mut node.play(action),
                 player,
-                row(&reach_actions, action, num_hands),
                 cfreach,
             );
         });
 
         // sum up the counterfactual values
-        let mut cfv_actions = cfv_actions.lock();
+        let cfv_actions = cfv_actions.lock();
         mul_slice(&mut strategy, &cfv_actions);
         strategy.chunks_exact(num_hands).for_each(|row| {
             add_slice(result, row);
         });
 
         // save the expected values
-        cfv_actions
-            .chunks_exact_mut(num_hands)
-            .for_each(|row| mul_slice(row, reach));
         if game.is_compression_enabled() {
-            let ev_scale = encode_signed_slice(node.expected_values_compressed_mut(), &cfv_actions);
-            node.set_expected_value_scale(ev_scale);
+            let cfv_scale = encode_signed_slice(node.cfvalues_compressed_mut(), &cfv_actions);
+            node.set_cfvalue_scale(cfv_scale);
         } else {
-            node.expected_values_mut().copy_from_slice(&cfv_actions);
+            node.cfvalues_mut().copy_from_slice(&cfv_actions);
         }
     }
     // opponent node
     else if num_actions == 1 {
         // simply recurse when the number of actions is one
-        compute_ev_recursive(result, game, &mut node.play(0), player, reach, cfreach);
+        compute_cfvalue_recursive(result, game, &mut node.play(0), player, cfreach);
     } else {
         // obtain the strategy
         let mut cfreach_actions = if game.is_compression_enabled() {
@@ -451,12 +441,11 @@ fn compute_ev_recursive<T: Game>(
 
         // compute the counterfactual values of each action
         for_each_child(node, |action| {
-            compute_ev_recursive(
+            compute_cfvalue_recursive(
                 row_mut(&mut cfv_actions.lock(), action, num_hands),
                 game,
                 &mut node.play(action),
                 player,
-                reach,
                 row(&cfreach_actions, action, row_size),
             );
         });

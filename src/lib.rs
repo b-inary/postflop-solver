@@ -81,13 +81,13 @@
 //!
 //! // get equity and EV of a specific hand
 //! game.cache_normalized_weights();
-//! let equity = game.equity(game.current_player());
-//! let ev = game.expected_values();
+//! let equity = game.equity(0); // `0` means OOP player
+//! let ev = game.expected_values(0);
 //! println!("Equity of oop_hands[0]: {:.2}%", 100.0 * equity[0]);
 //! println!("EV of oop_hands[0]: {:.2}", ev[0]);
 //!
 //! // get equity and EV of whole hand
-//! let weights = game.normalized_weights(game.current_player());
+//! let weights = game.normalized_weights(0);
 //! let average_equity = compute_average(&equity, weights);
 //! let average_ev = compute_average(&ev, weights);
 //! println!("Average equity: {:.2}%", 100.0 * average_equity);

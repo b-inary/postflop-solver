@@ -1,5 +1,12 @@
 # List of breaking changes
 
+## 2022-12-07
+
+- `PostFlopGame`:
+  - `play`: now terminal actions can be played.
+  - `is_terminal_action` method is removed and `is_terminal_node` method is added.
+  - `expected_values` and `expected_values_detail` methods now take a `player` argument.
+
 ## 2022-12-02
 
 - `ActionTree`: `new` constructor now takes a `TreeConfig` argument.
