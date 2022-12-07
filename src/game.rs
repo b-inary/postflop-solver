@@ -4,7 +4,6 @@ use crate::interface::*;
 use crate::mutex_like::*;
 use crate::sliceop::*;
 use crate::utility::*;
-use std::cmp;
 use std::mem;
 use std::ptr;
 use std::slice;
@@ -20,7 +19,7 @@ use {
 };
 
 #[cfg(feature = "custom-alloc")]
-use {crate::alloc::*, std::vec};
+use std::vec;
 
 /// A struct representing a postflop game.
 pub struct PostFlopGame {
@@ -51,7 +50,6 @@ pub struct PostFlopGame {
     // store options
     is_memory_allocated: bool,
     is_compression_enabled: bool,
-    stack_size: usize,
     misc_memory_usage: u64,
     num_storage_elements: u64,
 
@@ -102,25 +100,6 @@ unsafe impl Sync for PostFlopNode {}
 struct BuildTreeInfo<'a> {
     current_memory_usage: &'a AtomicU64,
     num_storage_elements: &'a AtomicU64,
-    stack_size: [usize; 2],
-    max_stack_size: &'a [AtomicUsize; 2],
-}
-
-#[cfg(not(feature = "custom-alloc"))]
-#[inline]
-fn align_up(size: usize) -> usize {
-    size
-}
-
-#[inline]
-fn atomic_set_max(atomic: &AtomicUsize, value: usize) {
-    let mut v = atomic.load(Ordering::Relaxed);
-    while v < value {
-        match atomic.compare_exchange_weak(v, value, Ordering::AcqRel, Ordering::Relaxed) {
-            Ok(_) => return,
-            Err(new_v) => v = new_v,
-        }
-    }
 }
 
 /// Decodes the encoded `i16` slice to the `f32` slice.
@@ -361,7 +340,7 @@ impl PostFlopGame {
         &self.card_config
     }
 
-    /// Obtains the action tree.
+    /// Obtains the tree configuration.
     #[inline]
     pub fn tree_config(&self) -> &TreeConfig {
         &self.tree_config
@@ -599,13 +578,10 @@ impl PostFlopGame {
     fn init_root(&mut self) {
         let current_memory_usage = AtomicU64::new(mem::size_of::<PostFlopNode>() as u64);
         let num_storage_elements = AtomicU64::new(0);
-        let max_stack_size = [AtomicUsize::new(0), AtomicUsize::new(0)];
 
         let info = BuildTreeInfo {
             current_memory_usage: &current_memory_usage,
             num_storage_elements: &num_storage_elements,
-            stack_size: [0, 0],
-            max_stack_size: &max_stack_size,
         };
 
         let mut root = self.root();
@@ -613,25 +589,12 @@ impl PostFlopGame {
         root.turn = self.card_config.turn;
         root.river = self.card_config.river;
 
-        self.build_tree_recursive(&mut root, &self.action_root.lock(), info);
+        self.build_tree_recursive(&mut root, &self.action_root.lock(), &info);
 
         let current_memory_usage = current_memory_usage.load(Ordering::Relaxed);
         let num_storage_elements = num_storage_elements.load(Ordering::Relaxed);
 
-        let stack_size = cmp::max(
-            max_stack_size[0].load(Ordering::Relaxed),
-            max_stack_size[1].load(Ordering::Relaxed),
-        );
-
-        #[cfg(feature = "custom-alloc")]
-        STACK_UNIT_SIZE.store(4 * stack_size, Ordering::Relaxed);
-
-        #[cfg(feature = "rayon")]
-        let stack_usage = (4 * stack_size * rayon::current_num_threads()) as u64;
-        #[cfg(not(feature = "rayon"))]
-        let stack_usage = 4 * stack_size as u64;
-
-        let mut memory_usage = current_memory_usage + stack_usage;
+        let mut memory_usage = current_memory_usage;
 
         memory_usage += vec_memory_usage(&self.valid_indices_turn);
         memory_usage += vec_memory_usage(&self.valid_indices_river);
@@ -667,7 +630,6 @@ impl PostFlopGame {
         }
 
         self.is_memory_allocated = false;
-        self.stack_size = stack_size;
         self.misc_memory_usage = memory_usage;
         self.num_storage_elements = num_storage_elements;
 
@@ -709,58 +671,24 @@ impl PostFlopGame {
         &self,
         node: &mut PostFlopNode,
         action_node: &ActionTreeNode,
-        info: BuildTreeInfo,
+        info: &BuildTreeInfo,
     ) {
         node.player = action_node.player;
         node.amount = action_node.amount;
 
         if node.is_terminal() {
-            for i in 0..2 {
-                atomic_set_max(&info.max_stack_size[i], info.stack_size[i]);
-            }
             return;
         }
 
-        let mut stack_size = info.stack_size;
-
-        // chance node
         if node.is_chance() {
-            self.push_chances(node, &info);
-
-            let f32_size = mem::size_of::<f32>();
-            let f64_size = mem::size_of::<f64>();
-            let col_size = f32_size * node.num_actions();
-            for (i, s) in stack_size.iter_mut().enumerate() {
-                *s += align_up(col_size * self.num_private_hands(i));
-                *s += align_up(f64_size * self.num_private_hands(i));
-                *s += align_up(f32_size * self.num_private_hands(i ^ 1));
-            }
-
+            self.push_chances(node, info);
             for child in &node.children {
-                self.build_tree_recursive(
-                    &mut child.lock(),
-                    &action_node.children[0].lock(),
-                    BuildTreeInfo { stack_size, ..info },
-                );
+                self.build_tree_recursive(&mut child.lock(), &action_node.children[0].lock(), info);
             }
-        }
-        // player node
-        else {
-            self.push_actions(node, action_node, &info);
-
-            let col_size = mem::size_of::<f32>() * node.num_actions();
-            for (i, s) in stack_size.iter_mut().enumerate() {
-                let n = if i == node.player() { 2 } else { 1 };
-                *s += align_up(col_size * self.num_private_hands(i));
-                *s += n * align_up(col_size * self.num_private_hands(node.player()));
-            }
-
+        } else {
+            self.push_actions(node, action_node, info);
             for (child, action_child) in node.children.iter().zip(action_node.children.iter()) {
-                self.build_tree_recursive(
-                    &mut child.lock(),
-                    &action_child.lock(),
-                    BuildTreeInfo { stack_size, ..info },
-                );
+                self.build_tree_recursive(&mut child.lock(), &action_child.lock(), info);
             }
         }
     }
@@ -981,7 +909,7 @@ impl PostFlopGame {
 
     /// Returns the current player (0 = OOP, 1 = IP).
     ///
-    /// If the current node is a chance node, returns an undefined value.
+    /// If the current node is a terminal node or a chance node, returns an undefined value.
     #[inline]
     pub fn current_player(&self) -> usize {
         self.node().player()
@@ -1632,7 +1560,6 @@ impl Default for PostFlopGame {
             river_isomorphism_swap: Vec::default(),
             is_memory_allocated: false,
             is_compression_enabled: false,
-            stack_size: 0,
             misc_memory_usage: 0,
             num_storage_elements: 0,
             storage1: MutexLike::default(),
@@ -1689,7 +1616,7 @@ impl Default for CardConfig {
 }
 
 #[cfg(feature = "bincode")]
-static VERSION_STR: &str = "2022-12-07";
+static VERSION_STR: &str = "2022-12-08";
 
 #[cfg(feature = "bincode")]
 thread_local! {
@@ -1725,7 +1652,6 @@ impl Encode for PostFlopGame {
         self.num_combinations.encode(encoder)?;
         self.is_memory_allocated.encode(encoder)?;
         self.is_compression_enabled.encode(encoder)?;
-        self.stack_size.encode(encoder)?;
         self.misc_memory_usage.encode(encoder)?;
         self.num_storage_elements.encode(encoder)?;
         self.storage1.encode(encoder)?;
@@ -1793,7 +1719,6 @@ impl Decode for PostFlopGame {
             num_combinations: Decode::decode(decoder)?,
             is_memory_allocated: Decode::decode(decoder)?,
             is_compression_enabled: Decode::decode(decoder)?,
-            stack_size: Decode::decode(decoder)?,
             misc_memory_usage: Decode::decode(decoder)?,
             num_storage_elements: Decode::decode(decoder)?,
             storage1: Decode::decode(decoder)?,
@@ -1842,9 +1767,6 @@ impl Decode for PostFlopGame {
         if is_normalized_weight_cached {
             game.cache_normalized_weights();
         }
-
-        #[cfg(feature = "custom-alloc")]
-        STACK_UNIT_SIZE.store(4 * game.stack_size, Ordering::Relaxed);
 
         Ok(game)
     }

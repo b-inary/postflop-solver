@@ -216,8 +216,14 @@ pub fn finalize<T: Game>(game: &mut T) {
         );
     }
 
-    // set the game is solved
+    // set the game solved
     game.set_solved(&cfvalues[1]);
+
+    // free buffer
+    #[cfg(all(feature = "custom-alloc", feature = "rayon"))]
+    rayon::broadcast(|_| free_custom_alloc_buffer());
+    #[cfg(all(feature = "custom-alloc", not(feature = "rayon")))]
+    free_custom_alloc_buffer();
 }
 
 /// Computes the exploitability of the current strategy.

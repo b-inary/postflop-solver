@@ -2,9 +2,9 @@ use std::alloc::{self, AllocError, Allocator, Layout};
 use std::cell::RefCell;
 use std::ptr::NonNull;
 use std::slice;
-use std::sync::atomic::{AtomicUsize, Ordering};
 
 const ALIGNMENT: usize = 16;
+const STACK_UNIT: usize = 1 << 20; // 1MB
 
 #[inline]
 pub(crate) fn align_up(size: usize) -> usize {
@@ -12,13 +12,10 @@ pub(crate) fn align_up(size: usize) -> usize {
     (size + mask) & !mask
 }
 
-pub(crate) static STACK_UNIT_SIZE: AtomicUsize = AtomicUsize::new(1 << 20);
-
 #[derive(Clone)]
 pub(crate) struct StackAlloc;
 
 struct StackAllocData {
-    unit_capacity: usize,
     index: usize,
     base: Vec<usize>,
     current: Vec<usize>,
@@ -26,8 +23,7 @@ struct StackAllocData {
 
 thread_local! {
     static STACK_ALLOC_DATA: RefCell<StackAllocData> = RefCell::new(StackAllocData {
-        unit_capacity: 0,
-        index: 0,
+        index: usize::MAX,
         base: Vec::new(),
         current: Vec::new(),
     });
@@ -35,39 +31,29 @@ thread_local! {
 
 impl StackAllocData {
     #[inline]
-    fn init(&mut self) {
-        let size = STACK_UNIT_SIZE.load(Ordering::Relaxed);
-        if self.unit_capacity != size {
-            self.free();
-            let layout = Layout::from_size_align(size, ALIGNMENT).unwrap();
-            let ptr = unsafe { alloc::alloc(layout) } as usize;
-            self.unit_capacity = size;
-            self.index = 0;
-            self.base.push(ptr);
-            self.current.push(ptr);
-        }
-    }
-
-    #[inline]
     fn free(&mut self) {
+        if self.index == usize::MAX {
+            return;
+        }
         if self.index != 0 || self.base.first() != self.current.first() {
             panic!("freeing error");
         }
-        let layout = Layout::from_size_align(self.unit_capacity, ALIGNMENT).unwrap();
+        let layout = Layout::from_size_align(STACK_UNIT, ALIGNMENT).unwrap();
         for b in &self.base {
             unsafe { alloc::dealloc(*b as *mut u8, layout) };
         }
-        self.unit_capacity = 0;
-        self.index = 0;
+        self.index = usize::MAX;
         self.base.clear();
         self.current.clear();
+        self.base.shrink_to_fit();
+        self.current.shrink_to_fit();
     }
 
     #[inline]
     fn allocate(&mut self, size: usize) -> *mut [u8] {
-        self.init();
         let size = align_up(size);
-        if self.current[self.index] + size > self.base[self.index] + self.unit_capacity {
+        let index = self.index;
+        if index == usize::MAX || self.current[index] + size > self.base[index] + STACK_UNIT {
             self.increment_index();
         }
         let ptr = self.current[self.index] as *mut u8;
@@ -90,9 +76,9 @@ impl StackAllocData {
 
     #[inline]
     fn increment_index(&mut self) {
-        self.index += 1;
+        self.index = (self.index as isize + 1) as usize;
         if self.index == self.base.len() {
-            let layout = Layout::from_size_align(self.unit_capacity, ALIGNMENT).unwrap();
+            let layout = Layout::from_size_align(STACK_UNIT, ALIGNMENT).unwrap();
             let ptr = unsafe { alloc::alloc(layout) } as usize;
             self.base.push(ptr);
             self.current.push(ptr);
@@ -117,15 +103,13 @@ impl Drop for StackAllocData {
 unsafe impl Allocator for StackAlloc {
     #[inline]
     fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
+        if layout.size() > STACK_UNIT || layout.align() > ALIGNMENT {
+            return Err(AllocError);
+        }
+
         STACK_ALLOC_DATA.with(|data| {
             let mut data = data.borrow_mut();
-            if layout.align() <= ALIGNMENT {
-                // perform allocation
-                Ok(NonNull::new(data.allocate(layout.size())).unwrap())
-            } else {
-                // unsupported alignment
-                Err(AllocError)
-            }
+            Ok(NonNull::new(data.allocate(layout.size())).unwrap())
         })
     }
 
@@ -136,4 +120,21 @@ unsafe impl Allocator for StackAlloc {
             data.deallocate(ptr.as_ptr(), layout.size());
         })
     }
+}
+
+/// Free buffers allocated by the custom allocator.
+///
+/// Note: The buffers are created per thread. If you are using rayon library, you should call this
+/// function like following:
+///
+/// ```
+/// use postflop_solver::*;
+/// use rayon::prelude::*;
+/// rayon::broadcast(|_| free_custom_alloc_buffer());
+/// ```
+pub fn free_custom_alloc_buffer() {
+    STACK_ALLOC_DATA.with(|data| {
+        let mut data = data.borrow_mut();
+        data.free();
+    });
 }
