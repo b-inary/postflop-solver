@@ -1086,7 +1086,7 @@ impl PostFlopGame {
                 let scale = self.node().cfvalue_scale();
                 decode_signed_slice(slice, scale)
             } else {
-                row(self.node().cfvalues(), action, num_hands).to_vec()
+                row(self.node().cfvalues(), action_index, num_hands).to_vec()
             };
             self.cfvalue_cache[PLAYER_IP as usize].copy_from_slice(&vec);
 
