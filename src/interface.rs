@@ -29,7 +29,7 @@ pub trait Game: Send + Sync {
 
     /// Sets the instance to be solved.
     #[doc(hidden)]
-    fn set_solved(&mut self, cfvalue_ip: &[f32]);
+    fn set_solved(&mut self, root_cfvalue_ip: &[f32]);
 
     /// Returns the list of indices that isomorphic chances refer to.
     #[doc(hidden)]

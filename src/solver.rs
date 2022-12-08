@@ -42,12 +42,12 @@ pub fn solve<T: Game>(
     target_exploitability: f32,
     print_progress: bool,
 ) -> f32 {
-    if !game.is_ready() {
-        panic!("the game is not ready");
-    }
-
     if game.is_solved() {
         panic!("the game is already solved");
+    }
+
+    if !game.is_ready() {
+        panic!("the game is not ready");
     }
 
     let mut root = game.root();
@@ -104,12 +104,12 @@ pub fn solve<T: Game>(
 /// Proceeds Discounted CFR algorithm for one iteration.
 #[inline]
 pub fn solve_step<T: Game>(game: &T, current_iteration: u32) {
-    if !game.is_ready() {
-        panic!("the game is not ready");
-    }
-
     if game.is_solved() {
         panic!("the game is already solved");
+    }
+
+    if !game.is_ready() {
+        panic!("the game is not ready");
     }
 
     let mut root = game.root();

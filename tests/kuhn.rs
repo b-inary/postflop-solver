@@ -89,7 +89,7 @@ impl Game for KuhnGame {
     }
 
     #[inline]
-    fn set_solved(&mut self, _cfvalue_ip: &[f32]) {
+    fn set_solved(&mut self, _root_cfvalue_ip: &[f32]) {
         self.is_solved = true;
     }
 }

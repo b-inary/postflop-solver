@@ -7,7 +7,6 @@ use crate::utility::*;
 use std::mem;
 use std::ptr;
 use std::slice;
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
 #[cfg(feature = "bincode")]
 use {
@@ -21,9 +20,23 @@ use {
 #[cfg(feature = "custom-alloc")]
 use std::vec;
 
+#[derive(Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[cfg_attr(feature = "bincode", derive(Decode, Encode))]
+enum State {
+    ConfigError = 0,
+    #[default]
+    Uninitialized = 1,
+    TreeBuilt = 2,
+    MemoryAllocated = 3,
+    Solved = 4,
+}
+
 /// A struct representing a postflop game.
 pub struct PostFlopGame {
-    // Postflop game configurations
+    // state
+    state: State,
+
+    // postflop game configurations
     card_config: CardConfig,
     tree_config: TreeConfig,
     added_lines: Vec<Vec<Action>>,
@@ -48,20 +61,21 @@ pub struct PostFlopGame {
     river_isomorphism_swap: Vec<[SwapList; 4]>,
 
     // store options
-    is_memory_allocated: bool,
     is_compression_enabled: bool,
     misc_memory_usage: u64,
-    num_storage_elements: u64,
+    num_storage_actions: u64,
+    num_storage_chances: u64,
 
     // global storage
     storage1: MutexLike<Vec<f32>>,
     storage2: MutexLike<Vec<f32>>,
+    storage_chance: MutexLike<Vec<f32>>,
     storage1_compressed: MutexLike<Vec<u16>>,
     storage2_compressed: MutexLike<Vec<i16>>,
+    storage_chance_compressed: MutexLike<Vec<i16>>,
 
     // result interactor
-    is_solved: bool,
-    cfvalue_ip: Vec<f32>,
+    root_cfvalue_ip: Vec<f32>,
     history: Vec<usize>,
     is_normalized_weight_cached: bool,
     node_ptr: *const PostFlopNode,
@@ -97,9 +111,10 @@ pub struct PostFlopNode {
 unsafe impl Send for PostFlopNode {}
 unsafe impl Sync for PostFlopNode {}
 
-struct BuildTreeInfo<'a> {
-    current_memory_usage: &'a AtomicU64,
-    num_storage_elements: &'a AtomicU64,
+struct BuildTreeInfo {
+    memory_usage_nodes: u64,
+    num_storage_actions: u64,
+    num_storage_chances: u64,
 }
 
 /// Decodes the encoded `i16` slice to the `f32` slice.
@@ -278,18 +293,18 @@ impl Game for PostFlopGame {
 
     #[inline]
     fn is_ready(&self) -> bool {
-        self.is_memory_allocated
+        self.state == State::MemoryAllocated
     }
 
     #[inline]
     fn is_solved(&self) -> bool {
-        self.is_solved
+        self.state == State::Solved
     }
 
     #[inline]
     fn set_solved(&mut self, cfvalue_ip: &[f32]) {
-        self.is_solved = true;
-        self.cfvalue_ip.copy_from_slice(cfvalue_ip);
+        self.state = State::Solved;
+        self.root_cfvalue_ip.copy_from_slice(cfvalue_ip);
         let history = self.history.clone();
         self.apply_history(&history);
     }
@@ -329,7 +344,9 @@ impl PostFlopGame {
             self.removed_lines,
             self.action_root,
         ) = action_tree.eject();
+        self.state = State::ConfigError;
         self.check_card_config()?;
+        self.state = State::TreeBuilt;
         self.init();
         Ok(())
     }
@@ -361,55 +378,64 @@ impl PostFlopGame {
     /// Returns the card list of private hands of the given player.
     #[inline]
     pub fn private_cards(&self, player: usize) -> &[(u8, u8)] {
+        if self.state <= State::Uninitialized {
+            panic!("Game is not successfully initialized");
+        }
+
         &self.private_cards[player]
     }
 
     /// Returns the estimated memory usage in bytes (uncompressed, compressed).
     #[inline]
     pub fn memory_usage(&self) -> (u64, u64) {
-        let uncompressed = self.misc_memory_usage + 8 * self.num_storage_elements;
-        let compressed = self.misc_memory_usage + 4 * self.num_storage_elements;
+        if self.state <= State::Uninitialized {
+            panic!("Game is not successfully initialized");
+        }
+
+        let num_elements = 2 * self.num_storage_actions + self.num_storage_chances;
+        let uncompressed = self.misc_memory_usage + 4 * num_elements;
+        let compressed = self.misc_memory_usage + 2 * num_elements;
         (uncompressed, compressed)
     }
 
     /// Allocates the memory.
     pub fn allocate_memory(&mut self, enable_compression: bool) {
-        if self.is_memory_allocated && self.is_compression_enabled == enable_compression {
+        if self.state <= State::Uninitialized {
+            panic!("Game is not successfully initialized");
+        }
+
+        if self.state == State::MemoryAllocated && self.is_compression_enabled == enable_compression
+        {
             return;
         }
 
         let bytes = if enable_compression { 2 } else { 4 };
-        let vec_size = bytes * self.num_storage_elements;
-        if vec_size > isize::MAX as u64 {
+        if bytes * self.num_storage_actions > isize::MAX as u64
+            || bytes * self.num_storage_chances > isize::MAX as u64
+        {
             panic!("Memory usage exceeds maximum size");
         }
 
-        self.clear_storage();
-
-        self.is_memory_allocated = true;
+        self.state = State::MemoryAllocated;
         self.is_compression_enabled = enable_compression;
 
-        let num_elems = self.num_storage_elements as usize;
+        self.clear_storage();
+
+        let num_actions = self.num_storage_actions as usize;
+        let num_chances = self.num_storage_chances as usize;
         if enable_compression {
-            self.storage1_compressed = MutexLike::new(vec![0; num_elems]);
-            self.storage2_compressed = MutexLike::new(vec![0; num_elems]);
+            self.storage1_compressed = MutexLike::new(vec![0; num_actions]);
+            self.storage2_compressed = MutexLike::new(vec![0; num_actions]);
+            self.storage_chance_compressed = MutexLike::new(vec![0; num_chances]);
         } else {
-            self.storage1 = MutexLike::new(vec![0.0; num_elems]);
-            self.storage2 = MutexLike::new(vec![0.0; num_elems]);
+            self.storage1 = MutexLike::new(vec![0.0; num_actions]);
+            self.storage2 = MutexLike::new(vec![0.0; num_actions]);
+            self.storage_chance = MutexLike::new(vec![0.0; num_chances]);
         }
 
-        let counter = AtomicUsize::new(0);
-        self.allocate_memory_recursive(&mut self.root(), &counter);
-    }
-
-    /// Returns a card list of isomorphic chances.
-    #[inline]
-    fn isomorphic_cards(&self, node: &PostFlopNode) -> &[u8] {
-        if node.turn == NOT_DEALT {
-            &self.turn_isomorphism_card
-        } else {
-            &self.river_isomorphism_card[node.turn as usize]
-        }
+        let mut action_counter = 0;
+        let mut chance_counter = 0;
+        self.allocate_memory_recursive(&mut self.root(), &mut action_counter, &mut chance_counter);
     }
 
     /// Checks the card configuration.
@@ -576,12 +602,10 @@ impl PostFlopGame {
 
     /// Initializes the root node of game tree.
     fn init_root(&mut self) {
-        let current_memory_usage = AtomicU64::new(mem::size_of::<PostFlopNode>() as u64);
-        let num_storage_elements = AtomicU64::new(0);
-
-        let info = BuildTreeInfo {
-            current_memory_usage: &current_memory_usage,
-            num_storage_elements: &num_storage_elements,
+        let mut info = BuildTreeInfo {
+            memory_usage_nodes: mem::size_of::<PostFlopNode>() as u64,
+            num_storage_actions: 0,
+            num_storage_chances: 0,
         };
 
         let mut root = self.root();
@@ -589,49 +613,11 @@ impl PostFlopGame {
         root.turn = self.card_config.turn;
         root.river = self.card_config.river;
 
-        self.build_tree_recursive(&mut root, &self.action_root.lock(), &info);
+        self.build_tree_recursive(&mut root, &self.action_root.lock(), &mut info);
 
-        let current_memory_usage = current_memory_usage.load(Ordering::Relaxed);
-        let num_storage_elements = num_storage_elements.load(Ordering::Relaxed);
-
-        let mut memory_usage = current_memory_usage;
-
-        memory_usage += vec_memory_usage(&self.valid_indices_turn);
-        memory_usage += vec_memory_usage(&self.valid_indices_river);
-        memory_usage += vec_memory_usage(&self.hand_strength);
-        memory_usage += vec_memory_usage(&self.turn_isomorphism_ref);
-        memory_usage += vec_memory_usage(&self.turn_isomorphism_card);
-        memory_usage += vec_memory_usage(&self.river_isomorphism_ref);
-        memory_usage += vec_memory_usage(&self.river_isomorphism_card);
-        memory_usage += vec_memory_usage(&self.river_isomorphism_swap);
-
-        for i in 0..2 {
-            memory_usage += vec_memory_usage(&self.initial_weights[i]);
-            memory_usage += vec_memory_usage(&self.private_cards[i]);
-            memory_usage += vec_memory_usage(&self.same_hand_index[i]);
-            memory_usage += vec_memory_usage(&self.valid_indices_flop[i]);
-            for indices in &self.valid_indices_turn {
-                memory_usage += vec_memory_usage(&indices[i]);
-            }
-            for indices in &self.valid_indices_river {
-                memory_usage += vec_memory_usage(&indices[i]);
-            }
-            for strength in &self.hand_strength {
-                memory_usage += vec_memory_usage(&strength[i]);
-            }
-            for swap in &self.turn_isomorphism_swap {
-                memory_usage += vec_memory_usage(&swap[i]);
-            }
-            for swap_list in &self.river_isomorphism_swap {
-                for swap in swap_list {
-                    memory_usage += vec_memory_usage(&swap[i]);
-                }
-            }
-        }
-
-        self.is_memory_allocated = false;
-        self.misc_memory_usage = memory_usage;
-        self.num_storage_elements = num_storage_elements;
+        self.misc_memory_usage = self.memory_usage_internal() + info.memory_usage_nodes;
+        self.num_storage_actions = info.num_storage_actions;
+        self.num_storage_chances = info.num_storage_chances;
 
         self.clear_storage();
     }
@@ -644,8 +630,7 @@ impl PostFlopGame {
             vec![0.0; self.num_private_hands(1)],
         ];
 
-        self.is_solved = false;
-        self.cfvalue_ip = vec![0.0; self.num_private_hands(1)];
+        self.root_cfvalue_ip = vec![0.0; self.num_private_hands(PLAYER_IP as usize)];
         self.weights = vecs.clone();
         self.normalized_weights = vecs.clone();
         self.cfvalue_cache = vecs;
@@ -658,12 +643,68 @@ impl PostFlopGame {
     fn clear_storage(&mut self) {
         self.storage1.lock().clear();
         self.storage2.lock().clear();
+        self.storage_chance.lock().clear();
         self.storage1_compressed.lock().clear();
         self.storage2_compressed.lock().clear();
+        self.storage_chance_compressed.lock().clear();
         self.storage1.lock().shrink_to_fit();
         self.storage2.lock().shrink_to_fit();
+        self.storage_chance.lock().shrink_to_fit();
         self.storage1_compressed.lock().shrink_to_fit();
         self.storage2_compressed.lock().shrink_to_fit();
+        self.storage_chance_compressed.lock().shrink_to_fit();
+    }
+
+    /// Computes the memory usage of this struct.
+    #[inline]
+    fn memory_usage_internal(&self) -> u64 {
+        // untracked: tree_config, action_root
+
+        let mut memory_usage = mem::size_of::<Self>() as u64;
+
+        memory_usage += vec_memory_usage(&self.added_lines);
+        memory_usage += vec_memory_usage(&self.removed_lines);
+        for line in &self.added_lines {
+            memory_usage += vec_memory_usage(line);
+        }
+        for line in &self.removed_lines {
+            memory_usage += vec_memory_usage(line);
+        }
+
+        memory_usage += vec_memory_usage(&self.valid_indices_turn);
+        memory_usage += vec_memory_usage(&self.valid_indices_river);
+        memory_usage += vec_memory_usage(&self.hand_strength);
+        memory_usage += vec_memory_usage(&self.turn_isomorphism_ref);
+        memory_usage += vec_memory_usage(&self.turn_isomorphism_card);
+        memory_usage += vec_memory_usage(&self.river_isomorphism_ref);
+        memory_usage += vec_memory_usage(&self.river_isomorphism_card);
+        memory_usage += vec_memory_usage(&self.river_isomorphism_swap);
+
+        for player in 0..2 {
+            memory_usage += vec_memory_usage(&self.initial_weights[player]);
+            memory_usage += vec_memory_usage(&self.private_cards[player]);
+            memory_usage += vec_memory_usage(&self.same_hand_index[player]);
+            memory_usage += vec_memory_usage(&self.valid_indices_flop[player]);
+            for indices in &self.valid_indices_turn {
+                memory_usage += vec_memory_usage(&indices[player]);
+            }
+            for indices in &self.valid_indices_river {
+                memory_usage += vec_memory_usage(&indices[player]);
+            }
+            for strength in &self.hand_strength {
+                memory_usage += vec_memory_usage(&strength[player]);
+            }
+            for swap in &self.turn_isomorphism_swap {
+                memory_usage += vec_memory_usage(&swap[player]);
+            }
+            for swap_list in &self.river_isomorphism_swap {
+                for swap in swap_list {
+                    memory_usage += vec_memory_usage(&swap[player]);
+                }
+            }
+        }
+
+        memory_usage
     }
 
     /// Builds the game tree recursively.
@@ -671,7 +712,7 @@ impl PostFlopGame {
         &self,
         node: &mut PostFlopNode,
         action_node: &ActionTreeNode,
-        info: &BuildTreeInfo,
+        info: &mut BuildTreeInfo,
     ) {
         node.player = action_node.player;
         node.amount = action_node.amount;
@@ -694,7 +735,7 @@ impl PostFlopGame {
     }
 
     /// Pushes the chance actions to the `node`.
-    fn push_chances(&self, node: &mut PostFlopNode, info: &BuildTreeInfo) {
+    fn push_chances(&self, node: &mut PostFlopNode, info: &mut BuildTreeInfo) {
         let flop = self.card_config.flop;
         let flop_mask: u64 = (1 << flop[0]) | (1 << flop[1]) | (1 << flop[2]);
 
@@ -736,10 +777,11 @@ impl PostFlopGame {
 
         node.actions.shrink_to_fit();
         node.children.shrink_to_fit();
-        info.current_memory_usage.fetch_add(
-            vec_memory_usage(&node.actions) + vec_memory_usage(&node.children),
-            Ordering::Relaxed,
-        );
+        node.num_elements = node.num_actions() * self.num_private_hands(PLAYER_IP as usize);
+
+        info.memory_usage_nodes += vec_memory_usage(&node.actions);
+        info.memory_usage_nodes += vec_memory_usage(&node.children);
+        info.num_storage_chances += node.num_elements as u64;
     }
 
     /// Pushes the actions to the `node`.
@@ -747,7 +789,7 @@ impl PostFlopGame {
         &self,
         node: &mut PostFlopNode,
         action_node: &ActionTreeNode,
-        info: &BuildTreeInfo,
+        info: &mut BuildTreeInfo,
     ) {
         for action in &action_node.actions {
             node.actions.push(*action);
@@ -760,48 +802,64 @@ impl PostFlopGame {
 
         node.actions.shrink_to_fit();
         node.children.shrink_to_fit();
-        info.current_memory_usage.fetch_add(
-            vec_memory_usage(&node.actions) + vec_memory_usage(&node.children),
-            Ordering::Relaxed,
-        );
+        node.num_elements = node.num_actions() * self.num_private_hands(node.player as usize);
 
-        let num_elems = node.num_actions() * self.num_private_hands(node.player as usize);
-        node.num_elements = num_elems;
-        info.num_storage_elements
-            .fetch_add(num_elems as u64, Ordering::Relaxed);
+        info.memory_usage_nodes += vec_memory_usage(&node.actions);
+        info.memory_usage_nodes += vec_memory_usage(&node.children);
+        info.num_storage_actions += node.num_elements as u64;
     }
 
     /// Allocates memory recursively.
-    fn allocate_memory_recursive(&self, node: &mut PostFlopNode, counter: &AtomicUsize) {
+    fn allocate_memory_recursive(
+        &self,
+        node: &mut PostFlopNode,
+        action_counter: &mut usize,
+        chance_counter: &mut usize,
+    ) {
         if node.is_terminal() {
             return;
         }
 
-        if !node.is_chance() {
-            let index = counter.fetch_add(node.num_elements, Ordering::SeqCst);
+        if node.is_chance() {
             unsafe {
                 if self.is_compression_enabled {
-                    let storage1_ptr = self.storage1_compressed.lock().as_mut_ptr();
-                    let storage2_ptr = self.storage2_compressed.lock().as_mut_ptr();
-                    node.storage1 = storage1_ptr.add(index) as *mut u8;
-                    node.storage2 = storage2_ptr.add(index) as *mut u8;
+                    let ptr = self.storage_chance_compressed.lock().as_mut_ptr();
+                    node.storage2 = ptr.add(*chance_counter) as *mut u8;
                 } else {
-                    let storage1_ptr = self.storage1.lock().as_mut_ptr();
-                    let storage2_ptr = self.storage2.lock().as_mut_ptr();
-                    node.storage1 = storage1_ptr.add(index) as *mut u8;
-                    node.storage2 = storage2_ptr.add(index) as *mut u8;
+                    let ptr = self.storage_chance.lock().as_mut_ptr();
+                    node.storage2 = ptr.add(*chance_counter) as *mut u8;
                 }
             }
+            *chance_counter += node.num_elements;
+        } else {
+            unsafe {
+                if self.is_compression_enabled {
+                    let ptr1 = self.storage1_compressed.lock().as_mut_ptr();
+                    let ptr2 = self.storage2_compressed.lock().as_mut_ptr();
+                    node.storage1 = ptr1.add(*action_counter) as *mut u8;
+                    node.storage2 = ptr2.add(*action_counter) as *mut u8;
+                } else {
+                    let ptr1 = self.storage1.lock().as_mut_ptr();
+                    let ptr2 = self.storage2.lock().as_mut_ptr();
+                    node.storage1 = ptr1.add(*action_counter) as *mut u8;
+                    node.storage2 = ptr2.add(*action_counter) as *mut u8;
+                }
+            }
+            *action_counter += node.num_elements;
         }
 
         for action in node.actions() {
-            self.allocate_memory_recursive(&mut node.play(action), counter);
+            self.allocate_memory_recursive(&mut node.play(action), action_counter, chance_counter);
         }
     }
 
     /// Moves the current node back to the root node.
     #[inline]
     pub fn back_to_root(&mut self) {
+        if self.state <= State::Uninitialized {
+            panic!("struct is not successfully initialized");
+        }
+
         self.history.clear();
         self.is_normalized_weight_cached = false;
         self.node_ptr = &*self.root();
@@ -814,8 +872,7 @@ impl PostFlopGame {
 
         self.weights[0].copy_from_slice(&self.initial_weights[0]);
         self.weights[1].copy_from_slice(&self.initial_weights[1]);
-        self.cfvalue_cache[0].fill(0.0);
-        self.cfvalue_cache[1].copy_from_slice(&self.cfvalue_ip);
+        self.cfvalue_cache[1].copy_from_slice(&self.root_cfvalue_ip);
     }
 
     /// Returns the history of the current node.
@@ -826,6 +883,10 @@ impl PostFlopGame {
     /// [`play`]: #method.play
     #[inline]
     pub fn history(&self) -> &[usize] {
+        if self.state <= State::Uninitialized {
+            panic!("struct is not successfully initialized");
+        }
+
         &self.history
     }
 
@@ -838,6 +899,10 @@ impl PostFlopGame {
     /// [`play`]: #method.play
     #[inline]
     pub fn apply_history(&mut self, history: &[usize]) {
+        if self.state <= State::Uninitialized {
+            panic!("struct is not successfully initialized");
+        }
+
         self.back_to_root();
         for &action in history {
             self.play(action);
@@ -850,6 +915,10 @@ impl PostFlopGame {
     /// one representative action (therefore this method is almost useless).
     #[inline]
     pub fn available_actions(&self) -> &[Action] {
+        if self.state <= State::Uninitialized {
+            panic!("struct is not successfully initialized");
+        }
+
         &self.node().actions
     }
 
@@ -859,6 +928,10 @@ impl PostFlopGame {
     /// terminal.
     #[inline]
     pub fn is_terminal_node(&self) -> bool {
+        if self.state <= State::Uninitialized {
+            panic!("struct is not successfully initialized");
+        }
+
         let node = self.node();
         node.is_terminal() || node.amount == self.tree_config.effective_stack
     }
@@ -866,6 +939,10 @@ impl PostFlopGame {
     /// Returns whether the current node is a chance node.
     #[inline]
     pub fn is_chance_node(&self) -> bool {
+        if self.state <= State::Uninitialized {
+            panic!("struct is not successfully initialized");
+        }
+
         self.node().is_chance()
     }
 
@@ -877,6 +954,10 @@ impl PostFlopGame {
     ///
     /// Card ID: `"2c"` => `0`, `"2d"` => `1`, `"2h"` => `2`, ..., `"As"` => `51`.
     pub fn possible_cards(&self) -> u64 {
+        if self.state <= State::Uninitialized {
+            panic!("struct is not successfully initialized");
+        }
+
         if !self.node().is_chance() {
             return 0;
         }
@@ -912,6 +993,10 @@ impl PostFlopGame {
     /// If the current node is a terminal node or a chance node, returns an undefined value.
     #[inline]
     pub fn current_player(&self) -> usize {
+        if self.state <= State::Uninitialized {
+            panic!("struct is not successfully initialized");
+        }
+
         self.node().player()
     }
 
@@ -925,7 +1010,7 @@ impl PostFlopGame {
     ///
     /// [`available_actions`]: #method.available_actions
     pub fn play(&mut self, action: usize) {
-        if !self.is_ready() {
+        if self.state < State::MemoryAllocated {
             panic!("memory is not allocated");
         }
 
@@ -994,6 +1079,17 @@ impl PostFlopGame {
                 panic!("invalid action");
             }
 
+            // cache the counterfactual values
+            let num_hands = self.num_private_hands(PLAYER_IP as usize);
+            let vec = if self.is_compression_enabled {
+                let slice = row(self.node().cfvalues_compressed(), action_index, num_hands);
+                let scale = self.node().cfvalue_scale();
+                decode_signed_slice(slice, scale)
+            } else {
+                row(self.node().cfvalues(), action, num_hands).to_vec()
+            };
+            self.cfvalue_cache[PLAYER_IP as usize].copy_from_slice(&vec);
+
             // update the state
             self.node_ptr = &*self.node().play(action_index);
             if is_turn {
@@ -1049,6 +1145,10 @@ impl PostFlopGame {
     /// [`expected_values`]: #method.expected_values
     /// [`expected_values_detail`]: #method.expected_values_detail
     pub fn cache_normalized_weights(&mut self) {
+        if self.state <= State::Uninitialized {
+            panic!("struct is not successfully initialized");
+        }
+
         if self.is_normalized_weight_cached {
             return;
         }
@@ -1111,6 +1211,10 @@ impl PostFlopGame {
     /// Returns the weights of each private hand of the given player.
     #[inline]
     pub fn weights(&self, player: usize) -> &[f32] {
+        if self.state <= State::Uninitialized {
+            panic!("struct is not successfully initialized");
+        }
+
         &self.weights[player]
     }
 
@@ -1125,6 +1229,10 @@ impl PostFlopGame {
     /// [`cache_normalized_weights`]: #method.cache_normalized_weights
     #[inline]
     pub fn normalized_weights(&self, player: usize) -> &[f32] {
+        if self.state <= State::Uninitialized {
+            panic!("struct is not successfully initialized");
+        }
+
         if !self.is_normalized_weight_cached {
             panic!("normalized weights are not cached");
         }
@@ -1139,6 +1247,10 @@ impl PostFlopGame {
     ///
     /// [`cache_normalized_weights`]: #method.cache_normalized_weights
     pub fn equity(&self, player: usize) -> Vec<f32> {
+        if self.state <= State::Uninitialized {
+            panic!("struct is not successfully initialized");
+        }
+
         if !self.is_normalized_weight_cached {
             panic!("normalized weights are not cached");
         }
@@ -1184,12 +1296,12 @@ impl PostFlopGame {
     ///
     /// [`cache_normalized_weights`]: #method.cache_normalized_weights
     pub fn expected_values(&self, player: usize) -> Vec<f32> {
-        if self.is_chance_node() {
-            panic!("chance node is not allowed");
+        if self.state != State::Solved {
+            panic!("game is not solved");
         }
 
-        if !self.is_solved {
-            panic!("game is not solved");
+        if self.is_chance_node() {
+            panic!("chance node is not allowed");
         }
 
         if !self.is_normalized_weight_cached {
@@ -1237,12 +1349,12 @@ impl PostFlopGame {
     /// [`expected_values`]: #method.expected_value
     /// [`cache_normalized_weights`]: #method.cache_normalized_weights
     pub fn expected_values_detail(&self, player: usize) -> Vec<f32> {
-        if self.is_chance_node() {
-            panic!("chance node is not allowed");
+        if self.state != State::Solved {
+            panic!("game is not solved");
         }
 
-        if !self.is_solved {
-            panic!("game is not solved");
+        if self.is_chance_node() {
+            panic!("chance node is not allowed");
         }
 
         if !self.is_normalized_weight_cached {
@@ -1293,12 +1405,12 @@ impl PostFlopGame {
     /// The probability of `i`-th action with `j`-th private hand is stored in the
     /// `i * #(private hands) + j`-th element.
     pub fn strategy(&self) -> Vec<f32> {
-        if self.is_chance_node() {
-            panic!("chance node is not allowed");
+        if self.state < State::MemoryAllocated {
+            panic!("memory is not allocated");
         }
 
-        if !self.is_ready() {
-            panic!("memory is not allocated");
+        if self.is_chance_node() {
+            panic!("chance node is not allowed");
         }
 
         let player = self.current_player();
@@ -1325,6 +1437,16 @@ impl PostFlopGame {
     #[inline]
     fn node(&self) -> &PostFlopNode {
         unsafe { &*self.node_ptr }
+    }
+
+    /// Returns a card list of isomorphic chances.
+    #[inline]
+    fn isomorphic_cards(&self, node: &PostFlopNode) -> &[u8] {
+        if node.turn == NOT_DEALT {
+            &self.turn_isomorphism_card
+        } else {
+            &self.river_isomorphism_card[node.turn as usize]
+        }
     }
 
     /// Applies the swap.
@@ -1544,6 +1666,7 @@ impl Default for PostFlopGame {
     #[inline]
     fn default() -> Self {
         Self {
+            state: State::default(),
             card_config: CardConfig::default(),
             tree_config: TreeConfig::default(),
             added_lines: Vec::default(),
@@ -1564,16 +1687,17 @@ impl Default for PostFlopGame {
             river_isomorphism_ref: Vec::default(),
             river_isomorphism_card: Vec::default(),
             river_isomorphism_swap: Vec::default(),
-            is_memory_allocated: false,
             is_compression_enabled: false,
             misc_memory_usage: 0,
-            num_storage_elements: 0,
+            num_storage_actions: 0,
+            num_storage_chances: 0,
             storage1: MutexLike::default(),
             storage2: MutexLike::default(),
+            storage_chance: MutexLike::default(),
             storage1_compressed: MutexLike::default(),
             storage2_compressed: MutexLike::default(),
-            is_solved: false,
-            cfvalue_ip: Vec::default(),
+            storage_chance_compressed: MutexLike::default(),
+            root_cfvalue_ip: Vec::default(),
             history: Vec::default(),
             is_normalized_weight_cached: false,
             node_ptr: ptr::null(),
@@ -1622,11 +1746,12 @@ impl Default for CardConfig {
 }
 
 #[cfg(feature = "bincode")]
-static VERSION_STR: &str = "2022-12-08";
+static VERSION_STR: &str = "2022-12-09";
 
 #[cfg(feature = "bincode")]
 thread_local! {
-    static BASE_PTR: Cell<(*mut u8, *mut u8)> = Cell::new((ptr::null_mut(), ptr::null_mut()));
+    static BASE_PTR: Cell<(*mut u8, *mut u8, *mut u8)> =
+        Cell::new((ptr::null_mut(), ptr::null_mut(), ptr::null_mut()));
 }
 
 #[cfg(feature = "bincode")]
@@ -1634,38 +1759,47 @@ impl Encode for PostFlopGame {
     fn encode<E: bincode::enc::Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
         // store base pointer
         BASE_PTR.with(|ps| {
-            if self.is_memory_allocated {
-                let base = if self.is_compression_enabled {
-                    self.storage1_compressed.lock().as_mut_ptr() as *mut u8
+            if self.state >= State::MemoryAllocated {
+                let (base_action, base_chance) = if self.is_compression_enabled {
+                    (
+                        self.storage2_compressed.lock().as_mut_ptr() as *mut u8,
+                        self.storage_chance_compressed.lock().as_mut_ptr() as *mut u8,
+                    )
                 } else {
-                    self.storage1.lock().as_mut_ptr() as *mut u8
+                    (
+                        self.storage2.lock().as_mut_ptr() as *mut u8,
+                        self.storage_chance.lock().as_mut_ptr() as *mut u8,
+                    )
                 };
-                ps.set((base, ptr::null_mut()));
+                ps.set((ptr::null_mut(), base_action, base_chance));
             } else {
-                ps.set((ptr::null_mut(), ptr::null_mut()));
+                ps.set((ptr::null_mut(), ptr::null_mut(), ptr::null_mut()));
             }
         });
 
         // version
         VERSION_STR.to_string().encode(encoder)?;
 
-        // contents
-        self.card_config.encode(encoder)?;
+        // action tree
         self.tree_config.encode(encoder)?;
         self.added_lines.encode(encoder)?;
         self.removed_lines.encode(encoder)?;
-        self.action_root.encode(encoder)?;
+
+        // contents
+        self.state.encode(encoder)?;
+        self.card_config.encode(encoder)?;
         self.num_combinations.encode(encoder)?;
-        self.is_memory_allocated.encode(encoder)?;
         self.is_compression_enabled.encode(encoder)?;
         self.misc_memory_usage.encode(encoder)?;
-        self.num_storage_elements.encode(encoder)?;
+        self.num_storage_actions.encode(encoder)?;
+        self.num_storage_chances.encode(encoder)?;
         self.storage1.encode(encoder)?;
         self.storage2.encode(encoder)?;
+        self.storage_chance.encode(encoder)?;
         self.storage1_compressed.encode(encoder)?;
         self.storage2_compressed.encode(encoder)?;
-        self.is_solved.encode(encoder)?;
-        self.cfvalue_ip.encode(encoder)?;
+        self.storage_chance_compressed.encode(encoder)?;
+        self.root_cfvalue_ip.encode(encoder)?;
         self.history.encode(encoder)?;
         self.is_normalized_weight_cached.encode(encoder)?;
 
@@ -1680,10 +1814,16 @@ impl Encode for PostFlopGame {
 impl Encode for PostFlopNode {
     fn encode<E: bincode::enc::Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
         // compute pointer offset
-        let offset = if self.storage1.is_null() {
-            0
+        let offset = if self.storage2.is_null() {
+            -1
         } else {
-            BASE_PTR.with(|ps| unsafe { self.storage1.offset_from(ps.get().0) })
+            BASE_PTR.with(|ps| {
+                if self.is_chance() {
+                    unsafe { self.storage2.offset_from(ps.get().2) }
+                } else {
+                    unsafe { self.storage2.offset_from(ps.get().1) }
+                }
+            })
         };
 
         // contents
@@ -1715,47 +1855,65 @@ impl Decode for PostFlopGame {
             )));
         }
 
+        let tree_config = TreeConfig::decode(decoder)?;
+        let added_lines = Vec::<Vec<Action>>::decode(decoder)?;
+        let removed_lines = Vec::<Vec<Action>>::decode(decoder)?;
+
+        let mut action_tree = ActionTree::new(tree_config).unwrap();
+        for line in &added_lines {
+            action_tree.add_line(line).unwrap();
+        }
+        for line in &removed_lines {
+            action_tree.remove_line(line).unwrap();
+        }
+
+        let (tree_config, _, _, action_root) = action_tree.eject();
+
         // game instance
         let mut game = Self {
+            state: Decode::decode(decoder)?,
             card_config: Decode::decode(decoder)?,
-            tree_config: Decode::decode(decoder)?,
-            added_lines: Decode::decode(decoder)?,
-            removed_lines: Decode::decode(decoder)?,
-            action_root: Decode::decode(decoder)?,
+            tree_config,
+            added_lines,
+            removed_lines,
+            action_root,
             num_combinations: Decode::decode(decoder)?,
-            is_memory_allocated: Decode::decode(decoder)?,
             is_compression_enabled: Decode::decode(decoder)?,
             misc_memory_usage: Decode::decode(decoder)?,
-            num_storage_elements: Decode::decode(decoder)?,
+            num_storage_actions: Decode::decode(decoder)?,
+            num_storage_chances: Decode::decode(decoder)?,
             storage1: Decode::decode(decoder)?,
             storage2: Decode::decode(decoder)?,
+            storage_chance: Decode::decode(decoder)?,
             storage1_compressed: Decode::decode(decoder)?,
             storage2_compressed: Decode::decode(decoder)?,
+            storage_chance_compressed: Decode::decode(decoder)?,
             ..Default::default()
         };
 
-        let is_solved = bool::decode(decoder)?;
-        let cfvalue_ip = Vec::<f32>::decode(decoder)?;
+        let root_cfvalue_ip = Vec::<f32>::decode(decoder)?;
         let history = Vec::<usize>::decode(decoder)?;
         let is_normalized_weight_cached = bool::decode(decoder)?;
 
         // store base pointers
         BASE_PTR.with(|ps| {
-            if game.is_memory_allocated {
+            if game.state >= State::MemoryAllocated {
                 let bases = if game.is_compression_enabled {
                     (
                         game.storage1_compressed.lock().as_mut_ptr() as *mut u8,
                         game.storage2_compressed.lock().as_mut_ptr() as *mut u8,
+                        game.storage_chance_compressed.lock().as_mut_ptr() as *mut u8,
                     )
                 } else {
                     (
                         game.storage1.lock().as_mut_ptr() as *mut u8,
                         game.storage2.lock().as_mut_ptr() as *mut u8,
+                        game.storage_chance.lock().as_mut_ptr() as *mut u8,
                     )
                 };
                 ps.set(bases);
             } else {
-                ps.set((ptr::null_mut(), ptr::null_mut()));
+                ps.set((ptr::null_mut(), ptr::null_mut(), ptr::null_mut()));
             }
         });
 
@@ -1763,15 +1921,16 @@ impl Decode for PostFlopGame {
         game.root = Decode::decode(decoder)?;
 
         // initialization
-        game.init_hands();
-        game.init_card_fields();
-        game.init_interactor();
+        if game.state >= State::TreeBuilt {
+            game.init_hands();
+            game.init_card_fields();
+            game.init_interactor();
 
-        game.is_solved = is_solved;
-        game.cfvalue_ip.copy_from_slice(&cfvalue_ip);
-        game.apply_history(&history);
-        if is_normalized_weight_cached {
-            game.cache_normalized_weights();
+            game.root_cfvalue_ip.copy_from_slice(&root_cfvalue_ip);
+            game.apply_history(&history);
+            if is_normalized_weight_cached {
+                game.cache_normalized_weights();
+            }
         }
 
         Ok(game)
@@ -1796,10 +1955,14 @@ impl Decode for PostFlopNode {
 
         // pointers
         let offset = isize::decode(decoder)?;
-        let (base1, base2) = BASE_PTR.with(|ps| ps.get());
-        if !base1.is_null() {
-            node.storage1 = unsafe { base1.offset(offset) };
-            node.storage2 = unsafe { base2.offset(offset) };
+        if offset >= 0 {
+            let (base1, base2, base_chance) = BASE_PTR.with(|ps| ps.get());
+            if node.is_chance() {
+                node.storage2 = unsafe { base_chance.offset(offset) };
+            } else {
+                node.storage1 = unsafe { base1.offset(offset) };
+                node.storage2 = unsafe { base2.offset(offset) };
+            }
         }
 
         // children
@@ -1807,11 +1970,6 @@ impl Decode for PostFlopNode {
 
         Ok(node)
     }
-}
-
-#[inline]
-fn vec_memory_usage<T>(vec: &Vec<T>) -> u64 {
-    vec.capacity() as u64 * mem::size_of::<T>() as u64
 }
 
 #[cfg(test)]

@@ -121,7 +121,7 @@ impl Game for LeducGame {
     }
 
     #[inline]
-    fn set_solved(&mut self, _cfvalue_ip: &[f32]) {
+    fn set_solved(&mut self, _root_cfvalue_ip: &[f32]) {
         self.is_solved = true;
     }
 
@@ -284,7 +284,10 @@ impl LeducGame {
             return;
         }
 
-        if !node.is_chance() {
+        if node.is_chance() {
+            let num_actions = node.num_actions();
+            node.storage = vec![0.0; num_actions * NUM_PRIVATE_HANDS];
+        } else {
             let num_actions = node.num_actions();
             node.strategy = vec![0.0; num_actions * NUM_PRIVATE_HANDS];
             node.storage = vec![0.0; num_actions * NUM_PRIVATE_HANDS];

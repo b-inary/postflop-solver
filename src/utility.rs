@@ -1,6 +1,8 @@
+use crate::action_tree::*;
 use crate::interface::*;
 use crate::mutex_like::*;
 use crate::sliceop::*;
+use std::mem;
 use std::ptr;
 
 #[cfg(feature = "custom-alloc")]
@@ -25,6 +27,11 @@ pub(crate) fn for_each_child<T: GameNode, OP: Fn(usize) + Sync + Send>(node: &T,
 #[inline]
 pub(crate) fn for_each_child<T: GameNode, OP: Fn(usize) + Sync + Send>(node: &T, op: OP) {
     node.actions().for_each(op);
+}
+
+#[inline]
+pub(crate) fn vec_memory_usage<T>(vec: &Vec<T>) -> u64 {
+    vec.capacity() as u64 * mem::size_of::<T>() as u64
 }
 
 #[inline]
@@ -191,12 +198,12 @@ pub(crate) fn encode_unsigned_slice(dst: &mut [u16], slice: &[f32]) -> f32 {
 /// Finalizes the solving process.
 #[inline]
 pub fn finalize<T: Game>(game: &mut T) {
-    if !game.is_ready() {
-        panic!("the game is not ready");
-    }
-
     if game.is_solved() {
         panic!("the game is already solved");
+    }
+
+    if !game.is_ready() {
+        panic!("the game is not ready");
     }
 
     let mut cfvalues = [
@@ -229,7 +236,7 @@ pub fn finalize<T: Game>(game: &mut T) {
 /// Computes the exploitability of the current strategy.
 #[inline]
 pub fn compute_exploitability<T: Game>(game: &T) -> f32 {
-    if !game.is_ready() {
+    if !game.is_ready() && !game.is_solved() {
         panic!("the game is not ready");
     }
 
@@ -351,6 +358,16 @@ fn compute_cfvalue_recursive<T: Game>(
         result.iter_mut().zip(&result_f64).for_each(|(r, &v)| {
             *r = v as f32;
         });
+
+        // save the counterfactual values for IP player
+        if player == PLAYER_IP as usize {
+            if game.is_compression_enabled() {
+                let cfv_scale = encode_signed_slice(node.cfvalues_compressed_mut(), &cfv_actions);
+                node.set_cfvalue_scale(cfv_scale);
+            } else {
+                node.cfvalues_mut().copy_from_slice(&cfv_actions);
+            }
+        }
     }
     // player node
     else if node.player() == player {
@@ -399,7 +416,7 @@ fn compute_cfvalue_recursive<T: Game>(
             add_slice(result, row);
         });
 
-        // save the expected values
+        // save the counterfactual values
         if game.is_compression_enabled() {
             let cfv_scale = encode_signed_slice(node.cfvalues_compressed_mut(), &cfv_actions);
             node.set_cfvalue_scale(cfv_scale);

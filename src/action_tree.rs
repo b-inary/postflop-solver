@@ -5,7 +5,7 @@ use crate::mutex_like::*;
 use bincode::{error::DecodeError, Decode, Encode};
 
 pub(crate) const PLAYER_OOP: u8 = 0;
-// pub(crate) const PLAYER_IP: u8 = 1;
+pub(crate) const PLAYER_IP: u8 = 1;
 pub(crate) const PLAYER_CHANCE: u8 = 2;
 pub(crate) const PLAYER_MASK: u8 = 3;
 pub(crate) const PLAYER_TERMINAL_FLAG: u8 = 4;
