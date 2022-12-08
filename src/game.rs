@@ -1004,7 +1004,7 @@ impl PostFlopGame {
                 self.normalize_factor *= 44.0;
             }
         }
-        // not chance node
+        // player node
         else {
             // panic if the action is invalid
             if action >= self.node().num_actions() {
@@ -1022,8 +1022,14 @@ impl PostFlopGame {
             }
 
             // cache the counterfactual values
-            let tmp = row(self.node().cfvalues(), action, num_hands).to_vec();
-            self.cfvalue_cache[player].copy_from_slice(&tmp);
+            let vec = if self.is_compression_enabled {
+                let slice = row(self.node().cfvalues_compressed(), action, num_hands);
+                let scale = self.node().cfvalue_scale();
+                decode_signed_slice(slice, scale)
+            } else {
+                row(self.node().cfvalues(), action, num_hands).to_vec()
+            };
+            self.cfvalue_cache[player].copy_from_slice(&vec);
 
             // update the node
             self.node_ptr = &*self.node().play(action);

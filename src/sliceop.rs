@@ -34,12 +34,12 @@ pub(crate) fn mul_slice_scalar(slice: &mut [f32], scalar: f32) {
 
 /// Returns the "row" slice of a slice representing a two dimensional matrix.
 #[inline]
-pub(crate) fn row(slice: &[f32], index: usize, row_size: usize) -> &[f32] {
+pub(crate) fn row<T>(slice: &[T], index: usize, row_size: usize) -> &[T] {
     &slice[index * row_size..(index + 1) * row_size]
 }
 
 /// Returns the mutable "row" slice of a slice representing a two dimensional matrix.
 #[inline]
-pub(crate) fn row_mut(slice: &mut [f32], index: usize, row_size: usize) -> &mut [f32] {
+pub(crate) fn row_mut<T>(slice: &mut [T], index: usize, row_size: usize) -> &mut [T] {
     &mut slice[index * row_size..(index + 1) * row_size]
 }
