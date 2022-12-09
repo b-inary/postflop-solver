@@ -6,10 +6,12 @@ use bincode::{error::DecodeError, Decode, Encode};
 
 pub(crate) const PLAYER_OOP: u8 = 0;
 pub(crate) const PLAYER_IP: u8 = 1;
+pub(crate) const PLAYER_MASK: u8 = 1;
 pub(crate) const PLAYER_CHANCE: u8 = 2;
-pub(crate) const PLAYER_MASK: u8 = 3;
-pub(crate) const PLAYER_TERMINAL_FLAG: u8 = 4;
-pub(crate) const PLAYER_FOLD_FLAG: u8 = 12;
+pub(crate) const PLAYER_ALLIN_FLAG: u8 = 4;
+pub(crate) const PLAYER_CHANCE_FLAG: u8 = 8;
+pub(crate) const PLAYER_TERMINAL_FLAG: u8 = 16;
+pub(crate) const PLAYER_FOLD_FLAG: u8 = 48;
 
 /// Available actions of the postflop game.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
@@ -451,7 +453,7 @@ impl ActionTree {
 
             let next_player = match (info.allin_flag, node.board_state) {
                 (false, _) => PLAYER_OOP,
-                (true, BoardState::Flop) => PLAYER_CHANCE,
+                (true, BoardState::Flop) => PLAYER_CHANCE_FLAG | PLAYER_ALLIN_FLAG | PLAYER_CHANCE,
                 (true, _) => PLAYER_TERMINAL_FLAG,
             };
 
@@ -465,7 +467,7 @@ impl ActionTree {
 
             self.build_tree_recursive(
                 &mut node.children[0].lock(),
-                info.create_next(PLAYER_CHANCE, Action::Chance(0)),
+                info.create_next(0, Action::Chance(0)),
             );
         } else {
             self.push_actions(node, &info);
@@ -609,8 +611,8 @@ impl ActionTree {
                 }
 
                 // all-in
-                let all_in_threshold = pot as f32 * self.config.add_allin_threshold;
-                if max_amount <= prev_amount + all_in_threshold.round() as i32 {
+                let allin_threshold = pot as f32 * self.config.add_allin_threshold;
+                if max_amount <= prev_amount + allin_threshold.round() as i32 {
                     actions.push(Action::AllIn(max_amount));
                 }
             }
@@ -653,9 +655,14 @@ impl ActionTree {
         // merge bet actions with close amounts
         actions = merge_bet_actions(actions, pot, prev_amount, self.config.merging_threshold);
 
-        let player_after_call = match num_remaining_streets {
-            1 => PLAYER_TERMINAL_FLAG,
-            _ => PLAYER_CHANCE,
+        let player_allin_flag = match info.allin_flag {
+            true => PLAYER_ALLIN_FLAG,
+            false => 0,
+        };
+
+        let player_after_call = match node.board_state {
+            BoardState::River => PLAYER_TERMINAL_FLAG,
+            _ => PLAYER_CHANCE_FLAG | player_allin_flag | player,
         };
 
         let player_after_check = match player {
@@ -735,7 +742,7 @@ impl ActionTree {
                 &mut node.children[0].lock(),
                 line,
                 was_removed,
-                info.create_next(PLAYER_CHANCE, Action::Chance(0)),
+                info.create_next(0, Action::Chance(0)),
             );
         }
 
@@ -814,9 +821,14 @@ impl ActionTree {
             };
         }
 
+        let player_allin_flag = match info.allin_flag {
+            true => PLAYER_ALLIN_FLAG,
+            false => 0,
+        };
+
         let player_after_call = match node.board_state {
             BoardState::River => PLAYER_TERMINAL_FLAG,
-            _ => PLAYER_CHANCE,
+            _ => PLAYER_CHANCE_FLAG | player_allin_flag | player,
         };
 
         let player_after_check = match player {
@@ -908,7 +920,7 @@ impl ActionTreeNode {
 
     #[inline]
     fn is_chance(&self) -> bool {
-        self.player == PLAYER_CHANCE
+        self.player & PLAYER_CHANCE_FLAG != 0
     }
 }
 

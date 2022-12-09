@@ -1,6 +1,14 @@
 use crate::mutex_like::*;
 use std::ops::Range;
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+#[doc(hidden)]
+pub enum CfValueStorage {
+    None,
+    Sum,
+    All,
+}
+
 /// The trait representing a game.
 pub trait Game: Send + Sync {
     /// The type representing a node in game tree.
@@ -66,6 +74,12 @@ pub trait GameNode: Send + Sync {
     #[doc(hidden)]
     fn is_chance(&self) -> bool;
 
+    /// Returns the option for storing counterfactual values for chance node.
+    #[doc(hidden)]
+    fn cfvalue_storage(&self, _player: usize) -> CfValueStorage {
+        CfValueStorage::None
+    }
+
     /// Returns the current player.
     #[doc(hidden)]
     fn player(&self) -> usize;
@@ -105,6 +119,18 @@ pub trait GameNode: Send + Sync {
     /// Returns the mutable reference to the counterfactual values.
     #[doc(hidden)]
     fn cfvalues_mut(&mut self) -> &mut [f32];
+
+    /// Returns the buffer for counterfactual values.
+    #[doc(hidden)]
+    fn cfvalues_chance(&self, _player: usize) -> &[f32] {
+        unreachable!()
+    }
+
+    /// Returns the mutable reference to the buffer for counterfactual values.
+    #[doc(hidden)]
+    fn cfvalues_chance_mut(&mut self, _player: usize) -> &mut [f32] {
+        unreachable!()
+    }
 
     /// Returns the [`Range`] struct of actions.
     #[doc(hidden)]
@@ -148,6 +174,18 @@ pub trait GameNode: Send + Sync {
         unreachable!()
     }
 
+    /// Returns the compressed buffer for counterfactual values.
+    #[doc(hidden)]
+    fn cfvalues_chance_compressed(&self, _player: usize) -> &[i16] {
+        unreachable!()
+    }
+
+    /// Returns the mutable reference to the compressed buffer for counterfactual values.
+    #[doc(hidden)]
+    fn cfvalues_chance_compressed_mut(&mut self, _player: usize) -> &mut [i16] {
+        unreachable!()
+    }
+
     /// Returns the scale of the compressed strategy.
     #[doc(hidden)]
     fn strategy_scale(&self) -> f32 {
@@ -181,6 +219,18 @@ pub trait GameNode: Send + Sync {
     /// Sets the scale of the compressed counterfactual values.
     #[doc(hidden)]
     fn set_cfvalue_scale(&mut self, _scale: f32) {
+        unreachable!()
+    }
+
+    /// Returns the scale of the compressed buffer for counterfactual values.
+    #[doc(hidden)]
+    fn cfvalue_chance_scale(&self, _player: usize) -> f32 {
+        unreachable!()
+    }
+
+    /// Sets the scale of the compressed buffer for counterfactual values.
+    #[doc(hidden)]
+    fn set_cfvalue_chance_scale(&mut self, _player: usize, _scale: f32) {
         unreachable!()
     }
 

@@ -284,10 +284,7 @@ impl LeducGame {
             return;
         }
 
-        if node.is_chance() {
-            let num_actions = node.num_actions();
-            node.storage = vec![0.0; num_actions * NUM_PRIVATE_HANDS];
-        } else {
+        if !node.is_chance() {
             let num_actions = node.num_actions();
             node.strategy = vec![0.0; num_actions * NUM_PRIVATE_HANDS];
             node.storage = vec![0.0; num_actions * NUM_PRIVATE_HANDS];

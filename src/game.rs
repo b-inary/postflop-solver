@@ -106,6 +106,7 @@ pub struct PostFlopNode {
     scale1: f32,
     scale2: f32,
     num_elements: usize,
+    num_elements_aux: usize,
 }
 
 unsafe impl Send for PostFlopNode {}
@@ -777,11 +778,22 @@ impl PostFlopGame {
 
         node.actions.shrink_to_fit();
         node.children.shrink_to_fit();
-        node.num_elements = node.num_actions() * self.num_private_hands(PLAYER_IP as usize);
+
+        node.num_elements = match node.cfvalue_storage(PLAYER_OOP as usize) {
+            CfValueStorage::None => 0,
+            CfValueStorage::Sum => self.num_private_hands(PLAYER_OOP as usize),
+            CfValueStorage::All => node.num_actions() * self.num_private_hands(PLAYER_OOP as usize),
+        };
+
+        node.num_elements_aux = match node.cfvalue_storage(PLAYER_IP as usize) {
+            CfValueStorage::None => 0,
+            CfValueStorage::Sum => self.num_private_hands(PLAYER_IP as usize),
+            CfValueStorage::All => node.num_actions() * self.num_private_hands(PLAYER_IP as usize),
+        };
 
         info.memory_usage_nodes += vec_memory_usage(&node.actions);
         info.memory_usage_nodes += vec_memory_usage(&node.children);
-        info.num_storage_chances += node.num_elements as u64;
+        info.num_storage_chances += (node.num_elements + node.num_elements_aux) as u64;
     }
 
     /// Pushes the actions to the `node`.
@@ -821,16 +833,30 @@ impl PostFlopGame {
         }
 
         if node.is_chance() {
-            unsafe {
-                if self.is_compression_enabled {
-                    let ptr = self.storage_chance_compressed.lock().as_mut_ptr();
-                    node.storage2 = ptr.add(*chance_counter) as *mut u8;
-                } else {
-                    let ptr = self.storage_chance.lock().as_mut_ptr();
-                    node.storage2 = ptr.add(*chance_counter) as *mut u8;
+            if node.num_elements > 0 {
+                unsafe {
+                    if self.is_compression_enabled {
+                        let ptr = self.storage_chance_compressed.lock().as_mut_ptr();
+                        node.storage1 = ptr.add(*chance_counter) as *mut u8;
+                    } else {
+                        let ptr = self.storage_chance.lock().as_mut_ptr();
+                        node.storage1 = ptr.add(*chance_counter) as *mut u8;
+                    }
                 }
+                *chance_counter += node.num_elements;
             }
-            *chance_counter += node.num_elements;
+            if node.num_elements_aux > 0 {
+                unsafe {
+                    if self.is_compression_enabled {
+                        let ptr = self.storage_chance_compressed.lock().as_mut_ptr();
+                        node.storage2 = ptr.add(*chance_counter) as *mut u8;
+                    } else {
+                        let ptr = self.storage_chance.lock().as_mut_ptr();
+                        node.storage2 = ptr.add(*chance_counter) as *mut u8;
+                    }
+                }
+                *chance_counter += node.num_elements_aux;
+            }
         } else {
             unsafe {
                 if self.is_compression_enabled {
@@ -909,22 +935,9 @@ impl PostFlopGame {
         }
     }
 
-    /// Returns the available actions for the current node.
-    ///
-    /// Note: If the current node is a chance node, isomorphic chances are grouped together into
-    /// one representative action (therefore this method is almost useless).
-    #[inline]
-    pub fn available_actions(&self) -> &[Action] {
-        if self.state <= State::Uninitialized {
-            panic!("struct is not successfully initialized");
-        }
-
-        &self.node().actions
-    }
-
     /// Returns whether the current node is a terminal node.
     ///
-    /// Note that the chance node after the call action after the all-in action is considered
+    /// Note that the turn/river node after the call action after the all-in action is considered
     /// terminal.
     #[inline]
     pub fn is_terminal_node(&self) -> bool {
@@ -936,14 +949,35 @@ impl PostFlopGame {
         node.is_terminal() || node.amount == self.tree_config.effective_stack
     }
 
-    /// Returns whether the current node is a chance node.
+    /// Returns whether the current node is a chance node (i.e., turn/river node).
+    ///
+    /// Note that the terminal node is not considered a chance node.
     #[inline]
     pub fn is_chance_node(&self) -> bool {
         if self.state <= State::Uninitialized {
             panic!("struct is not successfully initialized");
         }
 
-        self.node().is_chance()
+        !self.is_terminal_node() && self.node().is_chance()
+    }
+
+    /// Returns the available actions for the current node.
+    ///
+    /// If the current node is a terminal, returns an empty list. If the current node is a
+    /// turn/river node and not a terminal, isomorphic chances are grouped into one representative
+    /// action (in most cases, you should use the [`possible_cards`] method).
+    ///
+    /// [`possible_cards`]: #method.possible_cards
+    #[inline]
+    pub fn available_actions(&self) -> &[Action] {
+        if self.state <= State::Uninitialized {
+            panic!("struct is not successfully initialized");
+        }
+
+        match self.is_terminal_node() {
+            true => &[],
+            false => &self.node().actions,
+        }
     }
 
     /// If the current node is a chance node, returns a list of cards that may be dealt.
@@ -958,7 +992,7 @@ impl PostFlopGame {
             panic!("struct is not successfully initialized");
         }
 
-        if !self.node().is_chance() {
+        if !self.is_chance_node() {
             return 0;
         }
 
@@ -1080,15 +1114,18 @@ impl PostFlopGame {
             }
 
             // cache the counterfactual values
-            let num_hands = self.num_private_hands(PLAYER_IP as usize);
+            let player_ip = PLAYER_IP as usize;
+            let num_hands = self.num_private_hands(player_ip);
             let vec = if self.is_compression_enabled {
-                let slice = row(self.node().cfvalues_compressed(), action_index, num_hands);
-                let scale = self.node().cfvalue_scale();
+                let src = self.node().cfvalues_chance_compressed(player_ip);
+                let slice = row(src, action_index, num_hands);
+                let scale = self.node().cfvalue_chance_scale(player_ip);
                 decode_signed_slice(slice, scale)
             } else {
-                row(self.node().cfvalues(), action_index, num_hands).to_vec()
+                let src = self.node().cfvalues_chance(player_ip);
+                row(src, action_index, num_hands).to_vec()
             };
-            self.cfvalue_cache[PLAYER_IP as usize].copy_from_slice(&vec);
+            self.cfvalue_cache[player_ip].copy_from_slice(&vec);
 
             // update the state
             self.node_ptr = &*self.node().play(action_index);
@@ -1289,8 +1326,6 @@ impl PostFlopGame {
 
     /// Returns the expected values of each private hand of the given player.
     ///
-    /// Panics if the current node is a chance node.
-    ///
     /// After mutating the current node, you must call the [`cache_normalized_weights`] method
     /// before calling this method.
     ///
@@ -1300,17 +1335,13 @@ impl PostFlopGame {
             panic!("game is not solved");
         }
 
-        if self.is_chance_node() {
-            panic!("chance node is not allowed");
-        }
-
         if !self.is_normalized_weight_cached {
             panic!("normalized weights are not cached");
         }
 
         let expected_value_detail = self.expected_values_detail(player);
 
-        if self.is_terminal_node() || self.current_player() != player {
+        if self.is_terminal_node() || self.is_chance_node() || self.current_player() != player {
             return expected_value_detail;
         }
 
@@ -1333,12 +1364,9 @@ impl PostFlopGame {
 
     /// Returns the expected values of each action of each private hand of the given player.
     ///
-    /// Panics if the current node is a chance node.
-    ///
-    /// If the current node is not a terminal and the given player is the current player, the return
-    /// value is a vector of the length of `#(actions) * #(private hands)`. The expected value of
-    /// `i`-th action with `j`-th private hand is stored in the `i * #(private hands) + j`-th
-    /// element.
+    /// If the given player is the current player, the return value is a vector of the length of
+    /// `#(actions) * #(private hands)`. The expected value of `i`-th action with `j`-th private
+    /// hand is stored in the `i * #(private hands) + j`-th element.
     ///
     /// Otherwise, this method is the same as the [`expected_values`] method, so the return vector
     /// is the length of `#(private hands)`.
@@ -1353,10 +1381,6 @@ impl PostFlopGame {
             panic!("game is not solved");
         }
 
-        if self.is_chance_node() {
-            panic!("chance node is not allowed");
-        }
-
         if !self.is_normalized_weight_cached {
             panic!("normalized weights are not cached");
         }
@@ -1367,6 +1391,31 @@ impl PostFlopGame {
             let mut ret = vec![0.0; num_hands];
             self.evaluate(&mut ret, self.node(), player, &self.weights[player ^ 1]);
             ret
+        } else if self.is_chance_node() {
+            let storage = self.node().cfvalue_storage(player);
+            if storage == CfValueStorage::None {
+                self.cfvalue_cache[player].to_vec()
+            } else {
+                let vec = if self.is_compression_enabled {
+                    let slice = self.node().cfvalues_chance_compressed(player);
+                    let scale = self.node().cfvalue_chance_scale(player);
+                    decode_signed_slice(slice, scale)
+                } else {
+                    self.node().cfvalues_chance(player).to_vec()
+                };
+
+                if storage == CfValueStorage::Sum {
+                    vec
+                } else {
+                    let mut ret_f64 = vec![0.0; num_hands];
+                    vec.chunks_exact(num_hands).for_each(|row| {
+                        ret_f64.iter_mut().zip(row).for_each(|(r, &v)| {
+                            *r += v as f64;
+                        });
+                    });
+                    ret_f64.iter().map(|&v| v as f32).collect()
+                }
+            }
         } else if player != self.current_player() {
             self.cfvalue_cache[player].to_vec()
         } else if self.is_compression_enabled {
@@ -1399,7 +1448,7 @@ impl PostFlopGame {
 
     /// Returns the strategy of the current player.
     ///
-    /// Panics if the current node is a chance node.
+    /// Panics if the current node is a terminal node or a chance node.
     ///
     /// The return value is a vector of the length of `#(actions) * #(private hands)`.
     /// The probability of `i`-th action with `j`-th private hand is stored in the
@@ -1407,6 +1456,10 @@ impl PostFlopGame {
     pub fn strategy(&self) -> Vec<f32> {
         if self.state < State::MemoryAllocated {
             panic!("memory is not allocated");
+        }
+
+        if self.is_terminal_node() {
+            panic!("terminal node is not allowed");
         }
 
         if self.is_chance_node() {
@@ -1543,7 +1596,21 @@ impl GameNode for PostFlopNode {
 
     #[inline]
     fn is_chance(&self) -> bool {
-        self.player == PLAYER_CHANCE
+        self.player & PLAYER_CHANCE_FLAG != 0
+    }
+
+    #[inline]
+    fn cfvalue_storage(&self, player: usize) -> CfValueStorage {
+        let last_player = self.player & (PLAYER_MASK | PLAYER_CHANCE);
+        let allin_flag = self.player & PLAYER_ALLIN_FLAG != 0;
+        let pair = match (allin_flag, last_player) {
+            (false, PLAYER_OOP) => [CfValueStorage::None, CfValueStorage::All],
+            (false, PLAYER_IP) => [CfValueStorage::Sum, CfValueStorage::All],
+            (true, PLAYER_OOP) => [CfValueStorage::None, CfValueStorage::Sum],
+            (true, PLAYER_IP) => [CfValueStorage::Sum, CfValueStorage::None],
+            _ => [CfValueStorage::None, CfValueStorage::None],
+        };
+        pair[player]
     }
 
     #[inline]
@@ -1597,6 +1664,24 @@ impl GameNode for PostFlopNode {
     }
 
     #[inline]
+    fn cfvalues_chance(&self, player: usize) -> &[f32] {
+        let (base, len) = match player {
+            0 => (self.storage1, self.num_elements),
+            _ => (self.storage2, self.num_elements_aux),
+        };
+        unsafe { slice::from_raw_parts(base as *const f32, len) }
+    }
+
+    #[inline]
+    fn cfvalues_chance_mut(&mut self, player: usize) -> &mut [f32] {
+        let (base, len) = match player {
+            0 => (self.storage1, self.num_elements),
+            _ => (self.storage2, self.num_elements_aux),
+        };
+        unsafe { slice::from_raw_parts_mut(base as *mut f32, len) }
+    }
+
+    #[inline]
     fn strategy_compressed(&self) -> &[u16] {
         unsafe { slice::from_raw_parts(self.storage1 as *const u16, self.num_elements) }
     }
@@ -1627,6 +1712,24 @@ impl GameNode for PostFlopNode {
     }
 
     #[inline]
+    fn cfvalues_chance_compressed(&self, player: usize) -> &[i16] {
+        let (base, len) = match player {
+            0 => (self.storage1, self.num_elements),
+            _ => (self.storage2, self.num_elements_aux),
+        };
+        unsafe { slice::from_raw_parts(base as *const i16, len) }
+    }
+
+    #[inline]
+    fn cfvalues_chance_compressed_mut(&mut self, player: usize) -> &mut [i16] {
+        let (base, len) = match player {
+            0 => (self.storage1, self.num_elements),
+            _ => (self.storage2, self.num_elements_aux),
+        };
+        unsafe { slice::from_raw_parts_mut(base as *mut i16, len) }
+    }
+
+    #[inline]
     fn strategy_scale(&self) -> f32 {
         self.scale1
     }
@@ -1654,6 +1757,22 @@ impl GameNode for PostFlopNode {
     #[inline]
     fn set_cfvalue_scale(&mut self, scale: f32) {
         self.scale2 = scale;
+    }
+
+    #[doc(hidden)]
+    fn cfvalue_chance_scale(&self, player: usize) -> f32 {
+        match player {
+            0 => self.scale1,
+            _ => self.scale2,
+        }
+    }
+
+    #[doc(hidden)]
+    fn set_cfvalue_chance_scale(&mut self, player: usize, scale: f32) {
+        match player {
+            0 => self.scale1 = scale,
+            _ => self.scale2 = scale,
+        }
     }
 
     #[inline]
@@ -1729,6 +1848,7 @@ impl Default for PostFlopNode {
             scale1: 0.0,
             scale2: 0.0,
             num_elements: 0,
+            num_elements_aux: 0,
         }
     }
 }
@@ -1746,34 +1866,39 @@ impl Default for CardConfig {
 }
 
 #[cfg(feature = "bincode")]
-static VERSION_STR: &str = "2022-12-09";
+static VERSION_STR: &str = "2022-12-10";
 
 #[cfg(feature = "bincode")]
 thread_local! {
-    static BASE_PTR: Cell<(*mut u8, *mut u8, *mut u8)> =
-        Cell::new((ptr::null_mut(), ptr::null_mut(), ptr::null_mut()));
+    static ACTION_BASE: Cell<(*mut u8, *mut u8)> = Cell::new((ptr::null_mut(), ptr::null_mut()));
+    static CHANCE_BASE: Cell<*mut u8> = Cell::new(ptr::null_mut());
 }
 
 #[cfg(feature = "bincode")]
 impl Encode for PostFlopGame {
     fn encode<E: bincode::enc::Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
-        // store base pointer
-        BASE_PTR.with(|ps| {
+        // store base pointers
+        ACTION_BASE.with(|ps| {
             if self.state >= State::MemoryAllocated {
-                let (base_action, base_chance) = if self.is_compression_enabled {
-                    (
-                        self.storage2_compressed.lock().as_mut_ptr() as *mut u8,
-                        self.storage_chance_compressed.lock().as_mut_ptr() as *mut u8,
-                    )
-                } else {
-                    (
-                        self.storage2.lock().as_mut_ptr() as *mut u8,
-                        self.storage_chance.lock().as_mut_ptr() as *mut u8,
-                    )
+                let base1 = match self.is_compression_enabled {
+                    true => self.storage1_compressed.lock().as_mut_ptr() as *mut u8,
+                    false => self.storage1.lock().as_mut_ptr() as *mut u8,
                 };
-                ps.set((ptr::null_mut(), base_action, base_chance));
+                ps.set((base1, ptr::null_mut()));
             } else {
-                ps.set((ptr::null_mut(), ptr::null_mut(), ptr::null_mut()));
+                ps.set((ptr::null_mut(), ptr::null_mut()));
+            }
+        });
+
+        CHANCE_BASE.with(|p| {
+            if self.state >= State::MemoryAllocated {
+                let base = match self.is_compression_enabled {
+                    true => self.storage_chance_compressed.lock().as_mut_ptr() as *mut u8,
+                    false => self.storage_chance.lock().as_mut_ptr() as *mut u8,
+                };
+                p.set(base);
+            } else {
+                p.set(ptr::null_mut());
             }
         });
 
@@ -1814,14 +1939,28 @@ impl Encode for PostFlopGame {
 impl Encode for PostFlopNode {
     fn encode<E: bincode::enc::Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
         // compute pointer offset
-        let offset = if self.storage2.is_null() {
-            -1
+        let (offset, offset_aux) = if self.is_chance() {
+            CHANCE_BASE.with(|p| {
+                let base = p.get();
+                let ret = match self.storage1.is_null() {
+                    true => -1,
+                    false => unsafe { self.storage1.offset_from(base) },
+                };
+                let ret_aux = match self.storage2.is_null() {
+                    true => -1,
+                    false => unsafe { self.storage2.offset_from(base) },
+                };
+                (ret, ret_aux)
+            })
         } else {
-            BASE_PTR.with(|ps| {
-                if self.is_chance() {
-                    unsafe { self.storage2.offset_from(ps.get().2) }
-                } else {
-                    unsafe { self.storage2.offset_from(ps.get().1) }
+            ACTION_BASE.with(|ps| {
+                let (base1, _) = ps.get();
+                match self.storage1.is_null() {
+                    true => (-1, -1),
+                    false => {
+                        let ret = unsafe { self.storage1.offset_from(base1) };
+                        (ret, -1)
+                    }
                 }
             })
         };
@@ -1835,7 +1974,9 @@ impl Encode for PostFlopNode {
         self.scale1.encode(encoder)?;
         self.scale2.encode(encoder)?;
         self.num_elements.encode(encoder)?;
+        self.num_elements_aux.encode(encoder)?;
         offset.encode(encoder)?;
+        offset_aux.encode(encoder)?;
 
         // children
         self.children.encode(encoder)?;
@@ -1896,24 +2037,31 @@ impl Decode for PostFlopGame {
         let is_normalized_weight_cached = bool::decode(decoder)?;
 
         // store base pointers
-        BASE_PTR.with(|ps| {
+        ACTION_BASE.with(|ps| {
             if game.state >= State::MemoryAllocated {
-                let bases = if game.is_compression_enabled {
-                    (
-                        game.storage1_compressed.lock().as_mut_ptr() as *mut u8,
-                        game.storage2_compressed.lock().as_mut_ptr() as *mut u8,
-                        game.storage_chance_compressed.lock().as_mut_ptr() as *mut u8,
-                    )
+                let (base1, base2);
+                if game.is_compression_enabled {
+                    base1 = game.storage1_compressed.lock().as_mut_ptr() as *mut u8;
+                    base2 = game.storage2_compressed.lock().as_mut_ptr() as *mut u8;
                 } else {
-                    (
-                        game.storage1.lock().as_mut_ptr() as *mut u8,
-                        game.storage2.lock().as_mut_ptr() as *mut u8,
-                        game.storage_chance.lock().as_mut_ptr() as *mut u8,
-                    )
-                };
-                ps.set(bases);
+                    base1 = game.storage1.lock().as_mut_ptr() as *mut u8;
+                    base2 = game.storage2.lock().as_mut_ptr() as *mut u8;
+                }
+                ps.set((base1, base2));
             } else {
-                ps.set((ptr::null_mut(), ptr::null_mut(), ptr::null_mut()));
+                ps.set((ptr::null_mut(), ptr::null_mut()));
+            }
+        });
+
+        CHANCE_BASE.with(|p| {
+            if game.state >= State::MemoryAllocated {
+                let base = match game.is_compression_enabled {
+                    true => game.storage_chance_compressed.lock().as_mut_ptr() as *mut u8,
+                    false => game.storage_chance.lock().as_mut_ptr() as *mut u8,
+                };
+                p.set(base);
+            } else {
+                p.set(ptr::null_mut());
             }
         });
 
@@ -1950,19 +2098,25 @@ impl Decode for PostFlopNode {
             scale1: Decode::decode(decoder)?,
             scale2: Decode::decode(decoder)?,
             num_elements: Decode::decode(decoder)?,
+            num_elements_aux: Decode::decode(decoder)?,
             ..Default::default()
         };
 
         // pointers
         let offset = isize::decode(decoder)?;
-        if offset >= 0 {
-            let (base1, base2, base_chance) = BASE_PTR.with(|ps| ps.get());
-            if node.is_chance() {
-                node.storage2 = unsafe { base_chance.offset(offset) };
-            } else {
-                node.storage1 = unsafe { base1.offset(offset) };
-                node.storage2 = unsafe { base2.offset(offset) };
+        let offset_aux = isize::decode(decoder)?;
+        if node.is_chance() {
+            let base = CHANCE_BASE.with(|p| p.get());
+            if offset >= 0 {
+                node.storage1 = unsafe { base.offset(offset) };
             }
+            if offset_aux >= 0 {
+                node.storage2 = unsafe { base.offset(offset_aux) };
+            }
+        } else if offset >= 0 {
+            let (base1, base2) = ACTION_BASE.with(|ps| ps.get());
+            node.storage1 = unsafe { base1.offset(offset) };
+            node.storage2 = unsafe { base2.offset(offset) };
         }
 
         // children

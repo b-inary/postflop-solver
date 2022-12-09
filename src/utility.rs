@@ -1,4 +1,3 @@
-use crate::action_tree::*;
 use crate::interface::*;
 use crate::mutex_like::*;
 use crate::sliceop::*;
@@ -359,13 +358,19 @@ fn compute_cfvalue_recursive<T: Game>(
             *r = v as f32;
         });
 
-        // save the counterfactual values for IP player
-        if player == PLAYER_IP as usize {
+        // save the counterfactual values
+        let slice: &[f32] = match node.cfvalue_storage(player) {
+            CfValueStorage::None => &[],
+            CfValueStorage::Sum => result,
+            CfValueStorage::All => cfv_actions.as_slice(),
+        };
+        if !slice.is_empty() {
             if game.is_compression_enabled() {
-                let cfv_scale = encode_signed_slice(node.cfvalues_compressed_mut(), &cfv_actions);
-                node.set_cfvalue_scale(cfv_scale);
+                let dst = node.cfvalues_chance_compressed_mut(player);
+                let cfv_scale = encode_signed_slice(dst, slice);
+                node.set_cfvalue_chance_scale(player, cfv_scale);
             } else {
-                node.cfvalues_mut().copy_from_slice(&cfv_actions);
+                node.cfvalues_chance_mut(player).copy_from_slice(slice);
             }
         }
     }
