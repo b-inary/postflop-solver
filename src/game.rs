@@ -1387,11 +1387,11 @@ impl PostFlopGame {
 
         let num_hands = self.num_private_hands(player);
 
-        let mut ret = if self.is_terminal_node() {
+        let mut ret = if self.node().is_terminal() {
             let mut ret = vec![0.0; num_hands];
             self.evaluate(&mut ret, self.node(), player, &self.weights[player ^ 1]);
             ret
-        } else if self.is_chance_node() {
+        } else if self.node().is_chance() {
             let storage = self.node().cfvalue_storage(player);
             if storage == CfValueStorage::None {
                 self.cfvalue_cache[player].to_vec()
