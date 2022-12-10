@@ -29,6 +29,12 @@ pub(crate) fn for_each_child<T: GameNode, OP: Fn(usize) + Sync + Send>(node: &T,
 }
 
 #[inline]
+pub(crate) fn weighted_sum(values: &[f32], weights: &[f32]) -> f32 {
+    let f = |sum: f64, (&v, &w): (&f32, &f32)| sum + v as f64 * w as f64;
+    values.iter().zip(weights).fold(0.0, f) as f32
+}
+
+#[inline]
 pub(crate) fn vec_memory_usage<T>(vec: &Vec<T>) -> u64 {
     vec.capacity() as u64 * mem::size_of::<T>() as u64
 }
@@ -219,6 +225,7 @@ pub fn finalize<T: Game>(game: &mut T) {
             &mut game.root(),
             player,
             cfreach,
+            true,
         );
     }
 
@@ -232,9 +239,40 @@ pub fn finalize<T: Game>(game: &mut T) {
     free_custom_alloc_buffer();
 }
 
-/// Computes the exploitability of the current strategy.
+/// Computes the average of the expected values of the current strategy.
 #[inline]
-pub fn compute_exploitability<T: Game>(game: &T) -> f32 {
+pub fn compute_current_ev_average<T: Game>(game: &T) -> f32 {
+    if !game.is_ready() && !game.is_solved() {
+        panic!("the game is not ready");
+    }
+
+    let mut cfvalues = [
+        vec![0.0; game.num_private_hands(0)],
+        vec![0.0; game.num_private_hands(1)],
+    ];
+
+    let reach = [game.initial_weights(0), game.initial_weights(1)];
+
+    for player in 0..2 {
+        compute_cfvalue_recursive(
+            &mut cfvalues[player],
+            game,
+            &mut game.root(),
+            player,
+            reach[player ^ 1],
+            false,
+        );
+    }
+
+    let get_sum = |player: usize| weighted_sum(&cfvalues[player], reach[player]);
+    0.5 * (get_sum(0) + get_sum(1))
+}
+
+/// Computes the average of the expected values of the MES (Maximally Exploitative Strategy).
+///
+/// Corresponds to the exploitability value when not raked.
+#[inline]
+pub fn compute_mes_ev_average<T: Game>(game: &T) -> f32 {
     if !game.is_ready() && !game.is_solved() {
         panic!("the game is not ready");
     }
@@ -256,23 +294,18 @@ pub fn compute_exploitability<T: Game>(game: &T) -> f32 {
         );
     }
 
-    let get_sum = |player: usize| {
-        cfvalues[player]
-            .iter()
-            .zip(reach[player])
-            .fold(0.0, |sum, (&cfv, &reach)| sum + cfv as f64 * reach as f64)
-    };
-
-    (get_sum(0) + get_sum(1)) as f32 / 2.0
+    let get_sum = |player: usize| weighted_sum(&cfvalues[player], reach[player]);
+    0.5 * (get_sum(0) + get_sum(1))
 }
 
 /// The recursive helper function for computing the counterfactual values of the given strategy.
-fn compute_cfvalue_recursive<T: Game>(
+pub(crate) fn compute_cfvalue_recursive<T: Game>(
     result: &mut [f32],
     game: &T,
     node: &mut T::Node,
     player: usize,
     cfreach: &[f32],
+    save_cfvalues: bool,
 ) {
     // terminal node
     if node.is_terminal() {
@@ -312,6 +345,7 @@ fn compute_cfvalue_recursive<T: Game>(
                 &mut node.play(action),
                 player,
                 &cfreach,
+                save_cfvalues,
             );
         });
 
@@ -359,18 +393,20 @@ fn compute_cfvalue_recursive<T: Game>(
         });
 
         // save the counterfactual values
-        let slice: &[f32] = match node.cfvalue_storage(player) {
-            CfValueStorage::None => &[],
-            CfValueStorage::Sum => result,
-            CfValueStorage::All => cfv_actions.as_slice(),
-        };
-        if !slice.is_empty() {
-            if game.is_compression_enabled() {
-                let dst = node.cfvalues_chance_compressed_mut(player);
-                let cfv_scale = encode_signed_slice(dst, slice);
-                node.set_cfvalue_chance_scale(player, cfv_scale);
-            } else {
-                node.cfvalues_chance_mut(player).copy_from_slice(slice);
+        if save_cfvalues {
+            let slice: &[f32] = match node.cfvalue_storage(player) {
+                CfValueStorage::None => &[],
+                CfValueStorage::Sum => result,
+                CfValueStorage::All => cfv_actions.as_slice(),
+            };
+            if !slice.is_empty() {
+                if game.is_compression_enabled() {
+                    let dst = node.cfvalues_chance_compressed_mut(player);
+                    let cfv_scale = encode_signed_slice(dst, slice);
+                    node.set_cfvalue_chance_scale(player, cfv_scale);
+                } else {
+                    node.cfvalues_chance_mut(player).copy_from_slice(slice);
+                }
             }
         }
     }
@@ -411,6 +447,7 @@ fn compute_cfvalue_recursive<T: Game>(
                 &mut node.play(action),
                 player,
                 cfreach,
+                save_cfvalues,
             );
         });
 
@@ -422,17 +459,26 @@ fn compute_cfvalue_recursive<T: Game>(
         });
 
         // save the counterfactual values
-        if game.is_compression_enabled() {
-            let cfv_scale = encode_signed_slice(node.cfvalues_compressed_mut(), &cfv_actions);
-            node.set_cfvalue_scale(cfv_scale);
-        } else {
-            node.cfvalues_mut().copy_from_slice(&cfv_actions);
+        if save_cfvalues {
+            if game.is_compression_enabled() {
+                let cfv_scale = encode_signed_slice(node.cfvalues_compressed_mut(), &cfv_actions);
+                node.set_cfvalue_scale(cfv_scale);
+            } else {
+                node.cfvalues_mut().copy_from_slice(&cfv_actions);
+            }
         }
     }
     // opponent node
     else if num_actions == 1 {
         // simply recurse when the number of actions is one
-        compute_cfvalue_recursive(result, game, &mut node.play(0), player, cfreach);
+        compute_cfvalue_recursive(
+            result,
+            game,
+            &mut node.play(0),
+            player,
+            cfreach,
+            save_cfvalues,
+        );
     } else {
         // obtain the strategy
         let mut cfreach_actions = if game.is_compression_enabled() {
@@ -475,6 +521,7 @@ fn compute_cfvalue_recursive<T: Game>(
                 &mut node.play(action),
                 player,
                 row(&cfreach_actions, action, row_size),
+                save_cfvalues,
             );
         });
 

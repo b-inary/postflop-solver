@@ -51,20 +51,15 @@ pub fn solve<T: Game>(
     }
 
     let mut root = game.root();
-
-    let mut exploitability = compute_exploitability(game);
+    let mut exploitability = f32::INFINITY;
 
     if print_progress {
         print!("iteration: 0 / {max_num_iterations} ");
-        print!("(exploitability = {exploitability:.4e}[bb])");
+        print!("(exploitability = {exploitability:.4e})");
         io::stdout().flush().unwrap();
     }
 
     for t in 0..max_num_iterations {
-        if exploitability <= target_exploitability {
-            break;
-        }
-
         let params = DiscountParams::new(t);
 
         // alternating updates
@@ -81,13 +76,21 @@ pub fn solve<T: Game>(
         }
 
         if (t + 1) % 10 == 0 || t + 1 == max_num_iterations {
-            exploitability = compute_exploitability(game);
+            if !game.is_raked() {
+                exploitability = compute_mes_ev_average(game);
+            } else {
+                exploitability = compute_mes_ev_average(game) - compute_current_ev_average(game);
+            }
         }
 
         if print_progress {
             print!("\riteration: {} / {} ", t + 1, max_num_iterations);
-            print!("(exploitability = {exploitability:.4e}[bb])");
+            print!("(exploitability = {exploitability:.4e})");
             io::stdout().flush().unwrap();
+        }
+
+        if exploitability <= target_exploitability {
+            break;
         }
     }
 

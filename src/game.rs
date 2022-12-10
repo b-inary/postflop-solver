@@ -166,8 +166,25 @@ impl Game for PostFlopGame {
     }
 
     fn evaluate(&self, result: &mut [f32], node: &Self::Node, player: usize, cfreach: &[f32]) {
-        let amount_raw = self.tree_config.starting_pot as f64 * 0.5 + node.amount as f64;
-        let amount = amount_raw / self.num_combinations;
+        let pot = self.tree_config.starting_pot + 2 * node.amount;
+        let half_pot = 0.5 * pot as f64;
+
+        let rake_basis_points = self.tree_config.rake_basis_points;
+        let rake = if rake_basis_points == 0 {
+            0
+        } else {
+            let rake_raw = (pot as i64 * rake_basis_points as i64) as f64 / 10000.0;
+            let rake_rounded_up = rake_raw.round();
+            let rake_rounded_even = if rake_rounded_up - rake_raw == 0.5 {
+                (rake_rounded_up as i32) & !1 // rounding half to even (PokerStars)
+            } else {
+                rake_rounded_up as i32
+            };
+            i32::min(rake_rounded_even, self.tree_config.rake_cap)
+        };
+
+        let amount_win = (half_pot - rake as f64) / self.num_combinations;
+        let amount_lose = -half_pot / self.num_combinations;
 
         let player_cards = &self.private_cards[player];
         let opponent_cards = &self.private_cards[player ^ 1];
@@ -178,10 +195,10 @@ impl Game for PostFlopGame {
         // someone folded
         if node.player & PLAYER_FOLD_FLAG == PLAYER_FOLD_FLAG {
             let folded_player = node.player & PLAYER_MASK;
-            let payoff = if folded_player as usize == player {
-                -amount
+            let payoff = if folded_player as usize != player {
+                amount_win
             } else {
-                amount
+                amount_lose
             };
 
             let valid_indices = if node.turn == NOT_DEALT {
@@ -219,8 +236,8 @@ impl Game for PostFlopGame {
                 }
             }
         }
-        // showdown
-        else {
+        // showdown (not raked)
+        else if rake == 0 {
             let hand_strength = &self.hand_strength[card_pair_index(node.turn, node.river)];
             let player_strength = &hand_strength[player];
             let opponent_strength = &hand_strength[player ^ 1];
@@ -246,7 +263,7 @@ impl Game for PostFlopGame {
                     let cfreach = cfreach_sum
                         - cfreach_minus.get_unchecked(c1 as usize)
                         - cfreach_minus.get_unchecked(c2 as usize);
-                    *result.get_unchecked_mut(index as usize) = (amount * cfreach) as f32;
+                    *result.get_unchecked_mut(index as usize) = (amount_win * cfreach) as f32;
                 }
             }
 
@@ -269,10 +286,106 @@ impl Game for PostFlopGame {
                     let cfreach = cfreach_sum
                         - cfreach_minus.get_unchecked(c1 as usize)
                         - cfreach_minus.get_unchecked(c2 as usize);
-                    *result.get_unchecked_mut(index as usize) -= (amount * cfreach) as f32;
+                    *result.get_unchecked_mut(index as usize) += (amount_lose * cfreach) as f32;
                 }
             }
         }
+        // showdown (raked)
+        else {
+            let split = -(rake + player as i32) / 2; // OOP obtains the remainder
+            let amount_tie = split as f64 / self.num_combinations;
+
+            let valid_indices = &self.valid_indices_river[card_pair_index(node.turn, node.river)];
+            let opponent_indices = &valid_indices[player ^ 1];
+            for &i in opponent_indices {
+                unsafe {
+                    let (c1, c2) = *opponent_cards.get_unchecked(i as usize);
+                    let cfreach_i = *cfreach.get_unchecked(i as usize) as f64;
+                    cfreach_sum += cfreach_i;
+                    *cfreach_minus.get_unchecked_mut(c1 as usize) += cfreach_i;
+                    *cfreach_minus.get_unchecked_mut(c2 as usize) += cfreach_i;
+                }
+            }
+
+            let hand_strength = &self.hand_strength[card_pair_index(node.turn, node.river)];
+            let player_strength = &hand_strength[player];
+            let opponent_strength = &hand_strength[player ^ 1];
+
+            let player_len = player_strength.len();
+            let valid_player_strength = &player_strength[1..player_len - 1];
+            let same_hand_index = &self.same_hand_index[player];
+
+            let mut cfreach_sum_win = 0.0;
+            let mut cfreach_sum_tie = 0.0;
+            let mut cfreach_minus_win = [0.0; 52];
+            let mut cfreach_minus_tie = [0.0; 52];
+
+            let mut j = 1;
+            let mut k = 1;
+
+            for &StrengthItem { strength, index } in valid_player_strength {
+                unsafe {
+                    while opponent_strength.get_unchecked(j).strength < strength {
+                        let opponent_index = opponent_strength.get_unchecked(j).index as usize;
+                        let (c1, c2) = *opponent_cards.get_unchecked(opponent_index);
+                        let cfreach_opp = *cfreach.get_unchecked(opponent_index) as f64;
+                        cfreach_sum_win += cfreach_opp;
+                        *cfreach_minus_win.get_unchecked_mut(c1 as usize) += cfreach_opp;
+                        *cfreach_minus_win.get_unchecked_mut(c2 as usize) += cfreach_opp;
+                        j += 1;
+                    }
+
+                    while opponent_strength.get_unchecked(k).strength <= strength {
+                        let opponent_index = opponent_strength.get_unchecked(k).index as usize;
+                        let (c1, c2) = *opponent_cards.get_unchecked(opponent_index);
+                        let cfreach_opp = *cfreach.get_unchecked(opponent_index) as f64;
+                        cfreach_sum_tie += cfreach_opp;
+                        *cfreach_minus_tie.get_unchecked_mut(c1 as usize) += cfreach_opp;
+                        *cfreach_minus_tie.get_unchecked_mut(c2 as usize) += cfreach_opp;
+                        k += 1;
+                    }
+
+                    let (c1, c2) = *player_cards.get_unchecked(index as usize);
+                    let cfreach_total = cfreach_sum
+                        - cfreach_minus.get_unchecked(c1 as usize)
+                        - cfreach_minus.get_unchecked(c2 as usize);
+                    let cfreach_win = cfreach_sum_win
+                        - cfreach_minus_win.get_unchecked(c1 as usize)
+                        - cfreach_minus_win.get_unchecked(c2 as usize);
+                    let cfreach_tie = cfreach_sum_tie
+                        - cfreach_minus_tie.get_unchecked(c1 as usize)
+                        - cfreach_minus_tie.get_unchecked(c2 as usize);
+                    let cfreach_same = same_hand_index
+                        .get_unchecked(index as usize)
+                        .map_or(0.0, |opponent_index| {
+                            *cfreach.get_unchecked(opponent_index as usize) as f64
+                        });
+
+                    let cfvalue = amount_win * cfreach_win
+                        + amount_tie * (cfreach_tie - cfreach_same - cfreach_win)
+                        + amount_lose * (cfreach_total - cfreach_tie);
+                    *result.get_unchecked_mut(index as usize) = cfvalue as f32;
+                }
+            }
+        }
+    }
+
+    #[inline]
+    fn is_solved(&self) -> bool {
+        self.state == State::Solved
+    }
+
+    #[inline]
+    fn set_solved(&mut self, cfvalue_ip: &[f32]) {
+        self.state = State::Solved;
+        self.root_cfvalue_ip.copy_from_slice(cfvalue_ip);
+        let history = self.history.clone();
+        self.apply_history(&history);
+    }
+
+    #[inline]
+    fn is_raked(&self) -> bool {
+        self.tree_config.rake_basis_points > 0
     }
 
     #[inline]
@@ -297,19 +410,6 @@ impl Game for PostFlopGame {
     #[inline]
     fn is_ready(&self) -> bool {
         self.state == State::MemoryAllocated
-    }
-
-    #[inline]
-    fn is_solved(&self) -> bool {
-        self.state == State::Solved
-    }
-
-    #[inline]
-    fn set_solved(&mut self, cfvalue_ip: &[f32]) {
-        self.state = State::Solved;
-        self.root_cfvalue_ip.copy_from_slice(cfvalue_ip);
-        let history = self.history.clone();
-        self.apply_history(&history);
     }
 
     #[inline]
@@ -1892,7 +1992,7 @@ impl Default for CardConfig {
 }
 
 #[cfg(feature = "bincode")]
-static VERSION_STR: &str = "2022-12-10";
+static VERSION_STR: &str = "2022-12-11";
 
 #[cfg(feature = "bincode")]
 thread_local! {
@@ -2385,6 +2485,41 @@ mod tests {
     }
 
     #[test]
+    fn always_win_raked() {
+        // be careful for straight flushes
+        let lose_range_str = "KK-22,K9-K2,Q8-Q2,J8-J2,T8-T2,92+,82+,72+,62+";
+        let card_config = CardConfig {
+            range: ["AA".parse().unwrap(), lose_range_str.parse().unwrap()],
+            flop: flop_from_str("AcAdKh").unwrap(),
+            ..Default::default()
+        };
+
+        let tree_config = TreeConfig {
+            starting_pot: 60,
+            effective_stack: 970,
+            rake_basis_points: 500,
+            rake_cap: 10,
+            ..Default::default()
+        };
+
+        let action_tree = ActionTree::new(tree_config).unwrap();
+        let mut game = PostFlopGame::with_config(card_config, action_tree).unwrap();
+
+        game.allocate_memory(false);
+        finalize(&mut game);
+
+        game.cache_normalized_weights();
+        let weights_oop = game.normalized_weights(0);
+        let weights_ip = game.normalized_weights(1);
+
+        let root_ev_oop = compute_average(&game.expected_values(0), weights_oop);
+        let root_ev_ip = compute_average(&game.expected_values(1), weights_ip);
+
+        assert!((root_ev_oop - 57.0).abs() < 1e-4);
+        assert!((root_ev_ip - 0.0).abs() < 1e-4);
+    }
+
+    #[test]
     fn always_lose() {
         // be careful for straight flushes
         let lose_range_str = "KK-22,K9-K2,Q8-Q2,J8-J2,T8-T2,92+,82+,72+,62+";
@@ -2419,6 +2554,41 @@ mod tests {
         assert!((root_equity_ip - 1.0).abs() < 1e-5);
         assert!((root_ev_oop - 0.0).abs() < 1e-4);
         assert!((root_ev_ip - 60.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn always_lose_raked() {
+        // be careful for straight flushes
+        let lose_range_str = "KK-22,K9-K2,Q8-Q2,J8-J2,T8-T2,92+,82+,72+,62+";
+        let card_config = CardConfig {
+            range: [lose_range_str.parse().unwrap(), "AA".parse().unwrap()],
+            flop: flop_from_str("AcAdKh").unwrap(),
+            ..Default::default()
+        };
+
+        let tree_config = TreeConfig {
+            starting_pot: 60,
+            effective_stack: 970,
+            rake_basis_points: 500,
+            rake_cap: 10,
+            ..Default::default()
+        };
+
+        let action_tree = ActionTree::new(tree_config).unwrap();
+        let mut game = PostFlopGame::with_config(card_config, action_tree).unwrap();
+
+        game.allocate_memory(false);
+        finalize(&mut game);
+
+        game.cache_normalized_weights();
+        let weights_oop = game.normalized_weights(0);
+        let weights_ip = game.normalized_weights(1);
+
+        let root_ev_oop = compute_average(&game.expected_values(0), weights_oop);
+        let root_ev_ip = compute_average(&game.expected_values(1), weights_ip);
+
+        assert!((root_ev_oop - 0.0).abs() < 1e-4);
+        assert!((root_ev_ip - 57.0).abs() < 1e-4);
     }
 
     #[test]
@@ -2495,7 +2665,7 @@ mod tests {
 
     #[test]
     #[ignore]
-    fn solve_pio_preset() {
+    fn solve_pio_preset_normal() {
         let oop_range = "88+,A8s+,A5s-A2s:0.5,AJo+,ATo:0.75,K9s+,KQo,KJo:0.75,KTo:0.25,Q9s+,QJo:0.5,J8s+,JTo:0.25,T8s+,T7s:0.45,97s+,96s:0.45,87s,86s:0.75,85s:0.45,75s+:0.75,74s:0.45,65s:0.75,64s:0.5,63s:0.45,54s:0.75,53s:0.5,52s:0.45,43s:0.5,42s:0.45,32s:0.45";
         let ip_range = "AA:0.25,99-22,AJs-A2s,AQo-A8o,K2s+,K9o+,Q2s+,Q9o+,J6s+,J9o+,T6s+,T9o,96s+,95s:0.5,98o,86s+,85s:0.5,75s+,74s:0.5,64s+,63s:0.5,54s,53s:0.5,43s";
 
@@ -2547,5 +2717,59 @@ mod tests {
         assert!((root_equity_ip - 0.44653).abs() < 1e-5);
         assert!((root_ev_oop - 105.11).abs() < 0.2);
         assert!((root_ev_ip - 74.89).abs() < 0.2);
+    }
+
+    #[test]
+    #[ignore]
+    fn solve_pio_preset_raked() {
+        let oop_range = "88+,A8s+,A5s-A2s:0.5,AJo+,ATo:0.75,K9s+,KQo,KJo:0.75,KTo:0.25,Q9s+,QJo:0.5,J8s+,JTo:0.25,T8s+,T7s:0.45,97s+,96s:0.45,87s,86s:0.75,85s:0.45,75s+:0.75,74s:0.45,65s:0.75,64s:0.5,63s:0.45,54s:0.75,53s:0.5,52s:0.45,43s:0.5,42s:0.45,32s:0.45";
+        let ip_range = "AA:0.25,99-22,AJs-A2s,AQo-A8o,K2s+,K9o+,Q2s+,Q9o+,J6s+,J9o+,T6s+,T9o,96s+,95s:0.5,98o,86s+,85s:0.5,75s+,74s:0.5,64s+,63s:0.5,54s,53s:0.5,43s";
+
+        let card_config = CardConfig {
+            range: [oop_range.parse().unwrap(), ip_range.parse().unwrap()],
+            flop: flop_from_str("QsJh2h").unwrap(),
+            ..Default::default()
+        };
+
+        let tree_config = TreeConfig {
+            starting_pot: 180,
+            effective_stack: 910,
+            rake_basis_points: 500,
+            rake_cap: 30,
+            flop_bet_sizes: [
+                ("52%", "45%").try_into().unwrap(),
+                ("52%", "45%").try_into().unwrap(),
+            ],
+            turn_bet_sizes: [
+                ("55%", "45%").try_into().unwrap(),
+                ("55%", "45%").try_into().unwrap(),
+            ],
+            river_bet_sizes: [
+                ("70%", "45%").try_into().unwrap(),
+                ("70%", "45%").try_into().unwrap(),
+            ],
+            ..Default::default()
+        };
+
+        let action_tree = ActionTree::new(tree_config).unwrap();
+        let mut game = PostFlopGame::with_config(card_config, action_tree).unwrap();
+        println!(
+            "memory usage: {:.2}GB",
+            game.memory_usage().0 as f64 / (1024.0 * 1024.0 * 1024.0)
+        );
+        game.allocate_memory(false);
+
+        solve(&mut game, 1000, 180.0 * 0.001, true);
+
+        game.cache_normalized_weights();
+        let weights_oop = game.normalized_weights(0);
+        let weights_ip = game.normalized_weights(1);
+
+        let root_ev_oop = compute_average(&game.expected_values(0), weights_oop);
+        let root_ev_ip = compute_average(&game.expected_values(1), weights_ip);
+
+        // verified by PioSOLVER Free (but not theoretically guaranteed to be the same)
+        assert!((root_ev_oop - 95.57).abs() < 0.2);
+        assert!((root_ev_ip - 66.98).abs() < 0.2);
     }
 }

@@ -67,6 +67,8 @@ pub enum BoardState {
 ///     initial_state: BoardState::Turn,
 ///     starting_pot: 200,
 ///     effective_stack: 900,
+///     rake_basis_points: 500,
+///     rake_cap: 30,
 ///     flop_bet_sizes: Default::default(),
 ///     turn_bet_sizes: [bet_sizes.clone(), bet_sizes.clone()],
 ///     river_bet_sizes: [bet_sizes.clone(), bet_sizes.clone()],
@@ -88,6 +90,12 @@ pub struct TreeConfig {
 
     /// Initial effective stack. Must be greater than `0`.
     pub effective_stack: i32,
+
+    /// Rake in basis points (100bp = 1%). Must be between `0` and `10000`, inclusive.
+    pub rake_basis_points: i32,
+
+    /// Rake cap. Must be non-negative.
+    pub rake_cap: i32,
 
     /// Bet size candidates of each player for the flop.
     pub flop_bet_sizes: [BetSizeCandidates; 2],
@@ -404,6 +412,27 @@ impl ActionTree {
             return Err(format!(
                 "Effective stack must be positive: {}",
                 config.effective_stack
+            ));
+        }
+
+        if config.rake_basis_points < 0 {
+            return Err(format!(
+                "Rake basis points must be non-negative: {}",
+                config.rake_basis_points
+            ));
+        }
+
+        if config.rake_basis_points > 10000 {
+            return Err(format!(
+                "Rake basis points must be less than or equal to 10000: {}",
+                config.rake_basis_points
+            ));
+        }
+
+        if config.rake_cap < 0 {
+            return Err(format!(
+                "Rake cap must be non-negative: {}",
+                config.rake_cap
             ));
         }
 

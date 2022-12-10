@@ -24,6 +24,8 @@
 //!     initial_state: BoardState::Turn,
 //!     starting_pot: 200,
 //!     effective_stack: 900,
+//!     rake_basis_points: 0,
+//!     rake_cap: 0,
 //!     flop_bet_sizes: [bet_sizes.clone(), bet_sizes.clone()], // [OOP, IP]
 //!     turn_bet_sizes: [bet_sizes.clone(), bet_sizes.clone()],
 //!     river_bet_sizes: [bet_sizes.clone(), bet_sizes.clone()],
@@ -70,7 +72,7 @@
 //! // for i in 0..max_num_iterations {
 //! //     solve_step(&game, i);
 //! //     if (i + 1) % 10 == 0 {
-//! //         let exploitability = compute_exploitability(&game);
+//! //         let exploitability = compute_mes_ev_average(&game);
 //! //         if exploitability <= target_exploitability {
 //! //             println!("Exploitability: {:.2}", exploitability);
 //! //             break;
