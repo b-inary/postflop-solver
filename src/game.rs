@@ -85,6 +85,8 @@ pub struct PostFlopGame {
     turn_swapped_suit: Option<(u8, u8)>,
     turn_swap: Option<u8>,
     river_swap: Option<(u8, u8)>,
+    total_bet_amount: [i32; 2],
+    prev_bet_amount: i32,
     weights: [Vec<f32>; 2],
     normalized_weights: [Vec<f32>; 2],
     cfvalue_cache: [Vec<f32>; 2],
@@ -895,6 +897,8 @@ impl PostFlopGame {
         self.turn_swapped_suit = None;
         self.turn_swap = None;
         self.river_swap = None;
+        self.total_bet_amount = [0, 0];
+        self.prev_bet_amount = 0;
 
         self.weights[0].copy_from_slice(&self.initial_weights[0]);
         self.weights[1].copy_from_slice(&self.initial_weights[1]);
@@ -1163,6 +1167,20 @@ impl PostFlopGame {
                 row(self.node().cfvalues(), action, num_hands).to_vec()
             };
             self.cfvalue_cache[player].copy_from_slice(&vec);
+
+            // update the bet amounts
+            match self.node().actions[action] {
+                Action::Call => {
+                    self.total_bet_amount[player] = self.total_bet_amount[player ^ 1];
+                    self.prev_bet_amount = 0;
+                }
+                Action::Bet(amount) | Action::Raise(amount) | Action::AllIn(amount) => {
+                    let to_call = self.total_bet_amount[player ^ 1] - self.total_bet_amount[player];
+                    self.total_bet_amount[player] += amount - self.prev_bet_amount + to_call;
+                    self.prev_bet_amount = amount;
+                }
+                _ => {}
+            }
 
             // update the node
             self.node_ptr = &*self.node().play(action);
@@ -1484,6 +1502,12 @@ impl PostFlopGame {
         });
 
         ret
+    }
+
+    /// Returns the total bet amount of each player (OOP, IP).
+    #[inline]
+    pub fn total_bet_amount(&self) -> [i32; 2] {
+        self.total_bet_amount
     }
 
     /// Returns the reference to the current node.
@@ -1826,6 +1850,8 @@ impl Default for PostFlopGame {
             turn_swapped_suit: None,
             turn_swap: None,
             river_swap: None,
+            total_bet_amount: [0, 0],
+            prev_bet_amount: 0,
             weights: Default::default(),
             normalized_weights: Default::default(),
             cfvalue_cache: Default::default(),
