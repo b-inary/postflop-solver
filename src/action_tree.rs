@@ -67,8 +67,8 @@ pub enum BoardState {
 ///     initial_state: BoardState::Turn,
 ///     starting_pot: 200,
 ///     effective_stack: 900,
-///     rake_basis_points: 500,
-///     rake_cap: 30,
+///     rake_rate: 0.05,
+///     rake_cap: 30.0,
 ///     flop_bet_sizes: Default::default(),
 ///     turn_bet_sizes: [bet_sizes.clone(), bet_sizes.clone()],
 ///     river_bet_sizes: [bet_sizes.clone(), bet_sizes.clone()],
@@ -91,11 +91,11 @@ pub struct TreeConfig {
     /// Initial effective stack. Must be greater than `0`.
     pub effective_stack: i32,
 
-    /// Rake in basis points (100bp = 1%). Must be between `0` and `10000`, inclusive.
-    pub rake_basis_points: i32,
+    /// Rake rate. Must be between `0.0` and `1.0`, inclusive.
+    pub rake_rate: f64,
 
     /// Rake cap. Must be non-negative.
-    pub rake_cap: i32,
+    pub rake_cap: f64,
 
     /// Bet size candidates of each player for the flop.
     pub flop_bet_sizes: [BetSizeCandidates; 2],
@@ -114,13 +114,13 @@ pub struct TreeConfig {
 
     /// Add all-in action if the ratio of maximum bet size to the pot is below or equal to this
     /// value (set `0.0` to disable).
-    pub add_allin_threshold: f32,
+    pub add_allin_threshold: f64,
 
     /// Force all-in action if the SPR (stack/pot) after the opponent's call is below or equal to
     /// this value (set `0.0` to disable).
     ///
     /// Personal recommendation: between `0.1` and `0.2`
-    pub force_allin_threshold: f32,
+    pub force_allin_threshold: f64,
 
     /// Merge bet actions if there are bet actions with "close" values (set `0.0` to disable).
     ///
@@ -130,7 +130,7 @@ pub struct TreeConfig {
     /// Continue this process with the next highest bet size.
     ///
     /// Personal recommendation: around `0.1`
-    pub merging_threshold: f32,
+    pub merging_threshold: f64,
 }
 
 /// A struct representing an abstract game tree.
@@ -415,21 +415,21 @@ impl ActionTree {
             ));
         }
 
-        if config.rake_basis_points < 0 {
+        if config.rake_rate < 0.0 {
             return Err(format!(
-                "Rake basis points must be non-negative: {}",
-                config.rake_basis_points
+                "Rake rate must be non-negative: {}",
+                config.rake_rate
             ));
         }
 
-        if config.rake_basis_points > 10000 {
+        if config.rake_rate > 1.0 {
             return Err(format!(
-                "Rake basis points must be less than or equal to 10000: {}",
-                config.rake_basis_points
+                "Rake rate must be less than or equal to 1.0: {}",
+                config.rake_rate
             ));
         }
 
-        if config.rake_cap < 0 {
+        if config.rake_cap < 0.0 {
             return Err(format!(
                 "Rake cap must be non-negative: {}",
                 config.rake_cap
@@ -524,9 +524,9 @@ impl ActionTree {
         let min_amount = (prev_amount + to_call).clamp(1, max_amount);
 
         let spr_after_call = opponent_stack as f64 / pot as f64;
-        let compute_geometric = |num_streets: i32, max_ratio: f32| {
+        let compute_geometric = |num_streets: i32, max_ratio: f64| {
             let ratio = ((2.0 * spr_after_call + 1.0).powf(1.0 / num_streets as f64) - 1.0) / 2.0;
-            (pot as f64 * ratio.min(max_ratio as f64)).round() as i32
+            (pot as f64 * ratio.min(max_ratio)).round() as i32
         };
 
         let (candidates, donk_candidates, num_remaining_streets) = match node.board_state {
@@ -552,7 +552,7 @@ impl ActionTree {
             for &donk_size in &donk_candidates.as_ref().unwrap().donk {
                 match donk_size {
                     BetSize::PotRelative(ratio) => {
-                        let amount = (pot as f32 * ratio).round() as i32;
+                        let amount = (pot as f64 * ratio).round() as i32;
                         actions.push(Action::Bet(amount));
                     }
                     BetSize::PrevBetRelative(_) => panic!("Unexpected `PrevBetRelative`"),
@@ -570,7 +570,7 @@ impl ActionTree {
             }
 
             // all-in
-            if max_amount <= (pot as f32 * self.config.add_allin_threshold).round() as i32 {
+            if max_amount <= (pot as f64 * self.config.add_allin_threshold).round() as i32 {
                 actions.push(Action::AllIn(max_amount));
             }
         } else if matches!(
@@ -584,7 +584,7 @@ impl ActionTree {
             for &bet_size in &candidates[player as usize].bet {
                 match bet_size {
                     BetSize::PotRelative(ratio) => {
-                        let amount = (pot as f32 * ratio).round() as i32;
+                        let amount = (pot as f64 * ratio).round() as i32;
                         actions.push(Action::Bet(amount));
                     }
                     BetSize::PrevBetRelative(_) => panic!("Unexpected `PrevBetRelative`"),
@@ -602,7 +602,7 @@ impl ActionTree {
             }
 
             // all-in
-            if max_amount <= (pot as f32 * self.config.add_allin_threshold).round() as i32 {
+            if max_amount <= (pot as f64 * self.config.add_allin_threshold).round() as i32 {
                 actions.push(Action::AllIn(max_amount));
             }
         } else {
@@ -617,11 +617,11 @@ impl ActionTree {
                 for &bet_size in &candidates[player as usize].raise {
                     match bet_size {
                         BetSize::PotRelative(ratio) => {
-                            let amount = prev_amount + (pot as f32 * ratio).round() as i32;
+                            let amount = prev_amount + (pot as f64 * ratio).round() as i32;
                             actions.push(Action::Raise(amount));
                         }
                         BetSize::PrevBetRelative(ratio) => {
-                            let amount = (prev_amount as f32 * ratio).round() as i32;
+                            let amount = (prev_amount as f64 * ratio).round() as i32;
                             actions.push(Action::Raise(amount));
                         }
                         BetSize::Additive(adder) => {
@@ -640,7 +640,7 @@ impl ActionTree {
                 }
 
                 // all-in
-                let allin_threshold = pot as f32 * self.config.add_allin_threshold;
+                let allin_threshold = pot as f64 * self.config.add_allin_threshold;
                 if max_amount <= prev_amount + allin_threshold.round() as i32 {
                     actions.push(Action::AllIn(max_amount));
                 }
@@ -650,7 +650,7 @@ impl ActionTree {
         let is_above_threshold = |amount: i32| {
             let new_amount_diff = amount - prev_amount;
             let new_pot = pot + 2 * new_amount_diff;
-            let threshold = (new_pot as f32 * self.config.force_allin_threshold).round() as i32;
+            let threshold = (new_pot as f64 * self.config.force_allin_threshold).round() as i32;
             max_amount <= amount + threshold
         };
 
@@ -1016,8 +1016,8 @@ impl Decode for ActionTreeNode {
     }
 }
 
-fn merge_bet_actions(actions: Vec<Action>, pot: i32, offset: i32, param: f32) -> Vec<Action> {
-    const EPS: f32 = 2e-7; // 2 ulps
+fn merge_bet_actions(actions: Vec<Action>, pot: i32, offset: i32, param: f64) -> Vec<Action> {
+    const EPS: f64 = 1e-12;
 
     let get_amount = |action: Action| match action {
         Action::Bet(amount) | Action::Raise(amount) | Action::AllIn(amount) => amount,
@@ -1030,8 +1030,8 @@ fn merge_bet_actions(actions: Vec<Action>, pot: i32, offset: i32, param: f32) ->
     for &action in actions.iter().rev() {
         let amount = get_amount(action);
         if amount > 0 {
-            let ratio = (amount - offset) as f32 / pot as f32;
-            let cur_ratio = (cur_amount - offset) as f32 / pot as f32;
+            let ratio = (amount - offset) as f64 / pot as f64;
+            let cur_ratio = (cur_amount - offset) as f64 / pot as f64;
             let threshold_ratio = (cur_ratio - param) / (1.0 + param);
             if ratio < threshold_ratio * (1.0 - EPS) {
                 ret.push(action);

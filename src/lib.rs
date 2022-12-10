@@ -24,8 +24,8 @@
 //!     initial_state: BoardState::Turn,
 //!     starting_pot: 200,
 //!     effective_stack: 900,
-//!     rake_basis_points: 0,
-//!     rake_cap: 0,
+//!     rake_rate: 0.0,
+//!     rake_cap: 0.0,
 //!     flop_bet_sizes: [bet_sizes.clone(), bet_sizes.clone()], // [OOP, IP]
 //!     turn_bet_sizes: [bet_sizes.clone(), bet_sizes.clone()],
 //!     river_bet_sizes: [bet_sizes.clone(), bet_sizes.clone()],

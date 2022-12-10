@@ -29,14 +29,14 @@ pub(crate) fn for_each_child<T: GameNode, OP: Fn(usize) + Sync + Send>(node: &T,
 }
 
 #[inline]
-pub(crate) fn weighted_sum(values: &[f32], weights: &[f32]) -> f32 {
-    let f = |sum: f64, (&v, &w): (&f32, &f32)| sum + v as f64 * w as f64;
-    values.iter().zip(weights).fold(0.0, f) as f32
+pub(crate) fn vec_memory_usage<T>(vec: &Vec<T>) -> u64 {
+    vec.capacity() as u64 * mem::size_of::<T>() as u64
 }
 
 #[inline]
-pub(crate) fn vec_memory_usage<T>(vec: &Vec<T>) -> u64 {
-    vec.capacity() as u64 * mem::size_of::<T>() as u64
+fn weighted_sum(values: &[f32], weights: &[f32]) -> f32 {
+    let f = |sum: f64, (&v, &w): (&f32, &f32)| sum + v as f64 * w as f64;
+    values.iter().zip(weights).fold(0.0, f) as f32
 }
 
 #[inline]
@@ -299,7 +299,7 @@ pub fn compute_mes_ev_average<T: Game>(game: &T) -> f32 {
 }
 
 /// The recursive helper function for computing the counterfactual values of the given strategy.
-pub(crate) fn compute_cfvalue_recursive<T: Game>(
+fn compute_cfvalue_recursive<T: Game>(
     result: &mut [f32],
     game: &T,
     node: &mut T::Node,

@@ -166,24 +166,10 @@ impl Game for PostFlopGame {
     }
 
     fn evaluate(&self, result: &mut [f32], node: &Self::Node, player: usize, cfreach: &[f32]) {
-        let pot = self.tree_config.starting_pot + 2 * node.amount;
-        let half_pot = 0.5 * pot as f64;
-
-        let rake_basis_points = self.tree_config.rake_basis_points;
-        let rake = if rake_basis_points == 0 {
-            0
-        } else {
-            let rake_raw = (pot as i64 * rake_basis_points as i64) as f64 / 10000.0;
-            let rake_rounded_up = rake_raw.round();
-            let rake_rounded_even = if rake_rounded_up - rake_raw == 0.5 {
-                (rake_rounded_up as i32) & !1 // rounding half to even (PokerStars)
-            } else {
-                rake_rounded_up as i32
-            };
-            i32::min(rake_rounded_even, self.tree_config.rake_cap)
-        };
-
-        let amount_win = (half_pot - rake as f64) / self.num_combinations;
+        let pot = (self.tree_config.starting_pot + 2 * node.amount) as f64;
+        let half_pot = 0.5 * pot;
+        let rake = f64::min(pot * self.tree_config.rake_rate, self.tree_config.rake_cap);
+        let amount_win = (half_pot - rake) / self.num_combinations;
         let amount_lose = -half_pot / self.num_combinations;
 
         let player_cards = &self.private_cards[player];
@@ -237,7 +223,7 @@ impl Game for PostFlopGame {
             }
         }
         // showdown (not raked)
-        else if rake == 0 {
+        else if rake == 0.0 {
             let hand_strength = &self.hand_strength[card_pair_index(node.turn, node.river)];
             let player_strength = &hand_strength[player];
             let opponent_strength = &hand_strength[player ^ 1];
@@ -292,11 +278,11 @@ impl Game for PostFlopGame {
         }
         // showdown (raked)
         else {
-            let split = -(rake + player as i32) / 2; // OOP obtains the remainder
-            let amount_tie = split as f64 / self.num_combinations;
+            let amount_tie = -0.5 * rake / self.num_combinations;
 
             let valid_indices = &self.valid_indices_river[card_pair_index(node.turn, node.river)];
             let opponent_indices = &valid_indices[player ^ 1];
+
             for &i in opponent_indices {
                 unsafe {
                     let (c1, c2) = *opponent_cards.get_unchecked(i as usize);
@@ -385,7 +371,7 @@ impl Game for PostFlopGame {
 
     #[inline]
     fn is_raked(&self) -> bool {
-        self.tree_config.rake_basis_points > 0
+        self.tree_config.rake_rate > 0.0
     }
 
     #[inline]
@@ -2497,8 +2483,8 @@ mod tests {
         let tree_config = TreeConfig {
             starting_pot: 60,
             effective_stack: 970,
-            rake_basis_points: 500,
-            rake_cap: 10,
+            rake_rate: 0.05,
+            rake_cap: 10.0,
             ..Default::default()
         };
 
@@ -2569,8 +2555,8 @@ mod tests {
         let tree_config = TreeConfig {
             starting_pot: 60,
             effective_stack: 970,
-            rake_basis_points: 500,
-            rake_cap: 10,
+            rake_rate: 0.05,
+            rake_cap: 10.0,
             ..Default::default()
         };
 
@@ -2734,8 +2720,8 @@ mod tests {
         let tree_config = TreeConfig {
             starting_pot: 180,
             effective_stack: 910,
-            rake_basis_points: 500,
-            rake_cap: 30,
+            rake_rate: 0.05,
+            rake_cap: 30.0,
             flop_bet_sizes: [
                 ("52%", "45%").try_into().unwrap(),
                 ("52%", "45%").try_into().unwrap(),

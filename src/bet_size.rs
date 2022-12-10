@@ -27,7 +27,7 @@ use bincode::{Decode, Encode};
 ///     vec![
 ///         PotRelative(0.5),
 ///         Additive(100),
-///         Geometric(2, f32::INFINITY),
+///         Geometric(2, f64::INFINITY),
 ///         AllIn
 ///    ]
 /// );
@@ -58,18 +58,18 @@ pub struct DonkSizeCandidates {
 #[cfg_attr(feature = "bincode", derive(Decode, Encode))]
 pub enum BetSize {
     /// Bet size relative to the current pot size.
-    PotRelative(f32),
+    PotRelative(f64),
 
     /// Bet size relative to the previous bet size (only valid for raise actions).
-    PrevBetRelative(f32),
+    PrevBetRelative(f64),
 
     /// Bet size specifying constant addition.
     Additive(i32),
 
-    /// Geometric bet size for `i32` streets with maximum pot-relative size of `f32`.
+    /// Geometric bet size for `i32` streets with maximum pot-relative size of `f64`.
     ///
     /// If `i32 == 0`, the number of streets is as follows: flop = 3, turn = 2, river = 1.
-    Geometric(i32, f32),
+    Geometric(i32, f64),
 
     /// Bet size representing all-in.
     AllIn,
@@ -159,7 +159,7 @@ fn bet_size_from_str(s: &str, allow_prev_bet_rel: bool) -> Result<BetSize, Strin
                 let err_msg = format!("Multiplier must be greater than 1.0: {s}");
                 Err(err_msg)
             } else {
-                Ok(BetSize::PrevBetRelative(float as f32))
+                Ok(BetSize::PrevBetRelative(float))
             }
         }
     } else if let Some(add) = s_lower.strip_suffix('c') {
@@ -194,10 +194,10 @@ fn bet_size_from_str(s: &str, allow_prev_bet_rel: bool) -> Result<BetSize, Strin
         };
 
         let max_pot_rel = if max_pot_rel_str.is_empty() {
-            f32::INFINITY
+            f64::INFINITY
         } else {
             let max_pot_rel_str = max_pot_rel_str.strip_suffix('%').ok_or(&err_msg)?;
-            (parse_float(max_pot_rel_str).ok_or(&err_msg)? / 100.0) as f32
+            parse_float(max_pot_rel_str).ok_or(&err_msg)? / 100.0
         };
 
         if split.next().is_some() {
@@ -208,7 +208,7 @@ fn bet_size_from_str(s: &str, allow_prev_bet_rel: bool) -> Result<BetSize, Strin
     } else if let Some(pot_rel) = s_lower.strip_suffix('%') {
         // Pot relative (must be after the geometric check)
         let float = parse_float(pot_rel).ok_or(&err_msg)?;
-        Ok(BetSize::PotRelative((float / 100.0) as f32))
+        Ok(BetSize::PotRelative(float / 100.0))
     } else if s_lower == "a" {
         // All-in
         Ok(BetSize::AllIn)
@@ -233,9 +233,9 @@ mod tests {
             ("3.5X", PrevBetRelative(3.5)),
             ("0c", Additive(0)),
             ("123C", Additive(123)),
-            ("e", Geometric(0, f32::INFINITY)),
-            ("E", Geometric(0, f32::INFINITY)),
-            ("2e", Geometric(2, f32::INFINITY)),
+            ("e", Geometric(0, f64::INFINITY)),
+            ("E", Geometric(0, f64::INFINITY)),
+            ("2e", Geometric(2, f64::INFINITY)),
             ("E37.5%", Geometric(0, 0.375)),
             ("100e.5%", Geometric(100, 0.005)),
             ("a", AllIn),
@@ -271,7 +271,7 @@ mod tests {
                 "50c, e, a,",
                 "25%, 2.5x, e200%",
                 BetSizeCandidates {
-                    bet: vec![Additive(50), Geometric(0, f32::INFINITY), AllIn],
+                    bet: vec![Additive(50), Geometric(0, f64::INFINITY), AllIn],
                     raise: vec![PotRelative(0.25), PrevBetRelative(2.5), Geometric(0, 2.0)],
                 },
             ),
@@ -300,7 +300,7 @@ mod tests {
             (
                 "50c, e, a,",
                 DonkSizeCandidates {
-                    donk: vec![Additive(50), Geometric(0, f32::INFINITY), AllIn],
+                    donk: vec![Additive(50), Geometric(0, f64::INFINITY), AllIn],
                 },
             ),
         ];

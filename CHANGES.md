@@ -2,7 +2,8 @@
 
 ## 2022-12-11
 
-- `TreeConfig`: new fields `rake_basis_points` and `rake_cap` are added.
+- `TreeConfig`: new fields `rake_rate` and `rake_cap` are added.
+- real numbers in `BetSize` enum  and `TreeConfig` struct are now represented as `f64` instead of `f32`.
 - `compute_exploitability` function is renamed to `compute_mes_ev_average`.
 
 ## 2022-12-07
