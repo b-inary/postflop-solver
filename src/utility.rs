@@ -240,6 +240,12 @@ pub fn finalize<T: Game>(game: &mut T) {
 }
 
 /// Computes the average of the expected values of the current strategy.
+///
+/// If raked, the exploitability can be computed by subtracting the return value of this function
+/// from the return value of [`compute_mes_ev_average`]. If not raked, there is no need to call this
+/// function.
+///
+/// [`compute_mes_ev_average`]: fn.compute_mes_ev_average.html
 #[inline]
 pub fn compute_current_ev_average<T: Game>(game: &T) -> f32 {
     if !game.is_ready() && !game.is_solved() {
@@ -270,7 +276,12 @@ pub fn compute_current_ev_average<T: Game>(game: &T) -> f32 {
 
 /// Computes the average of the expected values of the MES (Maximally Exploitative Strategy).
 ///
-/// Corresponds to the exploitability value when not raked.
+/// The bias, i.e., (starting pot) / 2, is already subtracted. Therefore, the return value
+/// corresponds to the exploitability if not raked. If raked, use the [`compute_current_ev_average`]
+/// function together and subtract its return value from the return value of this function to
+/// compute the exploitability.
+///
+/// [`compute_current_ev_average`]: fn.compute_current_ev_average.html
 #[inline]
 pub fn compute_mes_ev_average<T: Game>(game: &T) -> f32 {
     if !game.is_ready() && !game.is_solved() {
