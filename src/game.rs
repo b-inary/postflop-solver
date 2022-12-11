@@ -348,7 +348,7 @@ impl Game for PostFlopGame {
                         });
 
                     let cfvalue = amount_win * cfreach_win
-                        + amount_tie * (cfreach_tie - cfreach_same - cfreach_win)
+                        + amount_tie * (cfreach_tie - cfreach_win + cfreach_same)
                         + amount_lose * (cfreach_total - cfreach_tie);
                     *result.get_unchecked_mut(index as usize) = cfvalue as f32;
                 }
@@ -2583,6 +2583,77 @@ mod tests {
 
         assert!((root_ev_oop - 0.0).abs() < 1e-4);
         assert!((root_ev_ip - 57.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn always_tie() {
+        let card_config = CardConfig {
+            range: ["AA".parse().unwrap(), "AA".parse().unwrap()],
+            flop: flop_from_str("2c6dTh").unwrap(),
+            ..Default::default()
+        };
+
+        let tree_config = TreeConfig {
+            starting_pot: 60,
+            effective_stack: 970,
+            ..Default::default()
+        };
+
+        let action_tree = ActionTree::new(tree_config).unwrap();
+        let mut game = PostFlopGame::with_config(card_config, action_tree).unwrap();
+
+        game.allocate_memory(false);
+        finalize(&mut game);
+
+        game.cache_normalized_weights();
+        let weights_oop = game.normalized_weights(0);
+        let weights_ip = game.normalized_weights(1);
+
+        let root_equity_oop = compute_average(&game.equity(0), weights_oop);
+        let root_equity_ip = compute_average(&game.equity(1), weights_ip);
+        let root_ev_oop = compute_average(&game.expected_values(0), weights_oop);
+        let root_ev_ip = compute_average(&game.expected_values(1), weights_ip);
+
+        assert!((root_equity_oop - 0.5).abs() < 1e-5);
+        assert!((root_equity_ip - 0.5).abs() < 1e-5);
+        assert!((root_ev_oop - 30.0).abs() < 1e-4);
+        assert!((root_ev_ip - 30.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn always_tie_raked() {
+        let card_config = CardConfig {
+            range: ["AA".parse().unwrap(), "AA".parse().unwrap()],
+            flop: flop_from_str("2c6dTh").unwrap(),
+            ..Default::default()
+        };
+
+        let tree_config = TreeConfig {
+            starting_pot: 60,
+            effective_stack: 970,
+            rake_rate: 0.05,
+            rake_cap: 10.0,
+            ..Default::default()
+        };
+
+        let action_tree = ActionTree::new(tree_config).unwrap();
+        let mut game = PostFlopGame::with_config(card_config, action_tree).unwrap();
+
+        game.allocate_memory(false);
+        finalize(&mut game);
+
+        game.cache_normalized_weights();
+        let weights_oop = game.normalized_weights(0);
+        let weights_ip = game.normalized_weights(1);
+
+        let root_ev_oop = compute_average(&game.expected_values(0), weights_oop);
+        let root_ev_ip = compute_average(&game.expected_values(1), weights_ip);
+
+        println!("root_ev_oop: {}", root_ev_oop);
+        println!("root_ev_ip: {}", root_ev_ip);
+
+        assert!((root_ev_oop - 28.5).abs() < 1e-4);
+        assert!((root_ev_ip - 28.5).abs() < 1e-4);
     }
 
     #[test]
