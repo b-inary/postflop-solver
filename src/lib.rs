@@ -95,21 +95,21 @@
 //! println!("Average equity: {:.2}%", 100.0 * average_equity);
 //! println!("Average EV: {:.2}", average_ev);
 //!
-//! // get available actions
+//! // get available actions (OOP)
 //! let actions = game.available_actions();
 //! assert_eq!(format!("{:?}", actions), "[Check, Bet(120), Bet(216), AllIn(900)]");
 //!
 //! // play `Bet(120)`
 //! game.play(1);
 //!
-//! // get available actions
+//! // get available actions (IP)
 //! let actions = game.available_actions();
 //! assert_eq!(format!("{:?}", actions), "[Fold, Call, Raise(300)]");
 //!
 //! // play `Call`
 //! game.play(1);
 //!
-//! // confirm that the current node is a chance node
+//! // confirm that the current node is a chance node (i.e., river node)
 //! assert!(game.is_chance_node());
 //!
 //! // confirm that "7s" may be dealt
