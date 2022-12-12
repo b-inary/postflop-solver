@@ -398,19 +398,12 @@ mod tests {
 
     #[test]
     fn test_card_pair_index() {
-        assert_eq!(card_pair_index(0, 1), 0);
-        assert_eq!(card_pair_index(0, 2), 1);
-        assert_eq!(card_pair_index(0, 51), 50);
-        assert_eq!(card_pair_index(1, 2), 51);
-        assert_eq!(card_pair_index(1, 51), 100);
-        assert_eq!(card_pair_index(50, 51), 1325);
-    }
-
-    #[test]
-    fn test_card_pair_index_reverse() {
+        let mut k = 0;
         for i in 0..52 {
             for j in (i + 1)..52 {
-                assert_eq!(card_pair_index(i, j), card_pair_index(j, i));
+                assert_eq!(card_pair_index(i, j), k);
+                assert_eq!(card_pair_index(j, i), k);
+                k += 1;
             }
         }
     }
