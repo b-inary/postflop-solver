@@ -239,19 +239,26 @@ pub fn finalize<T: Game>(game: &mut T) {
     free_custom_alloc_buffer();
 }
 
-/// Computes the average of the expected values of the current strategy.
-///
-/// If raked, the exploitability can be computed by subtracting the return value of this function
-/// from the return value of [`compute_mes_ev_average`]. If not raked, there is no need to call this
-/// function.
-///
-/// [`compute_mes_ev_average`]: fn.compute_mes_ev_average.html
+/// Computes the exploitability of the current strategy.
 #[inline]
-pub fn compute_current_ev_average<T: Game>(game: &T) -> f32 {
+pub fn compute_exploitability<T: Game>(game: &T) -> f32 {
     if !game.is_ready() && !game.is_solved() {
         panic!("the game is not ready");
     }
 
+    if !game.is_raked() {
+        compute_mes_ev_average(game)
+    } else {
+        compute_mes_ev_average(game) - compute_current_ev_average(game)
+    }
+}
+
+/// Computes the average of the expected values of the current strategy.
+///
+/// If raked, the exploitability can be computed by subtracting the return value of this function
+/// from the return value of `compute_mes_ev_average`. If not raked, there is no need to call this
+/// function (since this function should always return zero).
+fn compute_current_ev_average<T: Game>(game: &T) -> f32 {
     let mut cfvalues = [
         vec![0.0; game.num_private_hands(0)],
         vec![0.0; game.num_private_hands(1)],
@@ -277,17 +284,10 @@ pub fn compute_current_ev_average<T: Game>(game: &T) -> f32 {
 /// Computes the average of the expected values of the MES (Maximally Exploitative Strategy).
 ///
 /// The bias, i.e., (starting pot) / 2, is already subtracted. Therefore, the return value
-/// corresponds to the exploitability if not raked. If raked, use the [`compute_current_ev_average`]
+/// corresponds to the exploitability if not raked. If raked, use the `compute_current_ev_average`
 /// function together and subtract its return value from the return value of this function to
 /// compute the exploitability.
-///
-/// [`compute_current_ev_average`]: fn.compute_current_ev_average.html
-#[inline]
-pub fn compute_mes_ev_average<T: Game>(game: &T) -> f32 {
-    if !game.is_ready() && !game.is_solved() {
-        panic!("the game is not ready");
-    }
-
+fn compute_mes_ev_average<T: Game>(game: &T) -> f32 {
     let mut cfvalues = [
         vec![0.0; game.num_private_hands(0)],
         vec![0.0; game.num_private_hands(1)],

@@ -1,5 +1,9 @@
 # List of breaking changes
 
+## 2022-12-13
+
+- revert: `compute_exploitability` function is back, and `compute_mes_ev_average` function is removed.
+
 ## 2022-12-11
 
 - `TreeConfig`: new fields `rake_rate` and `rake_cap` are added.

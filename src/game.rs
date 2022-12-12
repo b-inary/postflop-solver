@@ -120,6 +120,15 @@ struct BuildTreeInfo {
     num_storage_chances: u64,
 }
 
+#[inline]
+fn min(x: f64, y: f64) -> f64 {
+    if x < y {
+        x
+    } else {
+        y
+    }
+}
+
 /// Decodes the encoded `i16` slice to the `f32` slice.
 #[inline]
 fn decode_signed_slice(slice: &[i16], scale: f32) -> Vec<f32> {
@@ -168,7 +177,7 @@ impl Game for PostFlopGame {
     fn evaluate(&self, result: &mut [f32], node: &Self::Node, player: usize, cfreach: &[f32]) {
         let pot = (self.tree_config.starting_pot + 2 * node.amount) as f64;
         let half_pot = 0.5 * pot;
-        let rake = f64::min(pot * self.tree_config.rake_rate, self.tree_config.rake_cap);
+        let rake = min(pot * self.tree_config.rake_rate, self.tree_config.rake_cap);
         let amount_win = (half_pot - rake) / self.num_combinations;
         let amount_lose = -half_pot / self.num_combinations;
 
@@ -332,7 +341,7 @@ impl Game for PostFlopGame {
 
     #[inline]
     fn is_raked(&self) -> bool {
-        self.tree_config.rake_rate > 0.0
+        self.tree_config.rake_rate > 0.0 && self.tree_config.rake_cap > 0.0
     }
 
     #[inline]

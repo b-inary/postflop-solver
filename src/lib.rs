@@ -72,7 +72,7 @@
 //! // for i in 0..max_num_iterations {
 //! //     solve_step(&game, i);
 //! //     if (i + 1) % 10 == 0 {
-//! //         let exploitability = compute_mes_ev_average(&game);
+//! //         let exploitability = compute_exploitability(&game);
 //! //         if exploitability <= target_exploitability {
 //! //             println!("Exploitability: {:.2}", exploitability);
 //! //             break;
