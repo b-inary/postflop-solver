@@ -250,27 +250,46 @@ impl Game for PostFlopGame {
 
             let mut j = 1;
             let mut k = 1;
+            let mut prev_strength = 0; // strength is always > 0
 
             for &StrengthItem { strength, index } in valid_player_strength {
                 unsafe {
-                    while opponent_strength.get_unchecked(j).strength < strength {
-                        let opponent_index = opponent_strength.get_unchecked(j).index as usize;
-                        let (c1, c2) = *opponent_cards.get_unchecked(opponent_index);
-                        let cfreach_opp = *cfreach.get_unchecked(opponent_index) as f64;
-                        cfreach_sum_win += cfreach_opp;
-                        *cfreach_minus_win.get_unchecked_mut(c1 as usize) += cfreach_opp;
-                        *cfreach_minus_win.get_unchecked_mut(c2 as usize) += cfreach_opp;
-                        j += 1;
-                    }
+                    if strength > prev_strength {
+                        prev_strength = strength;
 
-                    while opponent_strength.get_unchecked(k).strength <= strength {
-                        let opponent_index = opponent_strength.get_unchecked(k).index as usize;
-                        let (c1, c2) = *opponent_cards.get_unchecked(opponent_index);
-                        let cfreach_opp = *cfreach.get_unchecked(opponent_index) as f64;
-                        cfreach_sum_tie += cfreach_opp;
-                        *cfreach_minus_tie.get_unchecked_mut(c1 as usize) += cfreach_opp;
-                        *cfreach_minus_tie.get_unchecked_mut(c2 as usize) += cfreach_opp;
-                        k += 1;
+                        if j < k {
+                            cfreach_sum_win = cfreach_sum_tie;
+                            cfreach_minus_win = cfreach_minus_tie;
+                            j = k;
+                        }
+
+                        while opponent_strength.get_unchecked(j).strength < strength {
+                            let opponent_index = opponent_strength.get_unchecked(j).index as usize;
+                            let (c1, c2) = *opponent_cards.get_unchecked(opponent_index);
+                            let cfreach_opp = *cfreach.get_unchecked(opponent_index) as f64;
+                            cfreach_sum_win += cfreach_opp;
+                            *cfreach_minus_win.get_unchecked_mut(c1 as usize) += cfreach_opp;
+                            *cfreach_minus_win.get_unchecked_mut(c2 as usize) += cfreach_opp;
+                            *cfreach_minus_tie.get_unchecked_mut(c1 as usize) += cfreach_opp;
+                            *cfreach_minus_tie.get_unchecked_mut(c2 as usize) += cfreach_opp;
+                            j += 1;
+                        }
+
+                        if k < j {
+                            cfreach_sum_tie = cfreach_sum_win;
+                            cfreach_minus_tie = cfreach_minus_win;
+                            k = j;
+                        }
+
+                        while opponent_strength.get_unchecked(k).strength == strength {
+                            let opponent_index = opponent_strength.get_unchecked(k).index as usize;
+                            let (c1, c2) = *opponent_cards.get_unchecked(opponent_index);
+                            let cfreach_opp = *cfreach.get_unchecked(opponent_index) as f64;
+                            cfreach_sum_tie += cfreach_opp;
+                            *cfreach_minus_tie.get_unchecked_mut(c1 as usize) += cfreach_opp;
+                            *cfreach_minus_tie.get_unchecked_mut(c2 as usize) += cfreach_opp;
+                            k += 1;
+                        }
                     }
 
                     let (c1, c2) = *player_cards.get_unchecked(index as usize);

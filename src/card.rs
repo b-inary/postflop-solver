@@ -172,7 +172,7 @@ impl CardConfig {
                     ];
 
                     for player in 0..2 {
-                        // add weakest and strongest sentinel
+                        // add the weakest and strongest sentinels
                         strength[player].push(StrengthItem {
                             strength: 0,
                             index: 0,
@@ -191,7 +191,7 @@ impl CardConfig {
                                     } else {
                                         let hand = board.add_card(c1).add_card(c2);
                                         Some(StrengthItem {
-                                            strength: hand.evaluate(),
+                                            strength: hand.evaluate() + 1, // +1 to avoid 0
                                             index: index as u16,
                                         })
                                     }
