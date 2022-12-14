@@ -947,7 +947,7 @@ impl ActionTree {
         line: &[Action],
         info: BuildTreeInfo,
     ) -> [i32; 2] {
-        if node.is_terminal() {
+        if line.is_empty() || node.is_terminal() {
             let stack = self.config.effective_stack;
             return [stack - info.stack[0], stack - info.stack[1]];
         }
