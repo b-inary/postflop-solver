@@ -1006,15 +1006,13 @@ impl BuildTreeInfo {
             Action::Call => {
                 oop_call_flag = player == PLAYER_OOP;
                 stack[player as usize] = stack[player as usize ^ 1];
+                prev_amount = 0;
             }
             Action::Bet(amount) | Action::Raise(amount) | Action::AllIn(amount) => {
                 let to_call = stack[player as usize] - stack[player as usize ^ 1];
                 allin_flag = matches!(action, Action::AllIn(_));
                 stack[player as usize] -= amount - prev_amount + to_call;
                 prev_amount = amount;
-            }
-            Action::Chance(_) => {
-                prev_amount = 0;
             }
             _ => {}
         }
