@@ -250,31 +250,46 @@ impl ActionTree {
         Ok(())
     }
 
-    /// Obtains all possible actions at the current node.
-    ///
-    /// If the current node is a chance node, returns possible actions after the chance event.
+    /// Moves back to the root node.
     #[inline]
-    pub fn actions(&self) -> &[Action] {
-        &self.current_node_skip_chance().actions
+    pub fn back_to_root(&mut self) {
+        self.history.clear();
     }
 
-    /// Returns a list of booleans indicating whether the corresponding action is terminal.
+    /// Obtains the current action history.
     #[inline]
-    pub fn is_terminal_action(&self) -> Vec<bool> {
-        let node = self.current_node_skip_chance();
-        node.children
-            .iter()
-            .map(|child| {
-                let child = child.lock();
-                child.is_terminal() || child.amount == self.config.effective_stack
-            })
-            .collect()
+    pub fn history(&self) -> &[Action] {
+        &self.history
+    }
+
+    /// Applies the given action history from the root node.
+    #[inline]
+    pub fn apply_history(&mut self, history: &[Action]) -> Result<(), String> {
+        self.back_to_root();
+        for &action in history {
+            self.play(action)?;
+        }
+        Ok(())
+    }
+
+    /// Returns whether the current node is a terminal node.
+    #[inline]
+    pub fn is_terminal_node(&self) -> bool {
+        self.current_node_skip_chance().is_terminal()
     }
 
     /// Returns whether the current node is a chance node.
     #[inline]
     pub fn is_chance_node(&self) -> bool {
-        self.current_node().is_chance()
+        self.current_node().is_chance() && !self.is_terminal_node()
+    }
+
+    /// Returns the available actions for the current node.
+    ///
+    /// If the current node is a chance node, returns possible actions after the chance event.
+    #[inline]
+    pub fn available_actions(&self) -> &[Action] {
+        &self.current_node_skip_chance().actions
     }
 
     /// Plays the given action. Returns `Ok(())` if the action is valid.
@@ -301,28 +316,6 @@ impl ActionTree {
         }
 
         self.history.pop();
-        Ok(())
-    }
-
-    /// Moves back to the root node.
-    #[inline]
-    pub fn back_to_root(&mut self) {
-        self.history.clear();
-    }
-
-    /// Obtains the current action history.
-    #[inline]
-    pub fn history(&self) -> &[Action] {
-        &self.history
-    }
-
-    /// Applies the given action history from the root node.
-    #[inline]
-    pub fn apply_history(&mut self, history: &[Action]) -> Result<(), String> {
-        self.back_to_root();
-        for &action in history {
-            self.play(action)?;
-        }
         Ok(())
     }
 
@@ -362,6 +355,13 @@ impl ActionTree {
     pub fn remove_current_node(&mut self) -> Result<(), String> {
         let history = self.history.clone();
         self.remove_line(&history)
+    }
+
+    /// Returns the total bet amount of each player (OOP, IP).
+    #[inline]
+    pub fn total_bet_amount(&self) -> [i32; 2] {
+        let info = BuildTreeInfo::new(self.config.effective_stack);
+        self.total_bet_amount_recursive(&self.root.lock(), &self.history, info)
     }
 
     /// Ejects the fields.
@@ -938,6 +938,33 @@ impl ActionTree {
         node.children.shrink_to_fit();
 
         Ok(())
+    }
+
+    /// Recursive function to compute total bet amount for each player.
+    fn total_bet_amount_recursive(
+        &self,
+        node: &ActionTreeNode,
+        line: &[Action],
+        info: BuildTreeInfo,
+    ) -> [i32; 2] {
+        if node.is_terminal() {
+            let stack = self.config.effective_stack;
+            return [stack - info.stack[0], stack - info.stack[1]];
+        }
+
+        if node.is_chance() {
+            return self.total_bet_amount_recursive(&node.children[0].lock(), line, info);
+        }
+
+        let action = line[0];
+        let search_result = node.actions.binary_search(&action);
+        if search_result.is_err() {
+            panic!("Action does not exist: {action:?}");
+        }
+
+        let index = search_result.unwrap();
+        let next_info = info.create_next(node.player, action);
+        self.total_bet_amount_recursive(&node.children[index].lock(), &line[1..], next_info)
     }
 }
 

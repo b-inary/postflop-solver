@@ -1018,7 +1018,7 @@ impl PostFlopGame {
             panic!("Game is not successfully initialized");
         }
 
-        !self.is_terminal_node() && self.node().is_chance()
+        self.node().is_chance() && !self.is_terminal_node()
     }
 
     /// Returns the available actions for the current node.
