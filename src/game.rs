@@ -81,7 +81,7 @@ pub struct PostFlopGame {
     node_ptr: *const PostFlopNode,
     turn: u8,
     river: u8,
-    normalize_factor: f32,
+    chance_factor: i32,
     turn_swapped_suit: Option<(u8, u8)>,
     turn_swap: Option<u8>,
     river_swap: Option<(u8, u8)>,
@@ -949,7 +949,7 @@ impl PostFlopGame {
         self.node_ptr = &*self.root();
         self.turn = self.card_config.turn;
         self.river = self.card_config.river;
-        self.normalize_factor = self.num_combinations as f32;
+        self.chance_factor = 1;
         self.turn_swapped_suit = None;
         self.turn_swap = None;
         self.river_swap = None;
@@ -1194,10 +1194,10 @@ impl PostFlopGame {
             self.node_ptr = &*self.node().play(action_index);
             if is_turn {
                 self.turn = actual_card;
-                self.normalize_factor *= 45.0;
+                self.chance_factor *= 45;
             } else {
                 self.river = actual_card;
-                self.normalize_factor *= 44.0;
+                self.chance_factor *= 44;
             }
         }
         // player node
@@ -1468,11 +1468,11 @@ impl PostFlopGame {
 
         let num_hands = self.num_private_hands(player);
 
-        let total_bet_amount = self.total_bet_amount();
-        let bias = (total_bet_amount[player] - total_bet_amount[player ^ 1]).max(0);
         let mut have_actions = false;
+        let mut normalizer = (self.num_combinations * self.chance_factor as f64) as f32;
 
         let mut ret = if self.node().is_terminal() {
+            normalizer = self.num_combinations as f32;
             let mut ret = vec![0.0; num_hands];
             self.evaluate(&mut ret, self.node(), player, &self.weights[player ^ 1]);
             ret
@@ -1491,6 +1491,8 @@ impl PostFlopGame {
         };
 
         let starting_pot = self.tree_config.starting_pot;
+        let total_bet_amount = self.total_bet_amount();
+        let bias = (total_bet_amount[player] - total_bet_amount[player ^ 1]).max(0);
 
         ret.chunks_exact_mut(num_hands)
             .enumerate()
@@ -1504,7 +1506,7 @@ impl PostFlopGame {
                         if is_fold || w_normalized == 0.0 {
                             *v = 0.0;
                         } else {
-                            *v *= self.normalize_factor * (w_raw / w_normalized);
+                            *v *= normalizer * (w_raw / w_normalized);
                             *v += starting_pot as f32 * 0.5 + (self.node().amount + bias) as f32;
                         }
                     });
@@ -1957,7 +1959,7 @@ impl Default for PostFlopGame {
             node_ptr: ptr::null(),
             turn: NOT_DEALT,
             river: NOT_DEALT,
-            normalize_factor: 0.0,
+            chance_factor: 0,
             turn_swapped_suit: None,
             turn_swap: None,
             river_swap: None,
@@ -2731,15 +2733,38 @@ mod tests {
         game.cache_normalized_weights();
         let weights_oop = game.normalized_weights(0);
         let weights_ip = game.normalized_weights(1);
-        let root_equity_oop = compute_average(&game.equity(0), weights_oop);
-        let root_equity_ip = compute_average(&game.equity(1), weights_ip);
-        let root_ev_oop = compute_average(&game.expected_values(0), weights_oop);
-        let root_ev_ip = compute_average(&game.expected_values(1), weights_ip);
+        let equity_oop = compute_average(&game.equity(0), weights_oop);
+        let equity_ip = compute_average(&game.equity(1), weights_ip);
+        let ev_oop = compute_average(&game.expected_values(0), weights_oop);
+        let ev_ip = compute_average(&game.expected_values(1), weights_ip);
+        assert!((equity_oop - 1.0).abs() < 1e-5);
+        assert!((equity_ip - 0.0).abs() < 1e-5);
+        assert!((ev_oop - 60.0).abs() < 1e-4);
+        assert!((ev_ip - 0.0).abs() < 1e-4);
 
-        assert!((root_equity_oop - 1.0).abs() < 1e-5);
-        assert!((root_equity_ip - 0.0).abs() < 1e-5);
-        assert!((root_ev_oop - 60.0).abs() < 1e-4);
-        assert!((root_ev_ip - 0.0).abs() < 1e-4);
+        game.play(0);
+        game.play(0);
+        assert!(game.is_chance_node());
+        game.play(usize::MAX);
+        game.play(0);
+        game.play(0);
+        assert!(game.is_chance_node());
+        game.play(usize::MAX);
+        game.play(0);
+        game.play(0);
+        assert!(game.is_terminal_node());
+
+        game.cache_normalized_weights();
+        let weights_oop = game.normalized_weights(0);
+        let weights_ip = game.normalized_weights(1);
+        let equity_oop = compute_average(&game.equity(0), weights_oop);
+        let equity_ip = compute_average(&game.equity(1), weights_ip);
+        let ev_oop = compute_average(&game.expected_values(0), weights_oop);
+        let ev_ip = compute_average(&game.expected_values(1), weights_ip);
+        assert!((equity_oop - 1.0).abs() < 1e-5);
+        assert!((equity_ip - 0.0).abs() < 1e-5);
+        assert!((ev_oop - 60.0).abs() < 1e-4);
+        assert!((ev_ip - 0.0).abs() < 1e-4);
     }
 
     #[test]
@@ -2769,11 +2794,30 @@ mod tests {
         game.cache_normalized_weights();
         let weights_oop = game.normalized_weights(0);
         let weights_ip = game.normalized_weights(1);
-        let root_ev_oop = compute_average(&game.expected_values(0), weights_oop);
-        let root_ev_ip = compute_average(&game.expected_values(1), weights_ip);
+        let ev_oop = compute_average(&game.expected_values(0), weights_oop);
+        let ev_ip = compute_average(&game.expected_values(1), weights_ip);
+        assert!((ev_oop - 57.0).abs() < 1e-4);
+        assert!((ev_ip - 0.0).abs() < 1e-4);
 
-        assert!((root_ev_oop - 57.0).abs() < 1e-4);
-        assert!((root_ev_ip - 0.0).abs() < 1e-4);
+        game.play(0);
+        game.play(0);
+        assert!(game.is_chance_node());
+        game.play(usize::MAX);
+        game.play(0);
+        game.play(0);
+        assert!(game.is_chance_node());
+        game.play(usize::MAX);
+        game.play(0);
+        game.play(0);
+        assert!(game.is_terminal_node());
+
+        game.cache_normalized_weights();
+        let weights_oop = game.normalized_weights(0);
+        let weights_ip = game.normalized_weights(1);
+        let ev_oop = compute_average(&game.expected_values(0), weights_oop);
+        let ev_ip = compute_average(&game.expected_values(1), weights_ip);
+        assert!((ev_oop - 57.0).abs() < 1e-4);
+        assert!((ev_ip - 0.0).abs() < 1e-4);
     }
 
     #[test]
