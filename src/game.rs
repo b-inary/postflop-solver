@@ -1094,6 +1094,26 @@ impl PostFlopGame {
         self.node().player()
     }
 
+    /// Returns the current board.
+    ///
+    /// The returned vector is of length 3, 4, or 5. The flop cards, the turn card, and the river
+    /// card, if any, are stored in this order.
+    #[inline]
+    pub fn current_board(&self) -> Vec<u8> {
+        if self.state <= State::Uninitialized {
+            panic!("Game is not successfully initialized");
+        }
+
+        let mut ret = self.card_config.flop.to_vec();
+        if self.turn != NOT_DEALT {
+            ret.push(self.turn);
+        }
+        if self.river != NOT_DEALT {
+            ret.push(self.river);
+        }
+        ret
+    }
+
     /// Plays the given action. Playing an action from a terminal node is not allowed.
     ///
     /// - `action`
