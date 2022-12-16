@@ -279,8 +279,6 @@ impl Game for PostFlopGame {
                             cfreach_sum_win += cfreach_opp;
                             *cfreach_minus_win.get_unchecked_mut(c1 as usize) += cfreach_opp;
                             *cfreach_minus_win.get_unchecked_mut(c2 as usize) += cfreach_opp;
-                            *cfreach_minus_tie.get_unchecked_mut(c1 as usize) += cfreach_opp;
-                            *cfreach_minus_tie.get_unchecked_mut(c2 as usize) += cfreach_opp;
                             j += 1;
                         }
 
