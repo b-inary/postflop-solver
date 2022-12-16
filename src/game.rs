@@ -231,16 +231,70 @@ impl Game for PostFlopGame {
                 }
             }
         }
-        // showdown
-        else {
-            let amount_tie = -0.5 * rake / self.num_combinations;
-
-            let hand_strength = &self.hand_strength[card_pair_index(node.turn, node.river)];
+        // showdown (optimized for no rake; 2-pass)
+        else if rake == 0.0 {
+            let pair_index = card_pair_index(node.turn, node.river);
+            let hand_strength = &self.hand_strength[pair_index];
             let player_strength = &hand_strength[player];
             let opponent_strength = &hand_strength[player ^ 1];
+
+            let valid_player_strength = &player_strength[1..player_strength.len() - 1];
+            let mut j = 1;
+
+            for &StrengthItem { strength, index } in valid_player_strength {
+                unsafe {
+                    while opponent_strength.get_unchecked(j).strength < strength {
+                        let opponent_index = opponent_strength.get_unchecked(j).index as usize;
+                        let (c1, c2) = *opponent_cards.get_unchecked(opponent_index);
+                        let cfreach_opp = *cfreach.get_unchecked(opponent_index) as f64;
+                        cfreach_sum += cfreach_opp;
+                        *cfreach_minus.get_unchecked_mut(c1 as usize) += cfreach_opp;
+                        *cfreach_minus.get_unchecked_mut(c2 as usize) += cfreach_opp;
+                        j += 1;
+                    }
+                    let (c1, c2) = *player_cards.get_unchecked(index as usize);
+                    let cfreach = cfreach_sum
+                        - cfreach_minus.get_unchecked(c1 as usize)
+                        - cfreach_minus.get_unchecked(c2 as usize);
+                    *result.get_unchecked_mut(index as usize) = (amount_win * cfreach) as f32;
+                }
+            }
+
+            cfreach_sum = 0.0;
+            cfreach_minus.fill(0.0);
+            j = opponent_strength.len() - 2;
+
+            for &StrengthItem { strength, index } in valid_player_strength.iter().rev() {
+                unsafe {
+                    while opponent_strength.get_unchecked(j).strength > strength {
+                        let opponent_index = opponent_strength.get_unchecked(j).index as usize;
+                        let (c1, c2) = *opponent_cards.get_unchecked(opponent_index);
+                        let cfreach_opp = *cfreach.get_unchecked(opponent_index) as f64;
+                        cfreach_sum += cfreach_opp;
+                        *cfreach_minus.get_unchecked_mut(c1 as usize) += cfreach_opp;
+                        *cfreach_minus.get_unchecked_mut(c2 as usize) += cfreach_opp;
+                        j -= 1;
+                    }
+                    let (c1, c2) = *player_cards.get_unchecked(index as usize);
+                    let cfreach = cfreach_sum
+                        - cfreach_minus.get_unchecked(c1 as usize)
+                        - cfreach_minus.get_unchecked(c2 as usize);
+                    *result.get_unchecked_mut(index as usize) += (amount_lose * cfreach) as f32;
+                }
+            }
+        }
+        // showdown (raked; 3-pass)
+        else {
+            let amount_tie = -0.5 * rake / self.num_combinations;
+            let same_hand_index = &self.same_hand_index[player];
+
+            let pair_index = card_pair_index(node.turn, node.river);
+            let hand_strength = &self.hand_strength[pair_index];
+            let player_strength = &hand_strength[player];
+            let opponent_strength = &hand_strength[player ^ 1];
+
             let valid_player_strength = &player_strength[1..player_strength.len() - 1];
             let valid_opponent_strength = &opponent_strength[1..opponent_strength.len() - 1];
-            let same_hand_index = &self.same_hand_index[player];
 
             for &StrengthItem { index, .. } in valid_opponent_strength {
                 unsafe {
