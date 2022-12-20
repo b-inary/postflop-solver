@@ -219,12 +219,22 @@ impl ActionTree {
     #[inline]
     pub fn add_line(&mut self, line: &[Action]) -> Result<(), String> {
         let removed_index = self.removed_lines.iter().position(|x| x == line);
-        let info = BuildTreeInfo::new(self.config.effective_stack);
-        self.add_line_recursive(&mut self.root.lock(), line, removed_index.is_some(), info)?;
+        let is_replaced = self.add_line_recursive(
+            &mut self.root.lock(),
+            line,
+            removed_index.is_some(),
+            BuildTreeInfo::new(self.config.effective_stack),
+        )?;
         if let Some(index) = removed_index {
             self.removed_lines.remove(index);
         } else {
-            self.added_lines.push(line.to_vec());
+            let mut line = line.to_vec();
+            if is_replaced {
+                if let Some(&Action::Bet(amount) | &Action::Raise(amount)) = line.last() {
+                    *line.last_mut().unwrap() = Action::AllIn(amount);
+                }
+            }
+            self.added_lines.push(line);
         }
         Ok(())
     }
@@ -757,7 +767,7 @@ impl ActionTree {
         line: &[Action],
         was_removed: bool,
         info: BuildTreeInfo,
-    ) -> Result<(), String> {
+    ) -> Result<bool, String> {
         if line.is_empty() {
             return Err("Empty line".to_string());
         }
@@ -811,8 +821,10 @@ impl ActionTree {
         let max_amount = opponent_stack + prev_amount;
         let min_amount = (prev_amount + to_call).clamp(1, max_amount);
 
+        let mut is_replaced = false;
         let action = match action {
             Action::Bet(amount) | Action::Raise(amount) if amount == max_amount => {
+                is_replaced = true;
                 Action::AllIn(amount)
             }
             _ => action,
@@ -900,7 +912,7 @@ impl ActionTree {
             info.create_next(player, action),
         );
 
-        Ok(())
+        Ok(is_replaced)
     }
 
     /// Recursive function to remove a given line from the tree.
