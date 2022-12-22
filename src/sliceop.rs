@@ -20,13 +20,6 @@ pub(crate) fn add_slice(lhs: &mut [f32], rhs: &[f32]) {
 }
 
 #[inline]
-pub(crate) fn add_slice_nonnegative(lhs: &mut [f32], rhs: &[f32]) {
-    lhs.iter_mut()
-        .zip(rhs)
-        .for_each(|(l, r)| *l += max(*r, 0.0));
-}
-
-#[inline]
 pub(crate) fn sub_slice(lhs: &mut [f32], rhs: &[f32]) {
     lhs.iter_mut().zip(rhs).for_each(|(l, r)| *l -= *r);
 }
@@ -41,24 +34,6 @@ pub(crate) fn div_slice(lhs: &mut [f32], rhs: &[f32], default: f32) {
     lhs.iter_mut()
         .zip(rhs)
         .for_each(|(l, r)| *l = if is_zero(*r) { default } else { *l / *r });
-}
-
-#[inline]
-pub(crate) fn div_slice_nonnegative_uninit(
-    dst: &mut [MaybeUninit<f32>],
-    lhs: &[f32],
-    rhs: &[f32],
-    default: f32,
-) {
-    dst.iter_mut()
-        .zip(lhs.iter().zip(rhs))
-        .for_each(|(d, (l, r))| {
-            d.write(if is_zero(*r) {
-                default
-            } else {
-                max(*l, 0.0) / *r
-            });
-        });
 }
 
 #[inline]

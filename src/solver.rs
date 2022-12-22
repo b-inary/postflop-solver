@@ -361,24 +361,21 @@ fn max(x: f32, y: f32) -> f32 {
 fn regret_matching(regret: &[f32], num_actions: usize) -> Vec<f32, StackAlloc> {
     let mut strategy = Vec::with_capacity_in(regret.len(), StackAlloc);
     let uninit = strategy.spare_capacity_mut();
+    uninit.iter_mut().zip(regret).for_each(|(s, r)| {
+        s.write(max(*r, 0.0));
+    });
+    unsafe { strategy.set_len(regret.len()) };
 
     let row_size = regret.len() / num_actions;
     let mut denom = Vec::with_capacity_in(row_size, StackAlloc);
-    denom.extend(regret[..row_size].iter().map(|el| max(*el, 0.0)));
-
-    regret[row_size..].chunks_exact(row_size).for_each(|row| {
-        add_slice_nonnegative(&mut denom, row);
-    });
+    sum_slices_uninit(denom.spare_capacity_mut(), &strategy);
+    unsafe { denom.set_len(row_size) };
 
     let default = 1.0 / num_actions as f32;
-    uninit
-        .chunks_exact_mut(row_size)
-        .zip(regret.chunks_exact(row_size))
-        .for_each(|(s, r)| {
-            div_slice_nonnegative_uninit(s, r, &denom, default);
-        });
+    strategy.chunks_exact_mut(row_size).for_each(|row| {
+        div_slice(row, &denom, default);
+    });
 
-    unsafe { strategy.set_len(regret.len()) };
     strategy
 }
 
@@ -388,24 +385,21 @@ fn regret_matching(regret: &[f32], num_actions: usize) -> Vec<f32, StackAlloc> {
 fn regret_matching(regret: &[f32], num_actions: usize) -> Vec<f32> {
     let mut strategy = Vec::with_capacity(regret.len());
     let uninit = strategy.spare_capacity_mut();
+    uninit.iter_mut().zip(regret).for_each(|(s, r)| {
+        s.write(max(*r, 0.0));
+    });
+    unsafe { strategy.set_len(regret.len()) };
 
     let row_size = regret.len() / num_actions;
     let mut denom = Vec::with_capacity(row_size);
-    denom.extend(regret[..row_size].iter().map(|el| max(*el, 0.0)));
-
-    regret[row_size..].chunks_exact(row_size).for_each(|row| {
-        add_slice_nonnegative(&mut denom, row);
-    });
+    sum_slices_uninit(denom.spare_capacity_mut(), &strategy);
+    unsafe { denom.set_len(row_size) };
 
     let default = 1.0 / num_actions as f32;
-    uninit
-        .chunks_exact_mut(row_size)
-        .zip(regret.chunks_exact(row_size))
-        .for_each(|(s, r)| {
-            div_slice_nonnegative_uninit(s, r, &denom, default);
-        });
+    strategy.chunks_exact_mut(row_size).for_each(|row| {
+        div_slice(row, &denom, default);
+    });
 
-    unsafe { strategy.set_len(regret.len()) };
     strategy
 }
 
