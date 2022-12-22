@@ -364,21 +364,26 @@ fn max(x: f32, y: f32) -> f32 {
 #[cfg(feature = "custom-alloc")]
 #[inline]
 fn regret_matching(regret: &[f32], num_actions: usize) -> Vec<f32, StackAlloc> {
-    let mut strategy = regret.to_vec_in(StackAlloc);
-    let row_size = strategy.len() / num_actions;
+    let mut strategy = Vec::with_capacity_in(regret.len(), StackAlloc);
+    let uninit = strategy.spare_capacity_mut();
 
-    strategy.iter_mut().for_each(|el| *el = max(*el, 0.0));
+    let row_size = regret.len() / num_actions;
+    let mut denom = Vec::with_capacity_in(row_size, StackAlloc);
+    denom.extend(regret[..row_size].iter().map(|el| max(*el, 0.0)));
 
-    let mut denom = vec::from_elem_in(0.0, row_size, StackAlloc);
-    strategy.chunks_exact(row_size).for_each(|row| {
-        add_slice(&mut denom, row);
+    regret[row_size..].chunks_exact(row_size).for_each(|row| {
+        add_slice_nonnegative(&mut denom, row);
     });
 
     let default = 1.0 / num_actions as f32;
-    strategy.chunks_exact_mut(row_size).for_each(|row| {
-        div_slice(row, &denom, default);
-    });
+    uninit
+        .chunks_exact_mut(row_size)
+        .zip(regret.chunks_exact(row_size))
+        .for_each(|(s, r)| {
+            div_slice_nonnegative_uninit(s, r, &denom, default);
+        });
 
+    unsafe { strategy.set_len(regret.len()) };
     strategy
 }
 
@@ -386,21 +391,26 @@ fn regret_matching(regret: &[f32], num_actions: usize) -> Vec<f32, StackAlloc> {
 #[cfg(not(feature = "custom-alloc"))]
 #[inline]
 fn regret_matching(regret: &[f32], num_actions: usize) -> Vec<f32> {
-    let mut strategy = regret.to_vec();
-    let row_size = strategy.len() / num_actions;
+    let mut strategy = Vec::with_capacity(regret.len());
+    let uninit = strategy.spare_capacity_mut();
 
-    strategy.iter_mut().for_each(|el| *el = max(*el, 0.0));
+    let row_size = regret.len() / num_actions;
+    let mut denom = Vec::with_capacity(row_size);
+    denom.extend(regret[..row_size].iter().map(|el| max(*el, 0.0)));
 
-    let mut denom = vec![0.0; row_size];
-    strategy.chunks_exact(row_size).for_each(|row| {
-        add_slice(&mut denom, row);
+    regret[row_size..].chunks_exact(row_size).for_each(|row| {
+        add_slice_nonnegative(&mut denom, row);
     });
 
     let default = 1.0 / num_actions as f32;
-    strategy.chunks_exact_mut(row_size).for_each(|row| {
-        div_slice(row, &denom, default);
-    });
+    uninit
+        .chunks_exact_mut(row_size)
+        .zip(regret.chunks_exact(row_size))
+        .for_each(|(s, r)| {
+            div_slice_nonnegative_uninit(s, r, &denom, default);
+        });
 
+    unsafe { strategy.set_len(regret.len()) };
     strategy
 }
 
@@ -415,8 +425,9 @@ fn regret_matching_compressed(
     let mut strategy = decode_signed_slice_nonnegative(regret, scale);
     let row_size = strategy.len() / num_actions;
 
-    let mut denom = vec::from_elem_in(0.0, row_size, StackAlloc);
-    strategy.chunks_exact(row_size).for_each(|row| {
+    let mut denom = Vec::with_capacity_in(row_size, StackAlloc);
+    denom.extend_from_slice(&strategy[..row_size]);
+    strategy[row_size..].chunks_exact(row_size).for_each(|row| {
         add_slice(&mut denom, row);
     });
 
@@ -435,8 +446,9 @@ fn regret_matching_compressed(regret: &[i16], scale: f32, num_actions: usize) ->
     let mut strategy = decode_signed_slice_nonnegative(regret, scale);
     let row_size = strategy.len() / num_actions;
 
-    let mut denom = vec![0.0; row_size];
-    strategy.chunks_exact(row_size).for_each(|row| {
+    let mut denom = Vec::with_capacity(row_size);
+    denom.extend_from_slice(&strategy[..row_size]);
+    strategy[row_size..].chunks_exact(row_size).for_each(|row| {
         add_slice(&mut denom, row);
     });
 
@@ -454,13 +466,11 @@ fn regret_matching_compressed(regret: &[i16], scale: f32, num_actions: usize) ->
 fn decode_signed_slice_nonnegative(slice: &[i16], scale: f32) -> Vec<f32, StackAlloc> {
     let decoder = scale / i16::MAX as f32;
     let mut result = Vec::<f32, StackAlloc>::with_capacity_in(slice.len(), StackAlloc);
-    let ptr = result.as_mut_ptr();
-    unsafe {
-        for i in 0..slice.len() {
-            *ptr.add(i) = (*slice.get_unchecked(i)).max(0) as f32 * decoder;
-        }
-        result.set_len(slice.len());
-    }
+    let uninit = result.spare_capacity_mut();
+    uninit.iter_mut().zip(slice).for_each(|(d, s)| {
+        d.write((*s).max(0) as f32 * decoder);
+    });
+    unsafe { result.set_len(slice.len()) };
     result
 }
 
@@ -470,12 +480,10 @@ fn decode_signed_slice_nonnegative(slice: &[i16], scale: f32) -> Vec<f32, StackA
 fn decode_signed_slice_nonnegative(slice: &[i16], scale: f32) -> Vec<f32> {
     let decoder = scale / i16::MAX as f32;
     let mut result = Vec::<f32>::with_capacity(slice.len());
-    let ptr = result.as_mut_ptr();
-    unsafe {
-        for i in 0..slice.len() {
-            *ptr.add(i) = (*slice.get_unchecked(i)).max(0) as f32 * decoder;
-        }
-        result.set_len(slice.len());
-    }
+    let uninit = result.spare_capacity_mut();
+    uninit.iter_mut().zip(slice).for_each(|(d, s)| {
+        d.write((*s).max(0) as f32 * decoder);
+    });
+    unsafe { result.set_len(slice.len()) }
     result
 }
