@@ -1,4 +1,5 @@
 use crate::mutex_like::*;
+use std::mem::MaybeUninit;
 use std::ops::Range;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -29,7 +30,13 @@ pub trait Game: Send + Sync {
 
     /// Computes the counterfactual values of given node.
     #[doc(hidden)]
-    fn evaluate(&self, result: &mut [f32], node: &Self::Node, player: usize, cfreach: &[f32]);
+    fn evaluate(
+        &self,
+        result: &mut [MaybeUninit<f32>],
+        node: &Self::Node,
+        player: usize,
+        cfreach: &[f32],
+    );
 
     /// Returns whether the instance is solved.
     #[doc(hidden)]

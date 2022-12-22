@@ -3,6 +3,7 @@ use crate::mutex_like::*;
 use crate::sliceop::*;
 use crate::utility::*;
 use std::io::{self, Write};
+use std::mem::MaybeUninit;
 use std::ptr;
 
 #[cfg(feature = "custom-alloc")]
@@ -68,9 +69,9 @@ pub fn solve<T: Game>(
 
         // alternating updates
         for player in 0..2 {
-            let mut result = vec![0.0; game.num_private_hands(player)];
+            let mut result = Vec::with_capacity(game.num_private_hands(player));
             solve_recursive(
-                &mut result,
+                result.spare_capacity_mut(),
                 game,
                 &mut root,
                 player,
@@ -116,9 +117,9 @@ pub fn solve_step<T: Game>(game: &T, current_iteration: u32) {
 
     // alternating updates
     for player in 0..2 {
-        let mut result = vec![0.0; game.num_private_hands(player)];
+        let mut result = Vec::with_capacity(game.num_private_hands(player));
         solve_recursive(
-            &mut result,
+            result.spare_capacity_mut(),
             game,
             &mut root,
             player,
@@ -130,7 +131,7 @@ pub fn solve_step<T: Game>(game: &T, current_iteration: u32) {
 
 /// Recursively solves the counterfactual values.
 fn solve_recursive<T: Game>(
-    result: &mut [f32],
+    result: &mut [MaybeUninit<f32>],
     game: &T,
     node: &mut T::Node,
     player: usize,
@@ -155,9 +156,9 @@ fn solve_recursive<T: Game>(
 
     // allocate memory for storing the counterfactual values
     #[cfg(feature = "custom-alloc")]
-    let cfv_actions = MutexLike::new(vec::from_elem_in(0.0, num_actions * num_hands, StackAlloc));
+    let cfv_actions = MutexLike::new(Vec::with_capacity_in(num_actions * num_hands, StackAlloc));
     #[cfg(not(feature = "custom-alloc"))]
-    let cfv_actions = MutexLike::new(vec![0.0; num_actions * num_hands]);
+    let cfv_actions = MutexLike::new(Vec::with_capacity(num_actions * num_hands));
 
     // if the `node` is chance
     if node.is_chance() {
@@ -177,7 +178,7 @@ fn solve_recursive<T: Game>(
         // compute the counterfactual values of each action
         for_each_child(node, |action| {
             solve_recursive(
-                row_mut(&mut cfv_actions.lock(), action, num_hands),
+                row_mut(cfv_actions.lock().spare_capacity_mut(), action, num_hands),
                 game,
                 &mut node.play(action),
                 player,
@@ -188,6 +189,7 @@ fn solve_recursive<T: Game>(
 
         // sum up the counterfactual values
         let mut cfv_actions = cfv_actions.lock();
+        unsafe { cfv_actions.set_len(num_actions * num_hands) };
         cfv_actions.chunks_exact(num_hands).for_each(|row| {
             result_f64.iter_mut().zip(row).for_each(|(r, &v)| {
                 *r += v as f64;
@@ -226,7 +228,7 @@ fn solve_recursive<T: Game>(
         }
 
         result.iter_mut().zip(&result_f64).for_each(|(r, &v)| {
-            *r = v as f32;
+            r.write(v as f32);
         });
     }
     // if the current player is `player`
@@ -241,7 +243,7 @@ fn solve_recursive<T: Game>(
         // compute the counterfactual values of each action
         for_each_child(node, |action| {
             solve_recursive(
-                row_mut(&mut cfv_actions.lock(), action, num_hands),
+                row_mut(cfv_actions.lock().spare_capacity_mut(), action, num_hands),
                 game,
                 &mut node.play(action),
                 player,
@@ -252,16 +254,8 @@ fn solve_recursive<T: Game>(
 
         // sum up the counterfactual values
         let mut cfv_actions = cfv_actions.lock();
-        strategy
-            .chunks_exact(num_hands)
-            .zip(cfv_actions.chunks_exact(num_hands))
-            .for_each(|(strategy_row, cfv_row)| {
-                result
-                    .iter_mut()
-                    .zip(strategy_row)
-                    .zip(cfv_row)
-                    .for_each(|((r, &s), &v)| *r += s * v);
-            });
+        unsafe { cfv_actions.set_len(num_actions * num_hands) };
+        let result = fma_slices_uninit(result, &strategy, &cfv_actions);
 
         if game.is_compression_enabled() {
             // update the cumulative strategy
@@ -334,7 +328,7 @@ fn solve_recursive<T: Game>(
         // compute the counterfactual values of each action
         for_each_child(node, |action| {
             solve_recursive(
-                row_mut(&mut cfv_actions.lock(), action, num_hands),
+                row_mut(cfv_actions.lock().spare_capacity_mut(), action, num_hands),
                 game,
                 &mut node.play(action),
                 player,
@@ -344,10 +338,9 @@ fn solve_recursive<T: Game>(
         });
 
         // sum up the counterfactual values
-        let cfv_actions = cfv_actions.lock();
-        cfv_actions.chunks_exact(num_hands).for_each(|row| {
-            add_slice(result, row);
-        });
+        let mut cfv_actions = cfv_actions.lock();
+        unsafe { cfv_actions.set_len(num_actions * num_hands) };
+        sum_slices_uninit(result, &cfv_actions);
     }
 }
 

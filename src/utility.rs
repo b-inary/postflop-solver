@@ -1,7 +1,7 @@
 use crate::interface::*;
 use crate::mutex_like::*;
 use crate::sliceop::*;
-use std::mem;
+use std::mem::{self, MaybeUninit};
 use std::ptr;
 
 #[cfg(feature = "custom-alloc")]
@@ -212,21 +212,22 @@ pub fn finalize<T: Game>(game: &mut T) {
     }
 
     let mut cfvalues = [
-        vec![0.0; game.num_private_hands(0)],
-        vec![0.0; game.num_private_hands(1)],
+        Vec::with_capacity(game.num_private_hands(0)),
+        Vec::with_capacity(game.num_private_hands(1)),
     ];
 
     // compute the expected values and save them
     for player in 0..2 {
         let cfreach = game.initial_weights(player ^ 1);
         compute_cfvalue_recursive(
-            &mut cfvalues[player],
+            cfvalues[player].spare_capacity_mut(),
             game,
             &mut game.root(),
             player,
             cfreach,
             true,
         );
+        unsafe { cfvalues[player].set_len(game.num_private_hands(player)) };
     }
 
     // set the game solved
@@ -266,21 +267,22 @@ pub fn compute_current_ev<T: Game>(game: &T) -> [f32; 2] {
     }
 
     let mut cfvalues = [
-        vec![0.0; game.num_private_hands(0)],
-        vec![0.0; game.num_private_hands(1)],
+        Vec::with_capacity(game.num_private_hands(0)),
+        Vec::with_capacity(game.num_private_hands(1)),
     ];
 
     let reach = [game.initial_weights(0), game.initial_weights(1)];
 
     for player in 0..2 {
         compute_cfvalue_recursive(
-            &mut cfvalues[player],
+            cfvalues[player].spare_capacity_mut(),
             game,
             &mut game.root(),
             player,
             reach[player ^ 1],
             false,
         );
+        unsafe { cfvalues[player].set_len(game.num_private_hands(player)) };
     }
 
     let get_sum = |player: usize| weighted_sum(&cfvalues[player], reach[player]);
@@ -298,20 +300,21 @@ pub fn compute_mes_ev<T: Game>(game: &T) -> [f32; 2] {
     }
 
     let mut cfvalues = [
-        vec![0.0; game.num_private_hands(0)],
-        vec![0.0; game.num_private_hands(1)],
+        Vec::with_capacity(game.num_private_hands(0)),
+        Vec::with_capacity(game.num_private_hands(1)),
     ];
 
     let reach = [game.initial_weights(0), game.initial_weights(1)];
 
     for player in 0..2 {
         compute_best_cfv_recursive(
-            &mut cfvalues[player],
+            cfvalues[player].spare_capacity_mut(),
             game,
             &game.root(),
             player,
             reach[player ^ 1],
         );
+        unsafe { cfvalues[player].set_len(game.num_private_hands(player)) };
     }
 
     let get_sum = |player: usize| weighted_sum(&cfvalues[player], reach[player]);
@@ -320,7 +323,7 @@ pub fn compute_mes_ev<T: Game>(game: &T) -> [f32; 2] {
 
 /// The recursive helper function for computing the counterfactual values of the given strategy.
 fn compute_cfvalue_recursive<T: Game>(
-    result: &mut [f32],
+    result: &mut [MaybeUninit<f32>],
     game: &T,
     node: &mut T::Node,
     player: usize,
@@ -338,9 +341,9 @@ fn compute_cfvalue_recursive<T: Game>(
 
     // allocate memory for storing the counterfactual values
     #[cfg(feature = "custom-alloc")]
-    let cfv_actions = MutexLike::new(vec::from_elem_in(0.0, num_actions * num_hands, StackAlloc));
+    let cfv_actions = MutexLike::new(Vec::with_capacity_in(num_actions * num_hands, StackAlloc));
     #[cfg(not(feature = "custom-alloc"))]
-    let cfv_actions = MutexLike::new(vec![0.0; num_actions * num_hands]);
+    let cfv_actions = MutexLike::new(Vec::with_capacity(num_actions * num_hands));
 
     // chance node
     if node.is_chance() {
@@ -360,7 +363,7 @@ fn compute_cfvalue_recursive<T: Game>(
         // compute the counterfactual values of each action
         for_each_child(node, |action| {
             compute_cfvalue_recursive(
-                row_mut(&mut cfv_actions.lock(), action, num_hands),
+                row_mut(cfv_actions.lock().spare_capacity_mut(), action, num_hands),
                 game,
                 &mut node.play(action),
                 player,
@@ -371,6 +374,7 @@ fn compute_cfvalue_recursive<T: Game>(
 
         // sum up the counterfactual values
         let mut cfv_actions = cfv_actions.lock();
+        unsafe { cfv_actions.set_len(num_actions * num_hands) };
         cfv_actions.chunks_exact(num_hands).for_each(|row| {
             result_f64.iter_mut().zip(row).for_each(|(r, &v)| {
                 *r += v as f64;
@@ -409,8 +413,10 @@ fn compute_cfvalue_recursive<T: Game>(
         }
 
         result.iter_mut().zip(&result_f64).for_each(|(r, &v)| {
-            *r = v as f32;
+            r.write(v as f32);
         });
+
+        let result = unsafe { &*(result as *const _ as *const [f32]) };
 
         // save the counterfactual values
         if save_cfvalues {
@@ -462,7 +468,7 @@ fn compute_cfvalue_recursive<T: Game>(
         // compute the counterfactual values of each action
         for_each_child(node, |action| {
             compute_cfvalue_recursive(
-                row_mut(&mut cfv_actions.lock(), action, num_hands),
+                row_mut(cfv_actions.lock().spare_capacity_mut(), action, num_hands),
                 game,
                 &mut node.play(action),
                 player,
@@ -472,11 +478,9 @@ fn compute_cfvalue_recursive<T: Game>(
         });
 
         // sum up the counterfactual values
-        let cfv_actions = cfv_actions.lock();
-        mul_slice(&mut strategy, &cfv_actions);
-        strategy.chunks_exact(num_hands).for_each(|row| {
-            add_slice(result, row);
-        });
+        let mut cfv_actions = cfv_actions.lock();
+        unsafe { cfv_actions.set_len(num_actions * num_hands) };
+        fma_slices_uninit(result, &strategy, &cfv_actions);
 
         // save the counterfactual values
         if save_cfvalues {
@@ -536,7 +540,7 @@ fn compute_cfvalue_recursive<T: Game>(
         // compute the counterfactual values of each action
         for_each_child(node, |action| {
             compute_cfvalue_recursive(
-                row_mut(&mut cfv_actions.lock(), action, num_hands),
+                row_mut(cfv_actions.lock().spare_capacity_mut(), action, num_hands),
                 game,
                 &mut node.play(action),
                 player,
@@ -546,16 +550,15 @@ fn compute_cfvalue_recursive<T: Game>(
         });
 
         // sum up the counterfactual values
-        let cfv_actions = cfv_actions.lock();
-        cfv_actions.chunks_exact(num_hands).for_each(|row| {
-            add_slice(result, row);
-        });
+        let mut cfv_actions = cfv_actions.lock();
+        unsafe { cfv_actions.set_len(num_actions * num_hands) };
+        sum_slices_uninit(result, &cfv_actions);
     }
 }
 
 /// The recursive helper function for computing the counterfactual values of best response.
 fn compute_best_cfv_recursive<T: Game>(
-    result: &mut [f32],
+    result: &mut [MaybeUninit<f32>],
     game: &T,
     node: &T::Node,
     player: usize,
@@ -579,9 +582,9 @@ fn compute_best_cfv_recursive<T: Game>(
 
     // allocate memory for storing the counterfactual values
     #[cfg(feature = "custom-alloc")]
-    let cfv_actions = MutexLike::new(vec::from_elem_in(0.0, num_actions * num_hands, StackAlloc));
+    let cfv_actions = MutexLike::new(Vec::with_capacity_in(num_actions * num_hands, StackAlloc));
     #[cfg(not(feature = "custom-alloc"))]
-    let cfv_actions = MutexLike::new(vec![0.0; num_actions * num_hands]);
+    let cfv_actions = MutexLike::new(Vec::with_capacity(num_actions * num_hands));
 
     // chance node
     if node.is_chance() {
@@ -601,7 +604,7 @@ fn compute_best_cfv_recursive<T: Game>(
         // compute the counterfactual values of each action
         for_each_child(node, |action| {
             compute_best_cfv_recursive(
-                row_mut(&mut cfv_actions.lock(), action, num_hands),
+                row_mut(cfv_actions.lock().spare_capacity_mut(), action, num_hands),
                 game,
                 &node.play(action),
                 player,
@@ -611,6 +614,7 @@ fn compute_best_cfv_recursive<T: Game>(
 
         // sum up the counterfactual values
         let mut cfv_actions = cfv_actions.lock();
+        unsafe { cfv_actions.set_len(num_actions * num_hands) };
         cfv_actions.chunks_exact(num_hands).for_each(|row| {
             result_f64.iter_mut().zip(row).for_each(|(r, v)| {
                 *r += *v as f64;
@@ -649,7 +653,7 @@ fn compute_best_cfv_recursive<T: Game>(
         }
 
         result.iter_mut().zip(&result_f64).for_each(|(r, &v)| {
-            *r = v as f32;
+            r.write(v as f32);
         });
     }
     // player node
@@ -657,7 +661,7 @@ fn compute_best_cfv_recursive<T: Game>(
         // compute the counterfactual values of each action
         for_each_child(node, |action| {
             compute_best_cfv_recursive(
-                row_mut(&mut cfv_actions.lock(), action, num_hands),
+                row_mut(cfv_actions.lock().spare_capacity_mut(), action, num_hands),
                 game,
                 &node.play(action),
                 player,
@@ -666,13 +670,9 @@ fn compute_best_cfv_recursive<T: Game>(
         });
 
         // compute element-wise maximum (take the best response)
-        result.fill(f32::MIN);
-        let cfv_actions = cfv_actions.lock();
-        cfv_actions.chunks_exact(num_hands).for_each(|row| {
-            result.iter_mut().zip(row).for_each(|(r, v)| {
-                *r = max(*r, *v);
-            });
-        });
+        let mut cfv_actions = cfv_actions.lock();
+        unsafe { cfv_actions.set_len(num_actions * num_hands) };
+        max_slices_uninit(result, &cfv_actions);
     }
     // opponent node
     else {
@@ -714,7 +714,7 @@ fn compute_best_cfv_recursive<T: Game>(
             let cfreach = row(&cfreach_actions, action, row_size);
             if cfreach.iter().any(|&x| x > 0.0) {
                 compute_best_cfv_recursive(
-                    row_mut(&mut cfv_actions.lock(), action, num_hands),
+                    row_mut(cfv_actions.lock().spare_capacity_mut(), action, num_hands),
                     game,
                     &node.play(action),
                     player,
@@ -724,10 +724,9 @@ fn compute_best_cfv_recursive<T: Game>(
         });
 
         // sum up the counterfactual values
-        let cfv_actions = cfv_actions.lock();
-        cfv_actions.chunks_exact(num_hands).for_each(|row| {
-            add_slice(result, row);
-        });
+        let mut cfv_actions = cfv_actions.lock();
+        unsafe { cfv_actions.set_len(num_actions * num_hands) };
+        sum_slices_uninit(result, &cfv_actions);
     }
 }
 

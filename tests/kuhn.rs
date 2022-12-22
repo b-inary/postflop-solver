@@ -1,5 +1,6 @@
 extern crate postflop_solver;
 use postflop_solver::*;
+use std::mem::MaybeUninit;
 
 struct KuhnGame {
     root: MutexLike<KuhnNode>,
@@ -54,7 +55,18 @@ impl Game for KuhnGame {
         &self.initial_weight
     }
 
-    fn evaluate(&self, result: &mut [f32], node: &Self::Node, player: usize, cfreach: &[f32]) {
+    fn evaluate(
+        &self,
+        result: &mut [MaybeUninit<f32>],
+        node: &Self::Node,
+        player: usize,
+        cfreach: &[f32],
+    ) {
+        result.iter_mut().for_each(|x| {
+            x.write(0.0);
+        });
+        let result = unsafe { &mut *(result as *mut _ as *mut [f32]) };
+
         let num_hands = NUM_PRIVATE_HANDS * (NUM_PRIVATE_HANDS - 1);
         let num_hands_inv = 1.0 / num_hands as f32;
         let amount_normalized = node.amount as f32 * num_hands_inv;

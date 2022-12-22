@@ -4,7 +4,7 @@ use crate::interface::*;
 use crate::mutex_like::*;
 use crate::sliceop::*;
 use crate::utility::*;
-use std::mem;
+use std::mem::{self, MaybeUninit};
 use std::ptr;
 use std::slice;
 
@@ -174,7 +174,13 @@ impl Game for PostFlopGame {
         &self.initial_weights[player]
     }
 
-    fn evaluate(&self, result: &mut [f32], node: &Self::Node, player: usize, cfreach: &[f32]) {
+    fn evaluate(
+        &self,
+        result: &mut [MaybeUninit<f32>],
+        node: &Self::Node,
+        player: usize,
+        cfreach: &[f32],
+    ) {
         let pot = (self.tree_config.starting_pot + 2 * node.amount) as f64;
         let half_pot = 0.5 * pot;
         let rake = min(pot * self.tree_config.rake_rate, self.tree_config.rake_cap);
@@ -186,6 +192,11 @@ impl Game for PostFlopGame {
 
         let mut cfreach_sum = 0.0;
         let mut cfreach_minus = [0.0; 52];
+
+        result.iter_mut().for_each(|v| {
+            v.write(0.0);
+        });
+        let result: &mut [f32] = unsafe { &mut *(result as *mut _ as *mut [f32]) };
 
         // someone folded
         if node.player & PLAYER_FOLD_FLAG == PLAYER_FOLD_FLAG {
@@ -1545,8 +1556,14 @@ impl PostFlopGame {
 
         let mut ret = if self.node().is_terminal() {
             normalizer = self.num_combinations as f32;
-            let mut ret = vec![0.0; num_hands];
-            self.evaluate(&mut ret, self.node(), player, &self.weights[player ^ 1]);
+            let mut ret = Vec::with_capacity(num_hands);
+            self.evaluate(
+                ret.spare_capacity_mut(),
+                self.node(),
+                player,
+                &self.weights[player ^ 1],
+            );
+            unsafe { ret.set_len(num_hands) };
             ret
         } else if self.node().is_chance() {
             self.cfvalues_chance(player)
