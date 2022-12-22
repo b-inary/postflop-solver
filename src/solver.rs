@@ -145,7 +145,7 @@ fn solve_recursive<T: Game>(
     }
 
     let num_actions = node.num_actions();
-    let num_hands = game.num_private_hands(player);
+    let num_hands = result.len();
 
     // simply recurse when the number of actions is one
     if num_actions == 1 && !node.is_chance() {
@@ -297,14 +297,10 @@ fn solve_recursive<T: Game>(
             });
 
             // update the cumulative regret
-            let (alpha_t, beta_t) = (params.alpha_t, params.beta_t);
+            let (a, b) = (params.alpha_t, params.beta_t);
             let cum_regret = node.regrets_mut();
             cum_regret.iter_mut().zip(&*cfv_actions).for_each(|(x, y)| {
-                let coef = if x.is_sign_positive() {
-                    alpha_t
-                } else {
-                    beta_t
-                };
+                let coef = if x.is_sign_positive() { a } else { b };
                 *x = *x * coef + *y;
             });
             cum_regret.chunks_exact_mut(num_hands).for_each(|row| {
@@ -322,7 +318,7 @@ fn solve_recursive<T: Game>(
         };
 
         // update the reach probabilities
-        let row_size = cfreach_actions.len() / num_actions;
+        let row_size = cfreach.len();
         cfreach_actions.chunks_exact_mut(row_size).for_each(|row| {
             mul_slice(row, cfreach);
         });
@@ -415,10 +411,8 @@ fn regret_matching_compressed(
     let row_size = strategy.len() / num_actions;
 
     let mut denom = Vec::with_capacity_in(row_size, StackAlloc);
-    denom.extend_from_slice(&strategy[..row_size]);
-    strategy[row_size..].chunks_exact(row_size).for_each(|row| {
-        add_slice(&mut denom, row);
-    });
+    sum_slices_uninit(denom.spare_capacity_mut(), &strategy);
+    unsafe { denom.set_len(row_size) };
 
     let default = 1.0 / num_actions as f32;
     strategy.chunks_exact_mut(row_size).for_each(|row| {
@@ -436,10 +430,8 @@ fn regret_matching_compressed(regret: &[i16], scale: f32, num_actions: usize) ->
     let row_size = strategy.len() / num_actions;
 
     let mut denom = Vec::with_capacity(row_size);
-    denom.extend_from_slice(&strategy[..row_size]);
-    strategy[row_size..].chunks_exact(row_size).for_each(|row| {
-        add_slice(&mut denom, row);
-    });
+    sum_slices_uninit(denom.spare_capacity_mut(), &strategy);
+    unsafe { denom.set_len(row_size) };
 
     let default = 1.0 / num_actions as f32;
     strategy.chunks_exact_mut(row_size).for_each(|row| {
@@ -454,7 +446,7 @@ fn regret_matching_compressed(regret: &[i16], scale: f32, num_actions: usize) ->
 #[inline]
 fn decode_signed_slice_nonnegative(slice: &[i16], scale: f32) -> Vec<f32, StackAlloc> {
     let decoder = scale / i16::MAX as f32;
-    let mut result = Vec::<f32, StackAlloc>::with_capacity_in(slice.len(), StackAlloc);
+    let mut result = Vec::with_capacity_in(slice.len(), StackAlloc);
     let uninit = result.spare_capacity_mut();
     uninit.iter_mut().zip(slice).for_each(|(d, s)| {
         d.write((*s).max(0) as f32 * decoder);
@@ -468,7 +460,7 @@ fn decode_signed_slice_nonnegative(slice: &[i16], scale: f32) -> Vec<f32, StackA
 #[inline]
 fn decode_signed_slice_nonnegative(slice: &[i16], scale: f32) -> Vec<f32> {
     let decoder = scale / i16::MAX as f32;
-    let mut result = Vec::<f32>::with_capacity(slice.len());
+    let mut result = Vec::with_capacity(slice.len());
     let uninit = result.spare_capacity_mut();
     uninit.iter_mut().zip(slice).for_each(|(d, s)| {
         d.write((*s).max(0) as f32 * decoder);

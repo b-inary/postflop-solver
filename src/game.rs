@@ -1630,13 +1630,10 @@ impl PostFlopGame {
         let num_hands = self.num_private_hands(player);
 
         let mut ret = if self.is_compression_enabled {
-            let slice = self.node().strategy_compressed();
-            slice.iter().map(|&x| x as f32).collect()
+            normalized_strategy_compressed(self.node().strategy_compressed(), num_actions)
         } else {
-            self.node().strategy().to_vec()
+            normalized_strategy(self.node().strategy(), num_actions)
         };
-
-        normalize_strategy(&mut ret, num_actions);
 
         ret.chunks_exact_mut(num_hands).for_each(|chunk| {
             self.apply_swap(chunk, player);

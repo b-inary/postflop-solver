@@ -5,7 +5,7 @@ use std::mem::{self, MaybeUninit};
 use std::ptr;
 
 #[cfg(feature = "custom-alloc")]
-use {crate::alloc::*, std::vec};
+use crate::alloc::*;
 
 #[cfg(feature = "rayon")]
 use rayon::prelude::*;
@@ -337,7 +337,7 @@ fn compute_cfvalue_recursive<T: Game>(
     }
 
     let num_actions = node.num_actions();
-    let num_hands = game.num_private_hands(player);
+    let num_hands = result.len();
 
     // allocate memory for storing the counterfactual values
     #[cfg(feature = "custom-alloc")]
@@ -441,31 +441,18 @@ fn compute_cfvalue_recursive<T: Game>(
     // player node
     else if node.player() == player {
         // obtain the strategy
-        let mut strategy = if game.is_compression_enabled() {
-            let strategy = node.strategy_compressed();
-            #[cfg(feature = "custom-alloc")]
-            {
-                let mut vec = Vec::with_capacity_in(strategy.len(), StackAlloc);
-                vec.extend(strategy.iter().map(|&x| x as f32));
-                vec
-            }
-            #[cfg(not(feature = "custom-alloc"))]
-            {
-                strategy.iter().map(|&x| x as f32).collect()
-            }
+        #[cfg(feature = "custom-alloc")]
+        let strategy = if game.is_compression_enabled() {
+            normalized_strategy_compressed_custom_alloc(node.strategy_compressed(), num_actions)
         } else {
-            #[cfg(feature = "custom-alloc")]
-            {
-                node.strategy().to_vec_in(StackAlloc)
-            }
-            #[cfg(not(feature = "custom-alloc"))]
-            {
-                node.strategy().to_vec()
-            }
+            normalized_strategy_custom_alloc(node.strategy(), num_actions)
         };
-
-        // normalize the strategy
-        normalize_strategy(&mut strategy, node.num_actions());
+        #[cfg(not(feature = "custom-alloc"))]
+        let strategy = if game.is_compression_enabled() {
+            normalized_strategy_compressed(node.strategy_compressed(), num_actions)
+        } else {
+            normalized_strategy(node.strategy(), num_actions)
+        };
 
         // compute the counterfactual values of each action
         for_each_child(node, |action| {
@@ -507,34 +494,21 @@ fn compute_cfvalue_recursive<T: Game>(
         );
     } else {
         // obtain the strategy
+        #[cfg(feature = "custom-alloc")]
         let mut cfreach_actions = if game.is_compression_enabled() {
-            let strategy = node.strategy_compressed();
-            #[cfg(feature = "custom-alloc")]
-            {
-                let mut vec = Vec::with_capacity_in(strategy.len(), StackAlloc);
-                vec.extend(strategy.iter().map(|&x| x as f32));
-                vec
-            }
-            #[cfg(not(feature = "custom-alloc"))]
-            {
-                strategy.iter().map(|&x| x as f32).collect()
-            }
+            normalized_strategy_compressed_custom_alloc(node.strategy_compressed(), num_actions)
         } else {
-            #[cfg(feature = "custom-alloc")]
-            {
-                node.strategy().to_vec_in(StackAlloc)
-            }
-            #[cfg(not(feature = "custom-alloc"))]
-            {
-                node.strategy().to_vec()
-            }
+            normalized_strategy_custom_alloc(node.strategy(), num_actions)
+        };
+        #[cfg(not(feature = "custom-alloc"))]
+        let mut cfreach_actions = if game.is_compression_enabled() {
+            normalized_strategy_compressed(node.strategy_compressed(), num_actions)
+        } else {
+            normalized_strategy(node.strategy(), num_actions)
         };
 
-        // normalize the strategy
-        normalize_strategy(&mut cfreach_actions, node.num_actions());
-
         // update the reach probabilities
-        let row_size = cfreach_actions.len() / node.num_actions();
+        let row_size = cfreach.len();
         cfreach_actions.chunks_exact_mut(row_size).for_each(|row| {
             mul_slice(row, cfreach);
         });
@@ -681,34 +655,21 @@ fn compute_best_cfv_recursive<T: Game>(
     // opponent node
     else {
         // obtain the strategy
+        #[cfg(feature = "custom-alloc")]
         let mut cfreach_actions = if game.is_compression_enabled() {
-            let strategy = node.strategy_compressed();
-            #[cfg(feature = "custom-alloc")]
-            {
-                let mut vec = Vec::with_capacity_in(strategy.len(), StackAlloc);
-                vec.extend(strategy.iter().map(|&x| x as f32));
-                vec
-            }
-            #[cfg(not(feature = "custom-alloc"))]
-            {
-                strategy.iter().map(|&x| x as f32).collect()
-            }
+            normalized_strategy_compressed_custom_alloc(node.strategy_compressed(), num_actions)
         } else {
-            #[cfg(feature = "custom-alloc")]
-            {
-                node.strategy().to_vec_in(StackAlloc)
-            }
-            #[cfg(not(feature = "custom-alloc"))]
-            {
-                node.strategy().to_vec()
-            }
+            normalized_strategy_custom_alloc(node.strategy(), num_actions)
+        };
+        #[cfg(not(feature = "custom-alloc"))]
+        let mut cfreach_actions = if game.is_compression_enabled() {
+            normalized_strategy_compressed(node.strategy_compressed(), num_actions)
+        } else {
+            normalized_strategy(node.strategy(), num_actions)
         };
 
-        // normalize the strategy
-        normalize_strategy(&mut cfreach_actions, node.num_actions());
-
         // update the reach probabilities
-        let row_size = cfreach_actions.len() / node.num_actions();
+        let row_size = cfreach.len();
         cfreach_actions.chunks_exact_mut(row_size).for_each(|row| {
             mul_slice(row, cfreach);
         });
@@ -734,21 +695,100 @@ fn compute_best_cfv_recursive<T: Game>(
     }
 }
 
+#[cfg(feature = "custom-alloc")]
 #[inline]
-pub(crate) fn normalize_strategy(slice: &mut [f32], num_actions: usize) {
-    let row_size = slice.len() / num_actions;
+pub(crate) fn normalized_strategy_custom_alloc(
+    strategy: &[f32],
+    num_actions: usize,
+) -> Vec<f32, StackAlloc> {
+    let mut normalized = Vec::with_capacity_in(strategy.len(), StackAlloc);
+    let uninit = normalized.spare_capacity_mut();
 
-    #[cfg(feature = "custom-alloc")]
-    let mut denom = vec::from_elem_in(0.0, row_size, StackAlloc);
-    #[cfg(not(feature = "custom-alloc"))]
-    let mut denom = vec![0.0; row_size];
-
-    slice.chunks_exact(row_size).for_each(|row| {
-        add_slice(&mut denom, row);
-    });
+    let row_size = strategy.len() / num_actions;
+    let mut denom = Vec::with_capacity_in(row_size, StackAlloc);
+    sum_slices_uninit(denom.spare_capacity_mut(), strategy);
+    unsafe { denom.set_len(row_size) };
 
     let default = 1.0 / num_actions as f32;
-    slice.chunks_exact_mut(row_size).for_each(|row| {
+    uninit
+        .chunks_exact_mut(row_size)
+        .zip(strategy.chunks_exact(row_size))
+        .for_each(|(n, s)| {
+            div_slice_uninit(n, s, &denom, default);
+        });
+
+    unsafe { normalized.set_len(strategy.len()) };
+    normalized
+}
+
+#[inline]
+pub(crate) fn normalized_strategy(strategy: &[f32], num_actions: usize) -> Vec<f32> {
+    let mut normalized = Vec::with_capacity(strategy.len());
+    let uninit = normalized.spare_capacity_mut();
+
+    let row_size = strategy.len() / num_actions;
+    let mut denom = Vec::with_capacity(row_size);
+    sum_slices_uninit(denom.spare_capacity_mut(), strategy);
+    unsafe { denom.set_len(row_size) };
+
+    let default = 1.0 / num_actions as f32;
+    uninit
+        .chunks_exact_mut(row_size)
+        .zip(strategy.chunks_exact(row_size))
+        .for_each(|(n, s)| {
+            div_slice_uninit(n, s, &denom, default);
+        });
+
+    unsafe { normalized.set_len(strategy.len()) };
+    normalized
+}
+
+#[cfg(feature = "custom-alloc")]
+#[inline]
+pub(crate) fn normalized_strategy_compressed_custom_alloc(
+    strategy: &[u16],
+    num_actions: usize,
+) -> Vec<f32, StackAlloc> {
+    let mut normalized = Vec::with_capacity_in(strategy.len(), StackAlloc);
+    let uninit = normalized.spare_capacity_mut();
+
+    uninit.iter_mut().zip(strategy).for_each(|(n, s)| {
+        n.write(*s as f32);
+    });
+    unsafe { normalized.set_len(strategy.len()) };
+
+    let row_size = strategy.len() / num_actions;
+    let mut denom = Vec::with_capacity_in(row_size, StackAlloc);
+    sum_slices_uninit(denom.spare_capacity_mut(), &normalized);
+    unsafe { denom.set_len(row_size) };
+
+    let default = 1.0 / num_actions as f32;
+    normalized.chunks_exact_mut(row_size).for_each(|row| {
         div_slice(row, &denom, default);
     });
+
+    normalized
+}
+
+#[inline]
+pub(crate) fn normalized_strategy_compressed(strategy: &[u16], num_actions: usize) -> Vec<f32> {
+    let mut normalized = Vec::with_capacity(strategy.len());
+    let uninit = normalized.spare_capacity_mut();
+
+    uninit.iter_mut().zip(strategy).for_each(|(n, s)| {
+        n.write(*s as f32);
+    });
+    unsafe { normalized.set_len(strategy.len()) };
+
+    let row_size = strategy.len() / num_actions;
+    let mut denom = Vec::with_capacity(row_size);
+    sum_slices_uninit(denom.spare_capacity_mut(), &normalized);
+    unsafe { denom.set_len(row_size) };
+
+    let default = 1.0 / num_actions as f32;
+    normalized.chunks_exact_mut(row_size).for_each(|row| {
+        div_slice(row, &denom, default);
+    });
+
+    normalized
 }
