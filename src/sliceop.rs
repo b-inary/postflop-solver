@@ -62,8 +62,10 @@ pub(crate) fn div_slice_nonnegative_uninit(
 }
 
 #[inline]
-pub(crate) fn mul_slice_scalar(slice: &mut [f32], scalar: f32) {
-    slice.iter_mut().for_each(|l| *l *= scalar);
+pub(crate) fn mul_slice_scalar_uninit(dst: &mut [MaybeUninit<f32>], src: &[f32], scalar: f32) {
+    dst.iter_mut().zip(src).for_each(|(d, s)| {
+        d.write(*s * scalar);
+    });
 }
 
 #[inline]
@@ -76,6 +78,24 @@ pub(crate) fn sum_slices_uninit<'a>(dst: &'a mut [MaybeUninit<f32>], src: &[f32]
     src[len..].chunks_exact(len).for_each(|s| {
         dst.iter_mut().zip(s).for_each(|(d, s)| {
             *d += *s;
+        });
+    });
+    dst
+}
+
+#[inline]
+pub(crate) fn sum_slices_f64_uninit<'a>(
+    dst: &'a mut [MaybeUninit<f64>],
+    src: &[f32],
+) -> &'a mut [f64] {
+    let len = dst.len();
+    dst.iter_mut().zip(src).for_each(|(d, s)| {
+        d.write(*s as f64);
+    });
+    let dst = unsafe { &mut *(dst as *mut _ as *mut [f64]) };
+    src[len..].chunks_exact(len).for_each(|s| {
+        dst.iter_mut().zip(s).for_each(|(d, s)| {
+            *d += *s as f64;
         });
     });
     dst

@@ -347,18 +347,17 @@ fn compute_cfvalue_recursive<T: Game>(
 
     // chance node
     if node.is_chance() {
-        // use 64-bit floating point values
-        #[cfg(feature = "custom-alloc")]
-        let mut result_f64 = vec::from_elem_in(0.0, num_hands, StackAlloc);
-        #[cfg(not(feature = "custom-alloc"))]
-        let mut result_f64 = vec![0.0; num_hands];
-
         // update the reach probabilities
         #[cfg(feature = "custom-alloc")]
-        let mut cfreach = cfreach.to_vec_in(StackAlloc);
+        let mut cfreach_updated = Vec::with_capacity(cfreach.len());
         #[cfg(not(feature = "custom-alloc"))]
-        let mut cfreach = cfreach.to_vec();
-        mul_slice_scalar(&mut cfreach, node.chance_factor());
+        let mut cfreach_updated = Vec::with_capacity(cfreach.len());
+        mul_slice_scalar_uninit(
+            cfreach_updated.spare_capacity_mut(),
+            cfreach,
+            node.chance_factor(),
+        );
+        unsafe { cfreach_updated.set_len(cfreach.len()) };
 
         // compute the counterfactual values of each action
         for_each_child(node, |action| {
@@ -367,19 +366,22 @@ fn compute_cfvalue_recursive<T: Game>(
                 game,
                 &mut node.play(action),
                 player,
-                &cfreach,
+                &cfreach_updated,
                 save_cfvalues,
             );
         });
 
+        // use 64-bit floating point values
+        #[cfg(feature = "custom-alloc")]
+        let mut result_f64 = Vec::with_capacity_in(num_hands, StackAlloc);
+        #[cfg(not(feature = "custom-alloc"))]
+        let mut result_f64 = Vec::with_capacity(num_hands);
+
         // sum up the counterfactual values
         let mut cfv_actions = cfv_actions.lock();
         unsafe { cfv_actions.set_len(num_actions * num_hands) };
-        cfv_actions.chunks_exact(num_hands).for_each(|row| {
-            result_f64.iter_mut().zip(row).for_each(|(r, &v)| {
-                *r += v as f64;
-            });
-        });
+        sum_slices_f64_uninit(result_f64.spare_capacity_mut(), &cfv_actions);
+        unsafe { result_f64.set_len(num_hands) };
 
         // get information about isomorphic chances
         let isomorphic_chances = game.isomorphic_chances(node);
@@ -588,18 +590,17 @@ fn compute_best_cfv_recursive<T: Game>(
 
     // chance node
     if node.is_chance() {
-        // use 64-bit floating point values
-        #[cfg(feature = "custom-alloc")]
-        let mut result_f64 = vec::from_elem_in(0.0, num_hands, StackAlloc);
-        #[cfg(not(feature = "custom-alloc"))]
-        let mut result_f64 = vec![0.0; num_hands];
-
         // update the reach probabilities
         #[cfg(feature = "custom-alloc")]
-        let mut cfreach = cfreach.to_vec_in(StackAlloc);
+        let mut cfreach_updated = Vec::with_capacity(cfreach.len());
         #[cfg(not(feature = "custom-alloc"))]
-        let mut cfreach = cfreach.to_vec();
-        mul_slice_scalar(&mut cfreach, node.chance_factor());
+        let mut cfreach_updated = Vec::with_capacity(cfreach.len());
+        mul_slice_scalar_uninit(
+            cfreach_updated.spare_capacity_mut(),
+            cfreach,
+            node.chance_factor(),
+        );
+        unsafe { cfreach_updated.set_len(cfreach.len()) };
 
         // compute the counterfactual values of each action
         for_each_child(node, |action| {
@@ -608,18 +609,21 @@ fn compute_best_cfv_recursive<T: Game>(
                 game,
                 &node.play(action),
                 player,
-                &cfreach,
+                &cfreach_updated,
             )
         });
+
+        // use 64-bit floating point values
+        #[cfg(feature = "custom-alloc")]
+        let mut result_f64 = Vec::with_capacity_in(num_hands, StackAlloc);
+        #[cfg(not(feature = "custom-alloc"))]
+        let mut result_f64 = Vec::with_capacity(num_hands);
 
         // sum up the counterfactual values
         let mut cfv_actions = cfv_actions.lock();
         unsafe { cfv_actions.set_len(num_actions * num_hands) };
-        cfv_actions.chunks_exact(num_hands).for_each(|row| {
-            result_f64.iter_mut().zip(row).for_each(|(r, v)| {
-                *r += *v as f64;
-            });
-        });
+        sum_slices_f64_uninit(result_f64.spare_capacity_mut(), &cfv_actions);
+        unsafe { result_f64.set_len(num_hands) };
 
         // get information about isomorphic chances
         let isomorphic_chances = game.isomorphic_chances(node);
