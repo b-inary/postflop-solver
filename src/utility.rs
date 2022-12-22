@@ -246,19 +246,25 @@ pub fn compute_exploitability<T: Game>(game: &T) -> f32 {
         panic!("the game is not ready");
     }
 
+    let mes_ev = compute_mes_ev(game);
     if !game.is_raked() {
-        compute_mes_ev_average(game)
+        (mes_ev[0] + mes_ev[1]) * 0.5
     } else {
-        compute_mes_ev_average(game) - compute_current_ev_average(game)
+        let current_ev = compute_current_ev(game);
+        ((mes_ev[0] - current_ev[0]) + (mes_ev[1] - current_ev[1])) * 0.5
     }
 }
 
-/// Computes the average of the expected values of the current strategy.
+/// Computes the expected values of the current strategy of each player.
 ///
-/// If raked, the exploitability can be computed by subtracting the return value of this function
-/// from the return value of `compute_mes_ev_average`. If not raked, there is no need to call this
-/// function (since this function should always return zero).
-fn compute_current_ev_average<T: Game>(game: &T) -> f32 {
+/// The bias, i.e., (starting pot) / 2, is already subtracted to increase the significant figures.
+/// This treatment makes the return value zero-sum when not raked.
+#[inline]
+pub fn compute_current_ev<T: Game>(game: &T) -> [f32; 2] {
+    if !game.is_ready() && !game.is_solved() {
+        panic!("the game is not ready");
+    }
+
     let mut cfvalues = [
         vec![0.0; game.num_private_hands(0)],
         vec![0.0; game.num_private_hands(1)],
@@ -278,16 +284,19 @@ fn compute_current_ev_average<T: Game>(game: &T) -> f32 {
     }
 
     let get_sum = |player: usize| weighted_sum(&cfvalues[player], reach[player]);
-    0.5 * (get_sum(0) + get_sum(1))
+    [get_sum(0), get_sum(1)]
 }
 
-/// Computes the average of the expected values of the MES (Maximally Exploitative Strategy).
+/// Computes the expected values of the MES (Maximally Exploitative Strategy) of each player.
 ///
-/// The bias, i.e., (starting pot) / 2, is already subtracted. Therefore, the return value
-/// corresponds to the exploitability if not raked. If raked, use the `compute_current_ev_average`
-/// function together and subtract its return value from the return value of this function to
-/// compute the exploitability.
-fn compute_mes_ev_average<T: Game>(game: &T) -> f32 {
+/// The bias, i.e., (starting pot) / 2, is already subtracted to increase the significant figures.
+/// Therefore, the average of the return value corresponds to the exploitability value if not raked.
+#[inline]
+pub fn compute_mes_ev<T: Game>(game: &T) -> [f32; 2] {
+    if !game.is_ready() && !game.is_solved() {
+        panic!("the game is not ready");
+    }
+
     let mut cfvalues = [
         vec![0.0; game.num_private_hands(0)],
         vec![0.0; game.num_private_hands(1)],
@@ -306,7 +315,7 @@ fn compute_mes_ev_average<T: Game>(game: &T) -> f32 {
     }
 
     let get_sum = |player: usize| weighted_sum(&cfvalues[player], reach[player]);
-    0.5 * (get_sum(0) + get_sum(1))
+    [get_sum(0), get_sum(1)]
 }
 
 /// The recursive helper function for computing the counterfactual values of the given strategy.
