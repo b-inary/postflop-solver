@@ -1406,6 +1406,8 @@ impl PostFlopGame {
     }
 
     /// Returns the weights of each private hand of the given player.
+    ///
+    /// If a hand overlaps with the board, an undefined value is returned.
     #[inline]
     pub fn weights(&self, player: usize) -> &[f32] {
         if self.state <= State::Uninitialized {
@@ -1609,6 +1611,8 @@ impl PostFlopGame {
     /// The return value is a vector of the length of `#(actions) * #(private hands)`.
     /// The probability of `i`-th action with `j`-th private hand is stored in the
     /// `i * #(private hands) + j`-th element.
+    ///
+    /// If a hand overlaps with the board, an undefined value is returned.
     ///
     /// Panics if the current node is a terminal node or a chance node. Also, panics if the memory
     /// is not yet allocated.
