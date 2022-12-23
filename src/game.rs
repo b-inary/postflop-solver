@@ -196,7 +196,7 @@ impl Game for PostFlopGame {
         result.iter_mut().for_each(|v| {
             v.write(0.0);
         });
-        let result: &mut [f32] = unsafe { &mut *(result as *mut _ as *mut [f32]) };
+        let result = unsafe { &mut *(result as *mut _ as *mut [f32]) };
 
         // someone folded
         if node.player & PLAYER_FOLD_FLAG == PLAYER_FOLD_FLAG {
@@ -216,14 +216,35 @@ impl Game for PostFlopGame {
             };
 
             let opponent_indices = &valid_indices[player ^ 1];
-            for &i in opponent_indices {
+            let opponent_len = opponent_indices.len();
+            let opponent_len_8 = opponent_len & !7;
+
+            let mut i = 0;
+
+            while i < opponent_len_8 {
+                for j in 0..8 {
+                    unsafe {
+                        let index = *opponent_indices.get_unchecked(i + j) as usize;
+                        let (c1, c2) = *opponent_cards.get_unchecked(index);
+                        let cfreach_i = *cfreach.get_unchecked(index) as f64;
+                        cfreach_sum += cfreach_i;
+                        *cfreach_minus.get_unchecked_mut(c1 as usize) += cfreach_i;
+                        *cfreach_minus.get_unchecked_mut(c2 as usize) += cfreach_i;
+                    }
+                }
+                i += 8;
+            }
+
+            while i < opponent_len {
                 unsafe {
-                    let (c1, c2) = *opponent_cards.get_unchecked(i as usize);
-                    let cfreach_i = *cfreach.get_unchecked(i as usize) as f64;
+                    let index = *opponent_indices.get_unchecked(i) as usize;
+                    let (c1, c2) = *opponent_cards.get_unchecked(index);
+                    let cfreach_i = *cfreach.get_unchecked(index) as f64;
                     cfreach_sum += cfreach_i;
                     *cfreach_minus.get_unchecked_mut(c1 as usize) += cfreach_i;
                     *cfreach_minus.get_unchecked_mut(c2 as usize) += cfreach_i;
                 }
+                i += 1;
             }
 
             let player_indices = &valid_indices[player];
