@@ -459,6 +459,9 @@ impl PostFlopGame {
         card_config: CardConfig,
         action_tree: ActionTree,
     ) -> Result<(), String> {
+        if !action_tree.invalid_terminals().is_empty() {
+            return Err("Invalid terminal is found in action tree".to_string());
+        }
         self.card_config = card_config;
         (
             self.tree_config,
