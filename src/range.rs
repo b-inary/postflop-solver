@@ -577,8 +577,6 @@ impl Range {
 
     /// Returns whether the two suits are isomorphic.
     pub(crate) fn is_suit_isomorphic(&self, suit1: u8, suit2: u8) -> bool {
-        const EPS: f32 = 1e-5;
-
         let replace_suit = |suit| {
             if suit == suit1 {
                 suit2
@@ -595,7 +593,7 @@ impl Range {
                 let card2_replaced = (card2 & !3) | replace_suit(card2 & 3);
                 let weight = self.get_weight_by_cards(card1, card2);
                 let weight_replaced = self.get_weight_by_cards(card1_replaced, card2_replaced);
-                if (weight - weight_replaced).abs() >= EPS {
+                if weight != weight_replaced {
                     return false;
                 }
             }
