@@ -681,16 +681,13 @@ fn compute_best_cfv_recursive<T: Game>(
 
         // compute the counterfactual values of each action
         for_each_child(node, |action| {
-            let cfreach = row(&cfreach_actions, action, row_size);
-            if cfreach.iter().any(|&x| x > 0.0) {
-                compute_best_cfv_recursive(
-                    row_mut(cfv_actions.lock().spare_capacity_mut(), action, num_hands),
-                    game,
-                    &node.play(action),
-                    player,
-                    cfreach,
-                );
-            }
+            compute_best_cfv_recursive(
+                row_mut(cfv_actions.lock().spare_capacity_mut(), action, num_hands),
+                game,
+                &node.play(action),
+                player,
+                row(&cfreach_actions, action, row_size),
+            );
         });
 
         // sum up the counterfactual values
