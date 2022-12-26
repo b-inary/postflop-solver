@@ -290,17 +290,17 @@ fn solve_recursive<T: Game>(
             node.set_regret_scale(new_scale);
         } else {
             // update the cumulative strategy
-            let gamma_t = params.gamma_t;
+            let gamma = params.gamma_t;
             let cum_strategy = node.strategy_mut();
             cum_strategy.iter_mut().zip(&strategy).for_each(|(x, y)| {
-                *x = *x * gamma_t + *y;
+                *x = *x * gamma + *y;
             });
 
             // update the cumulative regret
-            let (a, b) = (params.alpha_t, params.beta_t);
+            let (alpha, beta) = (params.alpha_t, params.beta_t);
             let cum_regret = node.regrets_mut();
             cum_regret.iter_mut().zip(&*cfv_actions).for_each(|(x, y)| {
-                let coef = if x.is_sign_positive() { a } else { b };
+                let coef = if x.is_sign_positive() { alpha } else { beta };
                 *x = *x * coef + *y;
             });
             cum_regret.chunks_exact_mut(num_hands).for_each(|row| {
@@ -339,15 +339,6 @@ fn solve_recursive<T: Game>(
         let mut cfv_actions = cfv_actions.lock();
         unsafe { cfv_actions.set_len(num_actions * num_hands) };
         sum_slices_uninit(result, &cfv_actions);
-    }
-}
-
-#[inline]
-fn max(x: f32, y: f32) -> f32 {
-    if x > y {
-        x
-    } else {
-        y
     }
 }
 
