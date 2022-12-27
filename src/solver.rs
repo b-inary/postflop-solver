@@ -16,9 +16,6 @@ struct DiscountParams {
 }
 
 impl DiscountParams {
-    const ALPHA: f64 = 1.5;
-    const GAMMA: f64 = 3.0;
-
     pub fn new(current_iteration: u32) -> Self {
         // 0, 1, 4, 16, 64, 256, ...
         let msb_even = match current_iteration {
@@ -26,11 +23,11 @@ impl DiscountParams {
             x => 1 << ((x.leading_zeros() ^ 31) & !1),
         };
 
-        let float_alpha = (current_iteration as i32 - 1).max(0) as f64;
-        let float_gamma = (current_iteration - msb_even) as f64;
+        let t_alpha = (current_iteration as i32 - 1).max(0) as f64;
+        let t_gamma = (current_iteration - msb_even) as f64;
 
-        let pow_alpha = float_alpha.powf(Self::ALPHA);
-        let pow_gamma = (float_gamma / (float_gamma + 1.0)).powf(Self::GAMMA);
+        let pow_alpha = t_alpha * t_alpha.sqrt();
+        let pow_gamma = (t_gamma / (t_gamma + 1.0)).powi(3);
 
         Self {
             alpha_t: (pow_alpha / (pow_alpha + 1.0)) as f32,
