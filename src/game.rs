@@ -994,10 +994,10 @@ impl PostFlopGame {
     /// Remove lines after building the PostFlopGame but before allocating memory.
     /// This allows the removal of chance-specific lines (e.g., remove overbets on
     /// board-pairing turns) which we cannot do while building an action tree.
-    pub fn remove_lines(&mut self, lines: &Vec<Vec<Action>>) -> Result<(), String> {
+    pub fn remove_lines(&mut self, lines: &[Vec<Action>]) -> Result<(), String> {
         if self.state <= State::Uninitialized {
             return Err("Game is not successfully initialized".to_string());
-        } else if self.state == State::MemoryAllocated {
+        } else if self.state >= State::MemoryAllocated {
             return Err("Game has already been allocated".to_string());
         }
 
@@ -1034,8 +1034,11 @@ impl PostFlopGame {
         let index = search_result.unwrap();
         if line.len() > 1 {
             let result = self.remove_line_recursive(&mut node.children[index].lock(), &line[1..]);
-            if line.len() == 2 {}
             return result;
+        }
+
+        if node.is_chance() {
+            return Err("Cannot remove a line ending in a chance action".to_string());
         }
 
         // Remove action/children at index. To do this we must
@@ -1046,7 +1049,7 @@ impl PostFlopGame {
         // STEP 1
         let mut info = BuildTreeInfo {
             memory_usage_nodes: mem::size_of::<PostFlopNode>() as u64,
-            num_storage_actions: 0,
+            num_storage_actions: self.num_private_hands(node.player as usize) as u64,
             num_storage_chances: 0,
         };
 
@@ -1061,20 +1064,9 @@ impl PostFlopGame {
         node.children.shrink_to_fit();
 
         // STEP 3
-        if node.is_chance() {
-            node.num_elements = match node.cfvalue_storage(PLAYER_OOP as usize) {
-                CfValueStorage::None => 0,
-                CfValueStorage::Sum => self.num_private_hands(PLAYER_OOP as usize),
-                CfValueStorage::All => {
-                    node.num_actions() * self.num_private_hands(PLAYER_OOP as usize)
-                }
-            };
-        } else {
-            node.num_elements = node.num_actions() * self.num_private_hands(node.player as usize);
-        }
+        node.num_elements = node.num_actions() * self.num_private_hands(node.player as usize);
 
         Ok(info)
-        //Err("Not implemented".to_string())
     }
 
     /// Allocates memory recursively.
@@ -3207,68 +3199,12 @@ mod tests {
     fn remove_lines() {
         use crate::bet_size::BetSizeCandidates;
         let card_config = CardConfig {
-            range: ["AA".parse().unwrap(), "AA".parse().unwrap()],
-            flop: flop_from_str("2c6dTh").unwrap(),
-            turn: card_from_str("3c").unwrap(),
-            ..Default::default()
-        };
-
-        // Simple tree: force checks until river, where OOP can bet 1/2 pot
-        let tree_config = TreeConfig {
-            initial_state: BoardState::Turn,
-            starting_pot: 60,
-            effective_stack: 970,
-            river_bet_sizes: [
-                BetSizeCandidates::try_from(("50%", "")).unwrap(),
-                Default::default(),
-            ],
-            ..Default::default()
-        };
-
-        let action_tree = ActionTree::new(tree_config).unwrap();
-        let mut game = PostFlopGame::with_config(card_config, action_tree).unwrap();
-
-        let lines = vec![vec![
-            Action::Check,
-            Action::Check,
-            Action::Chance(2),
-            Action::Bet(30),
-        ]];
-
-        let res = game.remove_lines(&lines);
-        assert!(res.is_ok());
-
-        game.allocate_memory(false);
-
-        // Check that the removed line
-        game.back_to_root();
-        game.play(game.node().actions.binary_search(&Action::Check).unwrap());
-        game.play(game.node().actions.binary_search(&Action::Check).unwrap());
-        game.play(2);
-        assert!(game.available_actions() == &[Action::Check]);
-        assert!(game.node().children.len() == 1);
-
-        // Check that other lines are correct
-        game.back_to_root();
-        game.play(game.node().actions.binary_search(&Action::Check).unwrap());
-        game.play(game.node().actions.binary_search(&Action::Check).unwrap());
-        game.play(3);
-        assert!(game.available_actions() == &[Action::Check, Action::Bet(30)]);
-        assert!(game.node().children.len() == 2);
-
-        solve(&mut game, 10, 0.05, true);
-    }
-
-    #[test]
-    fn remove_lines2() {
-        use crate::bet_size::BetSizeCandidates;
-        let card_config = CardConfig {
             range: ["TT+,AKo,AQs+".parse().unwrap(), "AA".parse().unwrap()],
             flop: flop_from_str("2c6dTh").unwrap(),
             ..Default::default()
         };
 
-        // Simple tree: force checks until river, where OOP can bet 1/2 pot
+        // Simple tree: force checks on flop, and only use 1/2 pot bets on turn and river
         let tree_config = TreeConfig {
             starting_pot: 60,
             effective_stack: 970,
@@ -3305,7 +3241,6 @@ mod tests {
         ];
 
         let res = game.remove_lines(&lines);
-        println!("result: {res:?}");
         assert!(res.is_ok());
 
         game.allocate_memory(false);
@@ -3361,7 +3296,7 @@ mod tests {
         assert!(game.available_actions() == &[Action::Check, Action::Bet(30)]);
         assert!(game.node().children.len() == 2);
 
-        solve(&mut game, 10, 0.05, true);
+        solve(&mut game, 10, 0.05, false);
     }
 
     #[test]
