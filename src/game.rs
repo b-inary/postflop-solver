@@ -1057,6 +1057,9 @@ impl PostFlopGame {
         self.calculate_removed_line_info_recursive(node_to_remove, &mut info);
 
         // STEP 2
+        if node.num_actions() <= 1 {
+            return Err("Cannot remove the last action from a node".to_string());
+        }
         node.actions.remove(index);
         node.children.remove(index);
 
