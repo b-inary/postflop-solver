@@ -1,18 +1,5 @@
+use crate::utility::*;
 use std::mem::MaybeUninit;
-
-#[inline]
-fn max(x: f32, y: f32) -> f32 {
-    if x > y {
-        x
-    } else {
-        y
-    }
-}
-
-#[inline]
-fn is_zero(x: f32) -> bool {
-    x.to_bits() == 0
-}
 
 #[inline]
 pub(crate) fn sub_slice(lhs: &mut [f32], rhs: &[f32]) {

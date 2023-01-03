@@ -125,7 +125,8 @@
 //!
 //! # Implementation details
 //! - **Algorithm**: The solver uses [Discounted CFR] algorithm.
-//!   Currently, the value of γ is set to 5.0, rather than the 2.0 recommended by the original paper.
+//!   Currently, the value of γ is set to 3.0, rather than the 2.0 recommended by the original paper.
+//!   Also, the solver reset the cumulative strategy when the number of iterations is a power of 4.
 //! - **Precision**: 32-bit floating-point numbers are used in most places.
 //!   When calculating summations, temporal values use 64-bit floating-point numbers.
 //!   If the compression feature is enabled, each game node stores the values by 16-bit integers

@@ -196,7 +196,8 @@ impl Game for PostFlopGame {
         result.iter_mut().for_each(|v| {
             v.write(0.0);
         });
-        let result: &mut [f32] = unsafe { &mut *(result as *mut _ as *mut [f32]) };
+
+        let result = unsafe { &mut *(result as *mut _ as *mut [f32]) };
 
         // someone folded
         if node.player & PLAYER_FOLD_FLAG == PLAYER_FOLD_FLAG {
@@ -218,12 +219,19 @@ impl Game for PostFlopGame {
             let opponent_indices = &valid_indices[player ^ 1];
             for &i in opponent_indices {
                 unsafe {
-                    let (c1, c2) = *opponent_cards.get_unchecked(i as usize);
-                    let cfreach_i = *cfreach.get_unchecked(i as usize) as f64;
-                    cfreach_sum += cfreach_i;
-                    *cfreach_minus.get_unchecked_mut(c1 as usize) += cfreach_i;
-                    *cfreach_minus.get_unchecked_mut(c2 as usize) += cfreach_i;
+                    let cfreach_i = *cfreach.get_unchecked(i as usize);
+                    if cfreach_i != 0.0 {
+                        let (c1, c2) = *opponent_cards.get_unchecked(i as usize);
+                        let cfreach_i_f64 = cfreach_i as f64;
+                        cfreach_sum += cfreach_i_f64;
+                        *cfreach_minus.get_unchecked_mut(c1 as usize) += cfreach_i_f64;
+                        *cfreach_minus.get_unchecked_mut(c2 as usize) += cfreach_i_f64;
+                    }
                 }
+            }
+
+            if cfreach_sum == 0.0 {
+                return;
             }
 
             let player_indices = &valid_indices[player];
@@ -256,11 +264,14 @@ impl Game for PostFlopGame {
                 unsafe {
                     while opponent_strength.get_unchecked(i).strength < strength {
                         let opponent_index = opponent_strength.get_unchecked(i).index as usize;
-                        let (c1, c2) = *opponent_cards.get_unchecked(opponent_index);
-                        let cfreach_i = *cfreach.get_unchecked(opponent_index) as f64;
-                        cfreach_sum += cfreach_i;
-                        *cfreach_minus.get_unchecked_mut(c1 as usize) += cfreach_i;
-                        *cfreach_minus.get_unchecked_mut(c2 as usize) += cfreach_i;
+                        let cfreach_i = *cfreach.get_unchecked(opponent_index);
+                        if cfreach_i != 0.0 {
+                            let (c1, c2) = *opponent_cards.get_unchecked(opponent_index);
+                            let cfreach_i_f64 = cfreach_i as f64;
+                            cfreach_sum += cfreach_i_f64;
+                            *cfreach_minus.get_unchecked_mut(c1 as usize) += cfreach_i_f64;
+                            *cfreach_minus.get_unchecked_mut(c2 as usize) += cfreach_i_f64;
+                        }
                         i += 1;
                     }
                     let (c1, c2) = *player_cards.get_unchecked(index as usize);
@@ -279,11 +290,14 @@ impl Game for PostFlopGame {
                 unsafe {
                     while opponent_strength.get_unchecked(i).strength > strength {
                         let opponent_index = opponent_strength.get_unchecked(i).index as usize;
-                        let (c1, c2) = *opponent_cards.get_unchecked(opponent_index);
-                        let cfreach_i = *cfreach.get_unchecked(opponent_index) as f64;
-                        cfreach_sum += cfreach_i;
-                        *cfreach_minus.get_unchecked_mut(c1 as usize) += cfreach_i;
-                        *cfreach_minus.get_unchecked_mut(c2 as usize) += cfreach_i;
+                        let cfreach_i = *cfreach.get_unchecked(opponent_index);
+                        if cfreach_i != 0.0 {
+                            let (c1, c2) = *opponent_cards.get_unchecked(opponent_index);
+                            let cfreach_i_f64 = cfreach_i as f64;
+                            cfreach_sum += cfreach_i_f64;
+                            *cfreach_minus.get_unchecked_mut(c1 as usize) += cfreach_i_f64;
+                            *cfreach_minus.get_unchecked_mut(c2 as usize) += cfreach_i_f64;
+                        }
                         i -= 1;
                     }
                     let (c1, c2) = *player_cards.get_unchecked(index as usize);
@@ -309,12 +323,19 @@ impl Game for PostFlopGame {
 
             for &StrengthItem { index, .. } in valid_opponent_strength {
                 unsafe {
-                    let (c1, c2) = *opponent_cards.get_unchecked(index as usize);
-                    let cfreach_i = *cfreach.get_unchecked(index as usize) as f64;
-                    cfreach_sum += cfreach_i;
-                    *cfreach_minus.get_unchecked_mut(c1 as usize) += cfreach_i;
-                    *cfreach_minus.get_unchecked_mut(c2 as usize) += cfreach_i;
+                    let cfreach_i = *cfreach.get_unchecked(index as usize);
+                    if cfreach_i != 0.0 {
+                        let (c1, c2) = *opponent_cards.get_unchecked(index as usize);
+                        let cfreach_i_f64 = cfreach_i as f64;
+                        cfreach_sum += cfreach_i_f64;
+                        *cfreach_minus.get_unchecked_mut(c1 as usize) += cfreach_i_f64;
+                        *cfreach_minus.get_unchecked_mut(c2 as usize) += cfreach_i_f64;
+                    }
                 }
+            }
+
+            if cfreach_sum == 0.0 {
+                return;
             }
 
             let mut cfreach_sum_win = 0.0;
@@ -459,6 +480,9 @@ impl PostFlopGame {
         card_config: CardConfig,
         action_tree: ActionTree,
     ) -> Result<(), String> {
+        if !action_tree.invalid_terminals().is_empty() {
+            return Err("Invalid terminal is found in action tree".to_string());
+        }
         self.card_config = card_config;
         (
             self.tree_config,
@@ -1353,8 +1377,12 @@ impl PostFlopGame {
                             if let Action::Chance(repr_card) = actions[repr_index as usize] {
                                 self.turn_swapped_suit = Some((action_card & 3, repr_card & 3));
                             }
-                            self.turn_swap = Some(self.turn_isomorphism_card[i] & 3);
+                            self.turn_swap = Some(action_card & 3);
                         } else {
+                            // `self.turn != self.node().turn` if `self.turn_swap.is_some()`.
+                            // This is possible only when the flop is monotone.
+                            // In this case, there is only one suit that can be swapped and the
+                            // following code works correctly.
                             self.river_swap = Some((
                                 self.turn,
                                 self.river_isomorphism_card[self.turn as usize][i] & 3,
@@ -1790,7 +1818,7 @@ impl PostFlopGame {
             .river_swap
             .map(|(turn, suit)| &self.river_isomorphism_swap[turn as usize][suit as usize][player]);
 
-        for swap in [river_swap, turn_swap].into_iter().flatten() {
+        for swap in [turn_swap, river_swap].into_iter().flatten() {
             for &(i, j) in swap {
                 slice.swap(i as usize, j as usize);
             }
@@ -3334,6 +3362,67 @@ mod tests {
         assert!(game.node().children.len() == 2);
 
         solve(&mut game, 10, 0.05, true);
+    }
+    fn isomorphism_monotone() {
+        let oop_range = "88+,A8s+,A5s-A2s:0.5,AJo+,ATo:0.75,K9s+,KQo,KJo:0.75,KTo:0.25,Q9s+,QJo:0.5,J8s+,JTo:0.25,T8s+,T7s:0.45,97s+,96s:0.45,87s,86s:0.75,85s:0.45,75s+:0.75,74s:0.45,65s:0.75,64s:0.5,63s:0.45,54s:0.75,53s:0.5,52s:0.45,43s:0.5,42s:0.45,32s:0.45";
+        let ip_range = "AA:0.25,99-22,AJs-A2s,AQo-A8o,K2s+,K9o+,Q2s+,Q9o+,J6s+,J9o+,T6s+,T9o,96s+,95s:0.5,98o,86s+,85s:0.5,75s+,74s:0.5,64s+,63s:0.5,54s,53s:0.5,43s";
+
+        let card_config = CardConfig {
+            range: [oop_range.parse().unwrap(), ip_range.parse().unwrap()],
+            flop: flop_from_str("QhJh2h").unwrap(),
+            ..Default::default()
+        };
+
+        let tree_config = TreeConfig {
+            starting_pot: 100,
+            effective_stack: 100,
+            ..Default::default()
+        };
+
+        let action_tree = ActionTree::new(tree_config).unwrap();
+        let mut game = PostFlopGame::with_config(card_config, action_tree).unwrap();
+
+        game.allocate_memory(false);
+        finalize(&mut game);
+
+        let mut check = |history: &[usize],
+                         expected_turn_swap: Option<u8>,
+                         expected_river_swap: Option<(u8, u8)>| {
+            game.apply_history(history);
+            game.cache_normalized_weights();
+            let weights = game.normalized_weights(0);
+            let ev = game.expected_values(0);
+            weights.iter().zip(ev.iter()).for_each(|(&w, &v)| {
+                assert!(!(w > 0.0 && v == 50.0));
+            });
+            assert_eq!(game.turn_swap, expected_turn_swap);
+            assert_eq!(game.river_swap, expected_river_swap);
+        };
+
+        check(&[0, 0, 4], None, None);
+        check(&[0, 0, 5], Some(1), None);
+        check(&[0, 0, 6], None, None);
+        check(&[0, 0, 7], Some(3), None);
+
+        check(&[0, 0, 4, 0, 0, 8], None, None);
+        check(&[0, 0, 4, 0, 0, 9], None, None);
+        check(&[0, 0, 4, 0, 0, 10], None, None);
+        check(&[0, 0, 4, 0, 0, 11], None, Some((4, 3)));
+
+        check(&[0, 0, 5, 0, 0, 8], Some(1), None);
+        check(&[0, 0, 5, 0, 0, 9], Some(1), None);
+        check(&[0, 0, 5, 0, 0, 10], Some(1), None);
+        check(&[0, 0, 5, 0, 0, 11], Some(1), Some((5, 3)));
+
+        check(&[0, 0, 6, 0, 0, 8], None, None);
+        check(&[0, 0, 6, 0, 0, 9], None, Some((6, 1)));
+        check(&[0, 0, 6, 0, 0, 10], None, None);
+        check(&[0, 0, 6, 0, 0, 11], None, Some((6, 3)));
+
+        check(&[0, 0, 7, 0, 0, 8], Some(3), Some((7, 1)));
+        check(&[0, 0, 7, 0, 0, 9], Some(3), None);
+        check(&[0, 0, 7, 0, 0, 10], Some(3), None);
+        check(&[0, 0, 7, 0, 0, 11], Some(3), None);
     }
 
     #[test]

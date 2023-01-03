@@ -237,7 +237,7 @@ impl CardConfig {
         }
 
         let mut isomorphic_suit = [None; 4];
-        let mut reverse_table = [usize::MAX; 52 * 51 / 2];
+        let mut reverse_table = vec![usize::MAX; 52 * 51 / 2];
 
         let mut turn_isomorphism_ref = Vec::new();
         let mut turn_isomorphism_card = Vec::new();
@@ -329,7 +329,7 @@ impl CardConfig {
 
     fn isomorphism_swap_internal(
         swap_list: &mut [SwapList; 4],
-        reverse_table: &mut [usize; 52 * 51 / 2],
+        reverse_table: &mut [usize],
         suit1: u8,
         suit2: u8,
         private_cards: &PrivateCards,

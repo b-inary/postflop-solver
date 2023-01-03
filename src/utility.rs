@@ -29,6 +29,20 @@ pub(crate) fn for_each_child<T: GameNode, OP: Fn(usize) + Sync + Send>(node: &T,
 }
 
 #[inline]
+pub(crate) fn max(x: f32, y: f32) -> f32 {
+    if x > y {
+        x
+    } else {
+        y
+    }
+}
+
+#[inline]
+pub(crate) fn is_zero(x: f32) -> bool {
+    x.to_bits() == 0
+}
+
+#[inline]
 pub(crate) fn vec_memory_usage<T>(vec: &Vec<T>) -> u64 {
     vec.capacity() as u64 * mem::size_of::<T>() as u64
 }
@@ -37,15 +51,6 @@ pub(crate) fn vec_memory_usage<T>(vec: &Vec<T>) -> u64 {
 fn weighted_sum(values: &[f32], weights: &[f32]) -> f32 {
     let f = |sum: f64, (&v, &w): (&f32, &f32)| sum + v as f64 * w as f64;
     values.iter().zip(weights).fold(0.0, f) as f32
-}
-
-#[inline]
-fn max(x: f32, y: f32) -> f32 {
-    if x > y {
-        x
-    } else {
-        y
-    }
 }
 
 /// Obtains the maximum absolute value of the given slice.
@@ -676,16 +681,13 @@ fn compute_best_cfv_recursive<T: Game>(
 
         // compute the counterfactual values of each action
         for_each_child(node, |action| {
-            let cfreach = row(&cfreach_actions, action, row_size);
-            if cfreach.iter().any(|&x| x > 0.0) {
-                compute_best_cfv_recursive(
-                    row_mut(cfv_actions.lock().spare_capacity_mut(), action, num_hands),
-                    game,
-                    &node.play(action),
-                    player,
-                    cfreach,
-                );
-            }
+            compute_best_cfv_recursive(
+                row_mut(cfv_actions.lock().spare_capacity_mut(), action, num_hands),
+                game,
+                &node.play(action),
+                player,
+                row(&cfreach_actions, action, row_size),
+            );
         });
 
         // sum up the counterfactual values
