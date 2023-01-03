@@ -1030,11 +1030,8 @@ impl PostFlopGame {
         self.calculate_removed_line_info_recursive(node_to_remove, &mut info);
 
         // STEP 2
-        println!("Actions(before): {:?}", node.actions);
         node.actions.remove(index);
         node.children.remove(index);
-
-        println!("Actions(after): {:?}", node.actions);
 
         node.actions.shrink_to_fit();
         node.children.shrink_to_fit();
@@ -3231,7 +3228,112 @@ mod tests {
         assert!(game.available_actions() == &[Action::Check, Action::Bet(30)]);
         assert!(game.node().children.len() == 2);
 
-        finalize(&mut game);
+        solve(&mut game, 10, 0.05, true);
+    }
+
+    #[test]
+    fn remove_lines2() {
+        use crate::bet_size::BetSizeCandidates;
+        let card_config = CardConfig {
+            range: ["TT+,AKo,AQs+".parse().unwrap(), "AA".parse().unwrap()],
+            flop: flop_from_str("2c6dTh").unwrap(),
+            ..Default::default()
+        };
+
+        // Simple tree: force checks until river, where OOP can bet 1/2 pot
+        let tree_config = TreeConfig {
+            starting_pot: 60,
+            effective_stack: 970,
+            turn_bet_sizes: [
+                BetSizeCandidates::try_from(("50%", "")).unwrap(),
+                Default::default(),
+            ],
+            river_bet_sizes: [
+                BetSizeCandidates::try_from(("50%", "")).unwrap(),
+                Default::default(),
+            ],
+            ..Default::default()
+        };
+
+        let action_tree = ActionTree::new(tree_config).unwrap();
+        let mut game = PostFlopGame::with_config(card_config, action_tree).unwrap();
+
+        let lines = vec![
+            vec![
+                Action::Check,
+                Action::Check,
+                Action::Chance(2),
+                Action::Bet(30),
+            ],
+            vec![
+                Action::Check,
+                Action::Check,
+                Action::Chance(2),
+                Action::Check,
+                Action::Check,
+                Action::Chance(3),
+                Action::Bet(30),
+            ],
+        ];
+
+        let res = game.remove_lines(&lines);
+        println!("result: {res:?}");
+        assert!(res.is_ok());
+
+        game.allocate_memory(false);
+
+        // Check that the turn line is removed
+        game.back_to_root();
+        game.play(game.node().actions.binary_search(&Action::Check).unwrap());
+        game.play(game.node().actions.binary_search(&Action::Check).unwrap());
+        game.play(2);
+        assert!(game.available_actions() == &[Action::Check]);
+        assert!(game.node().children.len() == 1);
+
+        // Check that other turn lines are correct
+        game.back_to_root();
+        game.play(game.node().actions.binary_search(&Action::Check).unwrap());
+        game.play(game.node().actions.binary_search(&Action::Check).unwrap());
+        game.play(3);
+        assert!(game.available_actions() == &[Action::Check, Action::Bet(30)]);
+        assert!(game.node().children.len() == 2);
+
+        // Check that the river line is removed
+        game.back_to_root();
+        game.play(game.node().actions.binary_search(&Action::Check).unwrap());
+        game.play(game.node().actions.binary_search(&Action::Check).unwrap());
+        game.play(2);
+        game.play(game.node().actions.binary_search(&Action::Check).unwrap());
+        game.play(game.node().actions.binary_search(&Action::Check).unwrap());
+        game.play(3);
+
+        assert!(game.available_actions() == &[Action::Check]);
+        assert!(game.node().children.len() == 1);
+
+        // Check that other river lines are correct
+        game.back_to_root();
+        game.play(game.node().actions.binary_search(&Action::Check).unwrap());
+        game.play(game.node().actions.binary_search(&Action::Check).unwrap());
+        game.play(2);
+        game.play(game.node().actions.binary_search(&Action::Check).unwrap());
+        game.play(game.node().actions.binary_search(&Action::Check).unwrap());
+        game.play(4);
+
+        assert!(game.available_actions() == &[Action::Check, Action::Bet(30)]);
+        assert!(game.node().children.len() == 2);
+
+        game.back_to_root();
+        game.play(game.node().actions.binary_search(&Action::Check).unwrap());
+        game.play(game.node().actions.binary_search(&Action::Check).unwrap());
+        game.play(3);
+        game.play(game.node().actions.binary_search(&Action::Check).unwrap());
+        game.play(game.node().actions.binary_search(&Action::Check).unwrap());
+        game.play(4);
+
+        assert!(game.available_actions() == &[Action::Check, Action::Bet(30)]);
+        assert!(game.node().children.len() == 2);
+
+        solve(&mut game, 10, 0.05, true);
     }
 
     #[test]
