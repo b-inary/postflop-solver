@@ -989,6 +989,10 @@ impl PostFlopGame {
         } else {
             self.reverse_push_actions(node, info);
         }
+
+        for action in node.actions() {
+            self.calculate_removed_line_info_recursive(&node.play(action), info);
+        }
     }
 
     /// Remove lines after building the PostFlopGame but before allocating memory.
@@ -1048,7 +1052,7 @@ impl PostFlopGame {
 
         // STEP 1
         let mut info = BuildTreeInfo {
-            memory_usage_nodes: mem::size_of::<PostFlopNode>() as u64,
+            memory_usage_nodes: (mem::size_of::<Action>() + mem::size_of::<PostFlopNode>()) as u64,
             num_storage_actions: self.num_private_hands(node.player as usize) as u64,
             num_storage_chances: 0,
         };
