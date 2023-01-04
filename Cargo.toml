@@ -10,7 +10,7 @@ license = "AGPL-3.0-or-later"
 
 [dependencies]
 bincode = { version = "2.0.0-rc.2", optional = true }
-once_cell = "1.16.0"
+once_cell = "1.17.0"
 rayon = { version = "1.6.1", optional = true }
 regex = "1.7.0"
 
