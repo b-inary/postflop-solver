@@ -966,6 +966,112 @@ impl PostFlopGame {
         info.num_storage_actions += node.num_elements as u64;
     }
 
+    /// Reverse the action of push_chances
+    fn reverse_push_chances(&self, node: &PostFlopNode, info: &mut BuildTreeInfo) {
+        info.memory_usage_nodes += vec_memory_usage(&node.actions);
+        info.memory_usage_nodes += vec_memory_usage(&node.children);
+        info.num_storage_chances += (node.num_elements + node.num_elements_aux) as u64;
+    }
+
+    fn reverse_push_actions(&self, node: &PostFlopNode, info: &mut BuildTreeInfo) {
+        info.memory_usage_nodes += vec_memory_usage(&node.actions);
+        info.memory_usage_nodes += vec_memory_usage(&node.children);
+        info.num_storage_actions += node.num_elements as u64;
+    }
+
+    fn calculate_removed_line_info_recursive(&self, node: &PostFlopNode, info: &mut BuildTreeInfo) {
+        if node.is_terminal() {
+            return;
+        }
+
+        if node.is_chance() {
+            self.reverse_push_chances(node, info);
+        } else {
+            self.reverse_push_actions(node, info);
+        }
+    }
+
+    /// Remove lines after building the PostFlopGame but before allocating memory.
+    /// This allows the removal of chance-specific lines (e.g., remove overbets on
+    /// board-pairing turns) which we cannot do while building an action tree.
+    pub fn remove_lines(&mut self, lines: &[Vec<Action>]) -> Result<(), String> {
+        if self.state <= State::Uninitialized {
+            return Err("Game is not successfully initialized".to_string());
+        } else if self.state >= State::MemoryAllocated {
+            return Err("Game has already been allocated".to_string());
+        }
+
+        for line in lines.iter() {
+            let mut root = self.root();
+            let info = self.remove_line_recursive(&mut root, line)?;
+            self.misc_memory_usage -= info.memory_usage_nodes;
+            self.num_storage_actions -= info.num_storage_actions;
+            self.num_storage_chances -= info.num_storage_chances;
+        }
+        Ok(())
+    }
+
+    /// Recursively remove a line from a PostFlopGame tree
+    fn remove_line_recursive(
+        &self,
+        node: &mut PostFlopNode,
+        line: &[Action],
+    ) -> Result<BuildTreeInfo, String> {
+        if line.is_empty() {
+            return Err("Empty line".to_string());
+        }
+
+        if node.is_terminal() {
+            return Err("Unexpected terminal node".to_string());
+        }
+
+        let action = line[0];
+        let search_result = node.actions.binary_search(&action);
+        if search_result.is_err() {
+            return Err(format!("Action does not exist: {action:?}"));
+        }
+
+        let index = search_result.unwrap();
+        if line.len() > 1 {
+            let result = self.remove_line_recursive(&mut node.children[index].lock(), &line[1..]);
+            return result;
+        }
+
+        if node.is_chance() {
+            return Err("Cannot remove a line ending in a chance action".to_string());
+        }
+
+        // Remove action/children at index. To do this we must
+        // 1. compute the storage space required by the tree rooted at action index
+        // 2. remove children and actions
+        // 3. re-define num_elements and num_elements_aux after we remove children and actions
+
+        // STEP 1
+        let mut info = BuildTreeInfo {
+            memory_usage_nodes: mem::size_of::<PostFlopNode>() as u64,
+            num_storage_actions: self.num_private_hands(node.player as usize) as u64,
+            num_storage_chances: 0,
+        };
+
+        let node_to_remove = &*node.children.get(index).unwrap().lock();
+        self.calculate_removed_line_info_recursive(node_to_remove, &mut info);
+
+        // STEP 2
+        if node.num_actions() <= 1 {
+            return Err("Cannot remove the last action from a node".to_string());
+        }
+        node.actions.remove(index);
+        node.children.remove(index);
+
+        node.actions.shrink_to_fit();
+        node.children.shrink_to_fit();
+
+        // STEP 3
+        node.num_elements = node.num_actions() * self.num_private_hands(node.player as usize);
+
+        Ok(info)
+    }
+
     /// Allocates memory recursively.
     fn allocate_memory_recursive(
         &self,
@@ -3090,6 +3196,110 @@ mod tests {
         let action_tree = ActionTree::new(tree_config).unwrap();
         let game = PostFlopGame::with_config(card_config, action_tree);
         assert!(game.is_err());
+    }
+
+    #[test]
+    fn remove_lines() {
+        use crate::bet_size::BetSizeCandidates;
+        let card_config = CardConfig {
+            range: ["TT+,AKo,AQs+".parse().unwrap(), "AA".parse().unwrap()],
+            flop: flop_from_str("2c6dTh").unwrap(),
+            ..Default::default()
+        };
+
+        // Simple tree: force checks on flop, and only use 1/2 pot bets on turn and river
+        let tree_config = TreeConfig {
+            starting_pot: 60,
+            effective_stack: 970,
+            turn_bet_sizes: [
+                BetSizeCandidates::try_from(("50%", "")).unwrap(),
+                Default::default(),
+            ],
+            river_bet_sizes: [
+                BetSizeCandidates::try_from(("50%", "")).unwrap(),
+                Default::default(),
+            ],
+            ..Default::default()
+        };
+
+        let action_tree = ActionTree::new(tree_config).unwrap();
+        let mut game = PostFlopGame::with_config(card_config, action_tree).unwrap();
+
+        let lines = vec![
+            vec![
+                Action::Check,
+                Action::Check,
+                Action::Chance(2),
+                Action::Bet(30),
+            ],
+            vec![
+                Action::Check,
+                Action::Check,
+                Action::Chance(2),
+                Action::Check,
+                Action::Check,
+                Action::Chance(3),
+                Action::Bet(30),
+            ],
+        ];
+
+        let res = game.remove_lines(&lines);
+        assert!(res.is_ok());
+
+        game.allocate_memory(false);
+
+        // Check that the turn line is removed
+        game.back_to_root();
+        game.play(game.node().actions.binary_search(&Action::Check).unwrap());
+        game.play(game.node().actions.binary_search(&Action::Check).unwrap());
+        game.play(2);
+        assert!(game.available_actions() == &[Action::Check]);
+        assert!(game.node().children.len() == 1);
+
+        // Check that other turn lines are correct
+        game.back_to_root();
+        game.play(game.node().actions.binary_search(&Action::Check).unwrap());
+        game.play(game.node().actions.binary_search(&Action::Check).unwrap());
+        game.play(3);
+        assert!(game.available_actions() == &[Action::Check, Action::Bet(30)]);
+        assert!(game.node().children.len() == 2);
+
+        // Check that the river line is removed
+        game.back_to_root();
+        game.play(game.node().actions.binary_search(&Action::Check).unwrap());
+        game.play(game.node().actions.binary_search(&Action::Check).unwrap());
+        game.play(2);
+        game.play(game.node().actions.binary_search(&Action::Check).unwrap());
+        game.play(game.node().actions.binary_search(&Action::Check).unwrap());
+        game.play(3);
+
+        assert!(game.available_actions() == &[Action::Check]);
+        assert!(game.node().children.len() == 1);
+
+        // Check that other river lines are correct
+        game.back_to_root();
+        game.play(game.node().actions.binary_search(&Action::Check).unwrap());
+        game.play(game.node().actions.binary_search(&Action::Check).unwrap());
+        game.play(2);
+        game.play(game.node().actions.binary_search(&Action::Check).unwrap());
+        game.play(game.node().actions.binary_search(&Action::Check).unwrap());
+        game.play(4);
+
+        assert!(game.available_actions() == &[Action::Check, Action::Bet(30)]);
+        assert!(game.node().children.len() == 2);
+
+        game.back_to_root();
+        game.play(game.node().actions.binary_search(&Action::Check).unwrap());
+        game.play(game.node().actions.binary_search(&Action::Check).unwrap());
+        game.play(3);
+        game.play(game.node().actions.binary_search(&Action::Check).unwrap());
+        game.play(game.node().actions.binary_search(&Action::Check).unwrap());
+        game.play(4);
+
+        assert!(game.available_actions() == &[Action::Check, Action::Bet(30)]);
+        assert!(game.node().children.len() == 2);
+
+        solve(&mut game, 10, 0.05, false);
     }
 
     #[test]
