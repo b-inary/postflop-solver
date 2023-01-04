@@ -544,6 +544,28 @@ impl PostFlopGame {
         (uncompressed, compressed)
     }
 
+    /// Remove lines after building the `PostFlopGame` but before allocating memory.
+    ///
+    /// This allows the removal of chance-specific lines (e.g., remove overbets on board-pairing
+    /// turns) which we cannot do while building an action tree.
+    pub fn remove_lines(&mut self, lines: &[Vec<Action>]) -> Result<(), String> {
+        if self.state <= State::Uninitialized {
+            return Err("Game is not successfully initialized".to_string());
+        } else if self.state >= State::MemoryAllocated {
+            return Err("Game has already been allocated".to_string());
+        }
+
+        for line in lines {
+            let mut root = self.root();
+            let info = self.remove_line_recursive(&mut root, line)?;
+            self.misc_memory_usage -= info.memory_usage_nodes;
+            self.num_storage_actions -= info.num_storage_actions;
+            self.num_storage_chances -= info.num_storage_chances;
+        }
+
+        Ok(())
+    }
+
     /// Allocates the memory.
     pub fn allocate_memory(&mut self, enable_compression: bool) {
         if self.state <= State::Uninitialized {
@@ -995,26 +1017,6 @@ impl PostFlopGame {
         }
     }
 
-    /// Remove lines after building the PostFlopGame but before allocating memory.
-    /// This allows the removal of chance-specific lines (e.g., remove overbets on
-    /// board-pairing turns) which we cannot do while building an action tree.
-    pub fn remove_lines(&mut self, lines: &[Vec<Action>]) -> Result<(), String> {
-        if self.state <= State::Uninitialized {
-            return Err("Game is not successfully initialized".to_string());
-        } else if self.state >= State::MemoryAllocated {
-            return Err("Game has already been allocated".to_string());
-        }
-
-        for line in lines.iter() {
-            let mut root = self.root();
-            let info = self.remove_line_recursive(&mut root, line)?;
-            self.misc_memory_usage -= info.memory_usage_nodes;
-            self.num_storage_actions -= info.num_storage_actions;
-            self.num_storage_chances -= info.num_storage_chances;
-        }
-        Ok(())
-    }
-
     /// Recursively remove a line from a PostFlopGame tree
     fn remove_line_recursive(
         &self,
@@ -1045,10 +1047,14 @@ impl PostFlopGame {
             return Err("Cannot remove a line ending in a chance action".to_string());
         }
 
+        if node.num_actions() <= 1 {
+            return Err("Cannot remove the last action from a node".to_string());
+        }
+
         // Remove action/children at index. To do this we must
         // 1. compute the storage space required by the tree rooted at action index
         // 2. remove children and actions
-        // 3. re-define num_elements and num_elements_aux after we remove children and actions
+        // 3. re-define `num_elements` after we remove children and actions
 
         // STEP 1
         let mut info = BuildTreeInfo {
@@ -1057,13 +1063,10 @@ impl PostFlopGame {
             num_storage_chances: 0,
         };
 
-        let node_to_remove = &*node.children.get(index).unwrap().lock();
-        self.calculate_removed_line_info_recursive(node_to_remove, &mut info);
+        let node_to_remove = node.play(index);
+        self.calculate_removed_line_info_recursive(&node_to_remove, &mut info);
 
         // STEP 2
-        if node.num_actions() <= 1 {
-            return Err("Cannot remove the last action from a node".to_string());
-        }
         node.actions.remove(index);
         node.children.remove(index);
 
@@ -1071,7 +1074,7 @@ impl PostFlopGame {
         node.children.shrink_to_fit();
 
         // STEP 3
-        node.num_elements = node.num_actions() * self.num_private_hands(node.player as usize);
+        node.num_elements -= self.num_private_hands(node.player as usize);
 
         Ok(info)
     }
@@ -3257,16 +3260,16 @@ mod tests {
         game.play(game.node().actions.binary_search(&Action::Check).unwrap());
         game.play(game.node().actions.binary_search(&Action::Check).unwrap());
         game.play(2);
-        assert!(game.available_actions() == &[Action::Check]);
-        assert!(game.node().children.len() == 1);
+        assert_eq!(game.available_actions(), &[Action::Check]);
+        assert_eq!(game.node().children.len(), 1);
 
         // Check that other turn lines are correct
         game.back_to_root();
         game.play(game.node().actions.binary_search(&Action::Check).unwrap());
         game.play(game.node().actions.binary_search(&Action::Check).unwrap());
         game.play(3);
-        assert!(game.available_actions() == &[Action::Check, Action::Bet(30)]);
-        assert!(game.node().children.len() == 2);
+        assert_eq!(game.available_actions(), &[Action::Check, Action::Bet(30)]);
+        assert_eq!(game.node().children.len(), 2);
 
         // Check that the river line is removed
         game.back_to_root();
@@ -3277,8 +3280,8 @@ mod tests {
         game.play(game.node().actions.binary_search(&Action::Check).unwrap());
         game.play(3);
 
-        assert!(game.available_actions() == &[Action::Check]);
-        assert!(game.node().children.len() == 1);
+        assert_eq!(game.available_actions(), &[Action::Check]);
+        assert_eq!(game.node().children.len(), 1);
 
         // Check that other river lines are correct
         game.back_to_root();
@@ -3289,8 +3292,8 @@ mod tests {
         game.play(game.node().actions.binary_search(&Action::Check).unwrap());
         game.play(4);
 
-        assert!(game.available_actions() == &[Action::Check, Action::Bet(30)]);
-        assert!(game.node().children.len() == 2);
+        assert_eq!(game.available_actions(), &[Action::Check, Action::Bet(30)]);
+        assert_eq!(game.node().children.len(), 2);
 
         game.back_to_root();
         game.play(game.node().actions.binary_search(&Action::Check).unwrap());
@@ -3300,8 +3303,8 @@ mod tests {
         game.play(game.node().actions.binary_search(&Action::Check).unwrap());
         game.play(4);
 
-        assert!(game.available_actions() == &[Action::Check, Action::Bet(30)]);
-        assert!(game.node().children.len() == 2);
+        assert_eq!(game.available_actions(), &[Action::Check, Action::Bet(30)]);
+        assert_eq!(game.node().children.len(), 2);
 
         solve(&mut game, 10, 0.05, false);
     }
