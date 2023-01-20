@@ -1335,7 +1335,7 @@ impl PostFlopGame {
             panic!("Terminal node is not allowed");
         }
 
-        // chande node
+        // chance node
         if self.is_chance_node() {
             let is_turn = self.turn == NOT_DEALT;
             let actual_card = if action == usize::MAX {
@@ -1700,12 +1700,9 @@ impl PostFlopGame {
         let mut ret = if self.node().is_terminal() {
             normalizer = self.num_combinations as f32;
             let mut ret = Vec::with_capacity(num_hands);
-            self.evaluate(
-                ret.spare_capacity_mut(),
-                self.node(),
-                player,
-                &self.weights[player ^ 1],
-            );
+            let mut cfreach = self.weights[player ^ 1].clone();
+            self.apply_swap(&mut cfreach, player ^ 1, true);
+            self.evaluate(ret.spare_capacity_mut(), self.node(), player, &cfreach);
             unsafe { ret.set_len(num_hands) };
             ret
         } else if self.node().is_chance() {
@@ -1730,7 +1727,7 @@ impl PostFlopGame {
             .enumerate()
             .for_each(|(action, row)| {
                 let is_fold = have_actions && self.node().actions[action] == Action::Fold;
-                self.apply_swap(row, player);
+                self.apply_swap(row, player, false);
                 row.iter_mut()
                     .zip(self.weights[player].iter())
                     .zip(self.normalized_weights[player].iter())
@@ -1781,7 +1778,7 @@ impl PostFlopGame {
         };
 
         ret.chunks_exact_mut(num_hands).for_each(|chunk| {
-            self.apply_swap(chunk, player);
+            self.apply_swap(chunk, player, false);
         });
 
         ret
@@ -1811,7 +1808,7 @@ impl PostFlopGame {
 
     /// Applies the swap.
     #[inline]
-    fn apply_swap(&self, slice: &mut [f32], player: usize) {
+    fn apply_swap(&self, slice: &mut [f32], player: usize, reverse: bool) {
         let turn_swap = self
             .turn_swap
             .map(|suit| &self.turn_isomorphism_swap[suit as usize][player]);
@@ -1820,7 +1817,13 @@ impl PostFlopGame {
             .river_swap
             .map(|(turn, suit)| &self.river_isomorphism_swap[turn as usize][suit as usize][player]);
 
-        for swap in [turn_swap, river_swap].into_iter().flatten() {
+        let swaps = if !reverse {
+            [turn_swap, river_swap]
+        } else {
+            [river_swap, turn_swap]
+        };
+
+        for swap in swaps.into_iter().flatten() {
             for &(i, j) in swap {
                 slice.swap(i as usize, j as usize);
             }
@@ -1829,7 +1832,8 @@ impl PostFlopGame {
 
     /// Internal method for calculating the equity.
     fn equity_internal(&self, result: &mut [f64], player: usize, turn: u8, river: u8, amount: f64) {
-        let hand_strength = &self.hand_strength[card_pair_index(turn, river)];
+        let pair_index = card_pair_index(turn, river);
+        let hand_strength = &self.hand_strength[pair_index];
         let player_strength = &hand_strength[player];
         let opponent_strength = &hand_strength[player ^ 1];
 
