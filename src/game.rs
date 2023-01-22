@@ -1400,6 +1400,18 @@ impl PostFlopGame {
                 panic!("Invalid action");
             }
 
+            // update the weights
+            for player in 0..2 {
+                self.weights[player]
+                    .iter_mut()
+                    .zip(self.private_cards[player].iter())
+                    .for_each(|(w, &(c1, c2))| {
+                        if c1 == actual_card || c2 == actual_card {
+                            *w = 0.0;
+                        }
+                    });
+            }
+
             // cache the counterfactual values
             let player_ip = PLAYER_IP as usize;
             let num_hands = self.num_private_hands(player_ip);
@@ -1548,7 +1560,7 @@ impl PostFlopGame {
 
     /// Returns the weights of each private hand of the given player.
     ///
-    /// If a hand overlaps with the board, an undefined value is returned.
+    /// If a hand overlaps with the board, returns 0.0.
     #[inline]
     pub fn weights(&self, player: usize) -> &[f32] {
         if self.state <= State::Uninitialized {
