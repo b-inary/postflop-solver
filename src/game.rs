@@ -48,7 +48,7 @@ pub struct PostFlopGame {
     num_combinations: f64,
     initial_weights: [Vec<f32>; 2],
     private_cards: [Vec<(u8, u8)>; 2],
-    same_hand_index: [Vec<Option<u16>>; 2],
+    same_hand_index: [Vec<u16>; 2],
     valid_indices_flop: [Vec<u16>; 2],
     valid_indices_turn: Vec<[Vec<u16>; 2]>,
     valid_indices_river: Vec<[Vec<u16>; 2]>,
@@ -239,13 +239,17 @@ impl Game for PostFlopGame {
             for &i in player_indices {
                 unsafe {
                     let (c1, c2) = *player_cards.get_unchecked(i as usize);
+                    let same_i = *same_hand_index.get_unchecked(i as usize);
+                    let cfreach_same = if same_i == u16::MAX {
+                        0.0
+                    } else {
+                        *cfreach.get_unchecked(same_i as usize) as f64
+                    };
                     // inclusion-exclusion principle
                     let cfreach = cfreach_sum
                         - *cfreach_minus.get_unchecked(c1 as usize)
                         - *cfreach_minus.get_unchecked(c2 as usize)
-                        + same_hand_index
-                            .get_unchecked(i as usize)
-                            .map_or(0.0, |j| *cfreach.get_unchecked(j as usize) as f64);
+                        + cfreach_same;
                     *result.get_unchecked_mut(i as usize) = (payoff * cfreach) as f32;
                 }
             }
@@ -395,11 +399,12 @@ impl Game for PostFlopGame {
                     let cfreach_tie = cfreach_sum_tie
                         - cfreach_minus_tie.get_unchecked(c1 as usize)
                         - cfreach_minus_tie.get_unchecked(c2 as usize);
-                    let cfreach_same = same_hand_index
-                        .get_unchecked(index as usize)
-                        .map_or(0.0, |opponent_index| {
-                            *cfreach.get_unchecked(opponent_index as usize) as f64
-                        });
+                    let same_i = *same_hand_index.get_unchecked(index as usize);
+                    let cfreach_same = if same_i == u16::MAX {
+                        0.0
+                    } else {
+                        *cfreach.get_unchecked(same_i as usize) as f64
+                    };
 
                     let cfvalue = amount_win * cfreach_win
                         + amount_tie * (cfreach_tie - cfreach_win + cfreach_same)
@@ -746,7 +751,11 @@ impl PostFlopGame {
             let player_hands = &self.private_cards[player];
             let opponent_hands = &self.private_cards[player ^ 1];
             for hand in player_hands {
-                same_hand_index.push(opponent_hands.binary_search(hand).ok().map(|i| i as u16));
+                same_hand_index.push(
+                    opponent_hands
+                        .binary_search(hand)
+                        .map_or(u16::MAX, |i| i as u16),
+                );
             }
         }
 
@@ -1515,6 +1524,8 @@ impl PostFlopGame {
         let mut weight_sum_minus = [[0.0; 52]; 2];
 
         for player in 0..2 {
+            let weight_sum_player = &mut weight_sum[player];
+            let weight_sum_minus_player = &mut weight_sum_minus[player];
             self.private_cards[player]
                 .iter()
                 .zip(self.weights[player].iter())
@@ -1522,15 +1533,16 @@ impl PostFlopGame {
                     let mask: u64 = (1 << c1) | (1 << c2);
                     if mask & board_mask == 0 {
                         let w = w as f64;
-                        weight_sum[player] += w;
-                        weight_sum_minus[player][c1 as usize] += w;
-                        weight_sum_minus[player][c2 as usize] += w;
+                        *weight_sum_player += w;
+                        weight_sum_minus_player[c1 as usize] += w;
+                        weight_sum_minus_player[c2 as usize] += w;
                     }
                 });
         }
 
         for player in 0..2 {
             let player_cards = &self.private_cards[player];
+            let same_hand_index = &self.same_hand_index[player];
             let player_weights = &self.weights[player];
             let opponent_weights = &self.weights[player ^ 1];
             let opponent_weight_sum = weight_sum[player ^ 1];
@@ -1543,11 +1555,16 @@ impl PostFlopGame {
                     let (c1, c2) = player_cards[i];
                     let mask: u64 = (1 << c1) | (1 << c2);
                     if mask & board_mask == 0 {
+                        let same_i = same_hand_index[i];
+                        let opponent_weight_same = if same_i == u16::MAX {
+                            0.0
+                        } else {
+                            opponent_weights[same_i as usize] as f64
+                        };
                         let opponent_weight = opponent_weight_sum
                             - opponent_weight_sum_minus[c1 as usize]
                             - opponent_weight_sum_minus[c2 as usize]
-                            + self.same_hand_index[player][i]
-                                .map_or(0.0, |j| opponent_weights[j as usize] as f64);
+                            + opponent_weight_same;
                         *w = player_weights[i] * opponent_weight as f32;
                     } else {
                         *w = 0.0;
