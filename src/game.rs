@@ -246,10 +246,9 @@ impl Game for PostFlopGame {
                         *cfreach.get_unchecked(same_i as usize) as f64
                     };
                     // inclusion-exclusion principle
-                    let cfreach = cfreach_sum
+                    let cfreach = cfreach_sum + cfreach_same
                         - *cfreach_minus.get_unchecked(c1 as usize)
-                        - *cfreach_minus.get_unchecked(c2 as usize)
-                        + cfreach_same;
+                        - *cfreach_minus.get_unchecked(c2 as usize);
                     *result.get_unchecked_mut(i as usize) = (payoff * cfreach) as f32;
                 }
             }
@@ -1561,10 +1560,9 @@ impl PostFlopGame {
                         } else {
                             opponent_weights[same_i as usize] as f64
                         };
-                        let opponent_weight = opponent_weight_sum
+                        let opponent_weight = opponent_weight_sum + opponent_weight_same
                             - opponent_weight_sum_minus[c1 as usize]
-                            - opponent_weight_sum_minus[c2 as usize]
-                            + opponent_weight_same;
+                            - opponent_weight_sum_minus[c2 as usize];
                         *w = player_weights[i] * opponent_weight as f32;
                     } else {
                         *w = 0.0;
