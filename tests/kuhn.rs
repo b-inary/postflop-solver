@@ -173,7 +173,7 @@ impl KuhnGame {
         node.strategy = vec![0.0; num_actions * NUM_PRIVATE_HANDS];
         node.storage = vec![0.0; num_actions * NUM_PRIVATE_HANDS];
 
-        for action in node.actions() {
+        for action in node.action_indices() {
             Self::allocate_memory_recursive(&mut node.play(action));
         }
     }

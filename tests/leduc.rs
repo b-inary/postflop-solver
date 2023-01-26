@@ -179,7 +179,7 @@ impl LeducGame {
 
         if node.is_chance() {
             Self::push_chance_actions(node);
-            for action in node.actions() {
+            for action in node.action_indices() {
                 Self::build_tree_recursive(&mut node.play(action), Action::Chance(action), [0, 0]);
             }
             return;
@@ -220,7 +220,7 @@ impl LeducGame {
             ));
         }
 
-        for action in node.actions() {
+        for action in node.action_indices() {
             Self::build_tree_recursive(
                 &mut node.play(action),
                 actions[action].0,
@@ -302,7 +302,7 @@ impl LeducGame {
             node.storage = vec![0.0; num_actions * NUM_PRIVATE_HANDS];
         }
 
-        for action in node.actions() {
+        for action in node.action_indices() {
             Self::allocate_memory_recursive(&mut node.play(action));
         }
     }

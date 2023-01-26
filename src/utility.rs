@@ -15,9 +15,9 @@ use rayon::prelude::*;
 #[inline]
 pub(crate) fn for_each_child<T: GameNode, OP: Fn(usize) + Sync + Send>(node: &T, op: OP) {
     if node.enable_parallelization() {
-        node.actions().into_par_iter().for_each(op);
+        node.action_indices().into_par_iter().for_each(op);
     } else {
-        node.actions().for_each(op);
+        node.action_indices().for_each(op);
     }
 }
 

@@ -1020,7 +1020,7 @@ impl PostFlopGame {
             self.reverse_push_actions(node, info);
         }
 
-        for action in node.actions() {
+        for action in node.action_indices() {
             self.calculate_removed_line_info_recursive(&node.play(action), info);
         }
     }
@@ -1140,7 +1140,7 @@ impl PostFlopGame {
             *action_counter += node.num_elements;
         }
 
-        for action in node.actions() {
+        for action in node.action_indices() {
             self.allocate_memory_recursive(&mut node.play(action), action_counter, chance_counter);
         }
     }

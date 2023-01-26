@@ -147,7 +147,7 @@ pub trait GameNode: Send + Sync {
 
     /// Returns the [`Range`] struct of actions.
     #[doc(hidden)]
-    fn actions(&self) -> Range<usize> {
+    fn action_indices(&self) -> Range<usize> {
         0..self.num_actions()
     }
 
