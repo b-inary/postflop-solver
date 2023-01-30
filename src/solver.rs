@@ -168,7 +168,7 @@ fn solve_recursive<T: Game>(
     if node.is_chance() {
         // update the reach probabilities
         #[cfg(feature = "custom-alloc")]
-        let mut cfreach_updated = Vec::with_capacity(cfreach.len());
+        let mut cfreach_updated = Vec::with_capacity_in(cfreach.len(), StackAlloc);
         #[cfg(not(feature = "custom-alloc"))]
         let mut cfreach_updated = Vec::with_capacity(cfreach.len());
         mul_slice_scalar_uninit(
