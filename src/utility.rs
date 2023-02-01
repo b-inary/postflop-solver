@@ -25,7 +25,7 @@ pub(crate) fn for_each_child<T: GameNode, OP: Fn(usize) + Sync + Send>(node: &T,
 #[cfg(not(feature = "rayon"))]
 #[inline]
 pub(crate) fn for_each_child<T: GameNode, OP: Fn(usize) + Sync + Send>(node: &T, op: OP) {
-    node.actions().for_each(op);
+    node.action_indices().for_each(op);
 }
 
 #[inline]
