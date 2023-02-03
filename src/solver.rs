@@ -370,7 +370,7 @@ fn regret_matching(regret: &[f32], num_actions: usize) -> Vec<f32, StackAlloc> {
     strategy
 }
 
-/// Computes the strategy by regret-mathcing algorithm.
+/// Computes the strategy by regret-matching algorithm.
 #[cfg(not(feature = "custom-alloc"))]
 #[inline]
 fn regret_matching(regret: &[f32], num_actions: usize) -> Vec<f32> {
@@ -394,7 +394,7 @@ fn regret_matching(regret: &[f32], num_actions: usize) -> Vec<f32> {
     strategy
 }
 
-/// Computes the strategy by regret-mathcing algorithm.
+/// Computes the strategy by regret-matching algorithm.
 #[cfg(feature = "custom-alloc")]
 #[inline]
 fn regret_matching_compressed(regret: &[i16], num_actions: usize) -> Vec<f32, StackAlloc> {
@@ -414,7 +414,7 @@ fn regret_matching_compressed(regret: &[i16], num_actions: usize) -> Vec<f32, St
     strategy
 }
 
-/// Computes the strategy by regret-mathcing algorithm.
+/// Computes the strategy by regret-matching algorithm.
 #[cfg(not(feature = "custom-alloc"))]
 #[inline]
 fn regret_matching_compressed(regret: &[i16], num_actions: usize) -> Vec<f32> {
