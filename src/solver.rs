@@ -239,13 +239,6 @@ fn solve_recursive<T: Game>(
     }
     // if the current player is `player`
     else if node.player() == player {
-        // compute the strategy by regret-maching algorithm
-        let mut strategy = if game.is_compression_enabled() {
-            regret_matching_compressed(node.regrets_compressed(), num_actions)
-        } else {
-            regret_matching(node.regrets(), num_actions)
-        };
-
         // compute the counterfactual values of each action
         for_each_child(node, |action| {
             solve_recursive(
@@ -257,6 +250,17 @@ fn solve_recursive<T: Game>(
                 params,
             );
         });
+
+        // compute the strategy by regret-maching algorithm
+        let mut strategy = if game.is_compression_enabled() {
+            regret_matching_compressed(node.regrets_compressed(), num_actions)
+        } else {
+            regret_matching(node.regrets(), num_actions)
+        };
+
+        // node-locking
+        let locking = game.locking_strategy(node);
+        apply_locking_strategy(&mut strategy, locking);
 
         // sum up the counterfactual values
         let mut cfv_actions = cfv_actions.lock();
@@ -272,6 +276,14 @@ fn solve_recursive<T: Game>(
             strategy.iter_mut().zip(&*cum_strategy).for_each(|(x, y)| {
                 *x += (*y as f32) * decoder;
             });
+
+            if !locking.is_empty() {
+                strategy.iter_mut().zip(locking).for_each(|(d, s)| {
+                    if s.is_sign_positive() {
+                        *d = 0.0;
+                    }
+                })
+            }
 
             let new_scale = encode_unsigned_slice(cum_strategy, &strategy);
             node.set_strategy_scale(new_scale);
@@ -289,6 +301,14 @@ fn solve_recursive<T: Game>(
             cfv_actions.chunks_exact_mut(num_hands).for_each(|row| {
                 sub_slice(row, result);
             });
+
+            if !locking.is_empty() {
+                cfv_actions.iter_mut().zip(locking).for_each(|(d, s)| {
+                    if s.is_sign_positive() {
+                        *d = 0.0;
+                    }
+                })
+            }
 
             let new_scale = encode_signed_slice(cum_regret, &cfv_actions);
             node.set_regret_scale(new_scale);
@@ -321,6 +341,10 @@ fn solve_recursive<T: Game>(
             regret_matching(node.regrets(), num_actions)
         };
 
+        // node-locking
+        let locking = game.locking_strategy(node);
+        apply_locking_strategy(&mut cfreach_actions, locking);
+
         // update the reach probabilities
         let row_size = cfreach.len();
         cfreach_actions.chunks_exact_mut(row_size).for_each(|row| {
@@ -346,7 +370,7 @@ fn solve_recursive<T: Game>(
     }
 }
 
-/// Computes the strategy by regret-mathcing algorithm.
+/// Computes the strategy by regret-matching algorithm.
 #[cfg(feature = "custom-alloc")]
 #[inline]
 fn regret_matching(regret: &[f32], num_actions: usize) -> Vec<f32, StackAlloc> {

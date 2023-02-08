@@ -64,6 +64,12 @@ pub trait Game: Send + Sync {
         unreachable!()
     }
 
+    /// Returns the locking strategy.
+    #[doc(hidden)]
+    fn locking_strategy(&self, _node: &Self::Node) -> &[f32] {
+        &[]
+    }
+
     /// Returns whether the instance is ready to be solved.
     #[doc(hidden)]
     fn is_ready(&self) -> bool {
@@ -86,12 +92,6 @@ pub trait GameNode: Send + Sync {
     /// Returns whether the node is chance.
     #[doc(hidden)]
     fn is_chance(&self) -> bool;
-
-    /// Returns the option for storing counterfactual values for chance node.
-    #[doc(hidden)]
-    fn cfvalue_storage(&self, _player: usize) -> CfValueStorage {
-        CfValueStorage::None
-    }
 
     /// Returns the current player.
     #[doc(hidden)]
@@ -132,6 +132,12 @@ pub trait GameNode: Send + Sync {
     /// Returns the mutable reference to the counterfactual values.
     #[doc(hidden)]
     fn cfvalues_mut(&mut self) -> &mut [f32];
+
+    /// Returns the option for storing counterfactual values for chance node.
+    #[doc(hidden)]
+    fn cfvalue_storage(&self, _player: usize) -> CfValueStorage {
+        CfValueStorage::None
+    }
 
     /// Returns the buffer for counterfactual values.
     #[doc(hidden)]

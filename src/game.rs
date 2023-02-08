@@ -4,6 +4,7 @@ use crate::interface::*;
 use crate::mutex_like::*;
 use crate::sliceop::*;
 use crate::utility::*;
+use std::collections::BTreeMap;
 use std::mem::{self, MaybeUninit};
 use std::ptr;
 use std::slice;
@@ -73,12 +74,13 @@ pub struct PostFlopGame {
     storage1_compressed: MutexLike<Vec<u16>>,
     storage2_compressed: MutexLike<Vec<i16>>,
     storage_chance_compressed: MutexLike<Vec<i16>>,
+    locking_strategy: BTreeMap<usize, Vec<f32>>,
 
-    // result interactor
+    // result interpreter
     root_cfvalue_ip: Vec<f32>,
     history: Vec<usize>,
     is_normalized_weight_cached: bool,
-    node_ptr: *const PostFlopNode,
+    node_ptr: *mut PostFlopNode,
     turn: u8,
     river: u8,
     chance_factor: i32,
@@ -100,6 +102,7 @@ pub struct PostFlopNode {
     player: u8,
     turn: u8,
     river: u8,
+    is_locked: bool,
     amount: i32,
     actions: Vec<Action>,
     children: Vec<MutexLike<PostFlopNode>>,
@@ -452,6 +455,16 @@ impl Game for PostFlopGame {
     }
 
     #[inline]
+    fn locking_strategy(&self, node: &Self::Node) -> &[f32] {
+        if !node.is_locked {
+            &[]
+        } else {
+            let offset = self.node_offset(node);
+            self.locking_strategy.get(&offset).unwrap()
+        }
+    }
+
+    #[inline]
     fn is_ready(&self) -> bool {
         self.state == State::MemoryAllocated
     }
@@ -738,7 +751,7 @@ impl PostFlopGame {
     fn init(&mut self) {
         self.init_card_fields();
         self.init_root();
-        self.init_interactor();
+        self.init_interpreter();
     }
 
     /// Initializes fields related to cards.
@@ -798,9 +811,9 @@ impl PostFlopGame {
         self.clear_storage();
     }
 
-    /// Initializes the interactor.
+    /// Initializes the interpreter.
     #[inline]
-    fn init_interactor(&mut self) {
+    fn init_interpreter(&mut self) {
         let vecs = [
             vec![0.0; self.num_private_hands(0)],
             vec![0.0; self.num_private_hands(1)],
@@ -816,7 +829,7 @@ impl PostFlopGame {
 
     /// Clears the storage.
     #[inline]
-    fn clear_storage(&mut self) {
+    fn clear_storage(&self) {
         self.storage1.lock().clear();
         self.storage2.lock().clear();
         self.storage_chance.lock().clear();
@@ -1154,7 +1167,7 @@ impl PostFlopGame {
 
         self.history.clear();
         self.is_normalized_weight_cached = false;
-        self.node_ptr = &*self.root();
+        self.node_ptr = &mut *self.root();
         self.turn = self.card_config.turn;
         self.river = self.card_config.river;
         self.chance_factor = 1;
@@ -1435,7 +1448,7 @@ impl PostFlopGame {
             self.cfvalues_cache[player_ip].copy_from_slice(&vec);
 
             // update the state
-            self.node_ptr = &*self.node().play(action_index);
+            self.node_ptr = &mut *self.node().play(action_index);
             if is_turn {
                 self.turn = actual_card;
                 self.chance_factor *= 45;
@@ -1486,7 +1499,7 @@ impl PostFlopGame {
             }
 
             // update the node
-            self.node_ptr = &*self.node().play(action);
+            self.node_ptr = &mut *self.node().play(action);
         }
 
         self.history.push(action);
@@ -1804,6 +1817,9 @@ impl PostFlopGame {
             normalized_strategy(self.node().strategy(), num_actions)
         };
 
+        let locking = self.locking_strategy(self.node());
+        apply_locking_strategy(&mut ret, locking);
+
         ret.chunks_exact_mut(num_hands).for_each(|chunk| {
             self.apply_swap(chunk, player, false);
         });
@@ -1817,10 +1833,120 @@ impl PostFlopGame {
         self.total_bet_amount
     }
 
+    /// Locks the strategy of the current node.
+    ///
+    /// TODO: document
+    pub fn lock_current_strategy(&mut self, strategy: &[f32]) {
+        if self.state < State::MemoryAllocated {
+            panic!("Memory is not allocated");
+        }
+
+        if self.is_terminal_node() {
+            panic!("Terminal node is not allowed");
+        }
+
+        if self.is_chance_node() {
+            panic!("Chance node is not allowed");
+        }
+
+        let player = self.current_player();
+        let num_actions = self.node().num_actions();
+        let num_hands = self.num_private_hands(player);
+
+        let mut locking = vec![-1.0; num_actions * num_hands];
+
+        for hand in 0..num_hands {
+            let mut sum = 0.0;
+            let mut lock = false;
+
+            for action in 0..num_actions {
+                let freq = strategy[action * num_hands + hand];
+                if freq > 0.0 {
+                    sum += freq as f64;
+                    lock = true;
+                }
+            }
+
+            if lock {
+                for action in 0..num_actions {
+                    let freq = strategy[action * num_hands + hand].max(0.0) as f64;
+                    locking[action * num_hands + hand] = (freq / sum) as f32;
+                }
+            }
+        }
+
+        let offset = self.node_offset(self.node());
+        self.locking_strategy.insert(offset, locking);
+        self.node_mut().is_locked = true;
+    }
+
+    /// Unlocks the strategy of the current node.
+    #[inline]
+    pub fn unlock_current_strategy(&mut self) {
+        if self.state < State::MemoryAllocated {
+            panic!("Memory is not allocated");
+        }
+
+        if self.is_terminal_node() {
+            panic!("Terminal node is not allowed");
+        }
+
+        if self.is_chance_node() {
+            panic!("Chance node is not allowed");
+        }
+
+        if !self.node().is_locked {
+            return;
+        }
+
+        let offset = self.node_offset(self.node());
+        self.locking_strategy.remove(&offset);
+        self.node_mut().is_locked = false;
+    }
+
+    /// Returns the locking strategy of the current node.
+    ///
+    /// TODO: document
+    #[inline]
+    pub fn current_locking_strategy(&self) -> Option<&Vec<f32>> {
+        if self.state < State::MemoryAllocated {
+            panic!("Memory is not allocated");
+        }
+
+        if self.is_terminal_node() {
+            panic!("Terminal node is not allowed");
+        }
+
+        if self.is_chance_node() {
+            panic!("Chance node is not allowed");
+        }
+
+        let offset = self.node_offset(self.node());
+        self.locking_strategy.get(&offset)
+    }
+
     /// Returns the reference to the current node.
     #[inline]
     fn node(&self) -> &PostFlopNode {
         unsafe { &*self.node_ptr }
+    }
+
+    /// Returns the mutable reference to the current node.
+    #[inline]
+    fn node_mut(&mut self) -> &mut PostFlopNode {
+        unsafe { &mut *self.node_ptr }
+    }
+
+    /// Returns the offset of the given node.
+    #[inline]
+    fn node_offset(&self, node: &PostFlopNode) -> usize {
+        if self.is_compression_enabled {
+            let base = self.storage1_compressed.lock().as_ptr();
+            unsafe { (node.storage1 as *const u16).offset_from(base) as usize }
+        } else {
+            let base = self.storage1.lock().as_ptr();
+            unsafe { (node.storage1 as *const f32).offset_from(base) as usize }
+        }
     }
 
     /// Returns a card list of isomorphic chances.
@@ -2214,10 +2340,11 @@ impl Default for PostFlopGame {
             storage1_compressed: MutexLike::default(),
             storage2_compressed: MutexLike::default(),
             storage_chance_compressed: MutexLike::default(),
+            locking_strategy: BTreeMap::default(),
             root_cfvalue_ip: Vec::default(),
             history: Vec::default(),
             is_normalized_weight_cached: false,
-            node_ptr: ptr::null(),
+            node_ptr: ptr::null_mut(),
             turn: NOT_DEALT,
             river: NOT_DEALT,
             chance_factor: 0,
@@ -2240,6 +2367,7 @@ impl Default for PostFlopNode {
             player: PLAYER_OOP,
             turn: NOT_DEALT,
             river: NOT_DEALT,
+            is_locked: false,
             amount: 0,
             actions: Vec::new(),
             children: Vec::new(),
@@ -2266,7 +2394,7 @@ impl Default for CardConfig {
 }
 
 #[cfg(feature = "bincode")]
-static VERSION_STR: &str = "2022-12-11";
+static VERSION_STR: &str = "2023-02-08";
 
 #[cfg(feature = "bincode")]
 thread_local! {
@@ -2324,6 +2452,7 @@ impl Encode for PostFlopGame {
         self.storage1_compressed.encode(encoder)?;
         self.storage2_compressed.encode(encoder)?;
         self.storage_chance_compressed.encode(encoder)?;
+        self.locking_strategy.encode(encoder)?;
         self.root_cfvalue_ip.encode(encoder)?;
         self.history.encode(encoder)?;
         self.is_normalized_weight_cached.encode(encoder)?;
@@ -2369,6 +2498,7 @@ impl Encode for PostFlopNode {
         self.player.encode(encoder)?;
         self.turn.encode(encoder)?;
         self.river.encode(encoder)?;
+        self.is_locked.encode(encoder)?;
         self.amount.encode(encoder)?;
         self.actions.encode(encoder)?;
         self.scale1.encode(encoder)?;
@@ -2429,6 +2559,7 @@ impl Decode for PostFlopGame {
             storage1_compressed: Decode::decode(decoder)?,
             storage2_compressed: Decode::decode(decoder)?,
             storage_chance_compressed: Decode::decode(decoder)?,
+            locking_strategy: Decode::decode(decoder)?,
             ..Default::default()
         };
 
@@ -2472,7 +2603,7 @@ impl Decode for PostFlopGame {
         if game.state >= State::TreeBuilt {
             game.init_hands();
             game.init_card_fields();
-            game.init_interactor();
+            game.init_interpreter();
 
             game.root_cfvalue_ip.copy_from_slice(&root_cfvalue_ip);
             game.apply_history(&history);
@@ -2493,6 +2624,7 @@ impl Decode for PostFlopNode {
             player: Decode::decode(decoder)?,
             turn: Decode::decode(decoder)?,
             river: Decode::decode(decoder)?,
+            is_locked: Decode::decode(decoder)?,
             amount: Decode::decode(decoder)?,
             actions: Decode::decode(decoder)?,
             scale1: Decode::decode(decoder)?,
@@ -3401,6 +3533,109 @@ mod tests {
         check(&[0, 0, 7, 0, 0, 9], Some(3), None);
         check(&[0, 0, 7, 0, 0, 10], Some(3), None);
         check(&[0, 0, 7, 0, 0, 11], Some(3), None);
+    }
+
+    #[test]
+    fn node_locking() {
+        let card_config = CardConfig {
+            range: ["AsAh,QsQh".parse().unwrap(), "KsKh".parse().unwrap()],
+            flop: flop_from_str("2s3h4d").unwrap(),
+            turn: card_from_str("6c").unwrap(),
+            river: card_from_str("7c").unwrap(),
+        };
+
+        let tree_config = TreeConfig {
+            initial_state: BoardState::River,
+            starting_pot: 20,
+            effective_stack: 10,
+            river_bet_sizes: [("a", "").try_into().unwrap(), ("a", "").try_into().unwrap()],
+            ..Default::default()
+        };
+
+        let action_tree = ActionTree::new(tree_config).unwrap();
+        let mut game = PostFlopGame::with_config(card_config, action_tree).unwrap();
+
+        game.allocate_memory(false);
+        game.play(1); // all-in
+        game.lock_current_strategy(&[0.25, 0.75]); // 25% fold, 75% call
+        game.back_to_root();
+
+        solve(&mut game, 1000, 0.0, false);
+        game.cache_normalized_weights();
+
+        let ev_oop = game.expected_values(0);
+        let ev_ip = game.expected_values(1);
+        assert!((ev_oop[0] - 0.0).abs() < 1e-2);
+        assert!((ev_oop[1] - 27.5).abs() < 5e-2);
+        assert!((ev_ip[0] - 6.25).abs() < 1e-2);
+
+        let strategy_oop = game.strategy();
+        assert!((strategy_oop[0] - 1.0).abs() < 1e-3); // QQ Check
+        assert!((strategy_oop[1] - 0.0).abs() < 1e-3); // AA Check
+        assert!((strategy_oop[2] - 0.0).abs() < 1e-3); // QQ Bet
+        assert!((strategy_oop[3] - 1.0).abs() < 1e-3); // AA Bet
+
+        game.allocate_memory(false);
+        game.play(1); // all-in
+        game.lock_current_strategy(&[0.5, 0.5]); // 50% fold, 50% call
+        game.back_to_root();
+
+        solve(&mut game, 1000, 0.0, false);
+        game.cache_normalized_weights();
+
+        let ev_oop = game.expected_values(0);
+        let ev_ip = game.expected_values(1);
+        assert!((ev_oop[0] - 5.0).abs() < 1e-2);
+        assert!((ev_oop[1] - 25.0).abs() < 5e-2);
+        assert!((ev_ip[0] - 5.0).abs() < 1e-2);
+
+        let strategy_oop = game.strategy();
+        assert!((strategy_oop[0] - 0.0).abs() < 1e-3); // QQ Check
+        assert!((strategy_oop[1] - 0.0).abs() < 1e-3); // AA Check
+        assert!((strategy_oop[2] - 1.0).abs() < 1e-3); // QQ Bet
+        assert!((strategy_oop[3] - 1.0).abs() < 1e-3); // AA Bet
+    }
+
+    #[test]
+    fn node_locking_partial() {
+        let card_config = CardConfig {
+            range: ["AsAh,QsQh,JsJh".parse().unwrap(), "KsKh".parse().unwrap()],
+            flop: flop_from_str("2s3h4d").unwrap(),
+            turn: card_from_str("6c").unwrap(),
+            river: card_from_str("7c").unwrap(),
+        };
+
+        let tree_config = TreeConfig {
+            initial_state: BoardState::River,
+            starting_pot: 10,
+            effective_stack: 10,
+            river_bet_sizes: [("a", "").try_into().unwrap(), ("a", "").try_into().unwrap()],
+            ..Default::default()
+        };
+
+        let action_tree = ActionTree::new(tree_config).unwrap();
+        let mut game = PostFlopGame::with_config(card_config, action_tree).unwrap();
+
+        game.allocate_memory(false);
+        game.lock_current_strategy(&[0.8, 0.0, 0.0, 0.2, 0.0, 0.0]); // JJ -> 80% check, 20% all-in
+
+        solve(&mut game, 1000, 0.0, false);
+        game.cache_normalized_weights();
+
+        let ev_oop = game.expected_values(0);
+        let ev_ip = game.expected_values(1);
+        assert!((ev_oop[0] - 0.0).abs() < 1e-2);
+        assert!((ev_oop[1] - 0.0).abs() < 1e-2);
+        assert!((ev_oop[2] - 15.0).abs() < 5e-2);
+        assert!((ev_ip[0] - 5.0).abs() < 1e-2);
+
+        let strategy_oop = game.strategy();
+        assert!((strategy_oop[0] - 0.8).abs() < 1e-3); // JJ Check
+        assert!((strategy_oop[1] - 0.7).abs() < 1e-3); // QQ Check
+        assert!((strategy_oop[2] - 0.0).abs() < 1e-3); // AA Check
+        assert!((strategy_oop[3] - 0.2).abs() < 1e-3); // JJ Bet
+        assert!((strategy_oop[4] - 0.3).abs() < 1e-3); // QQ Bet
+        assert!((strategy_oop[5] - 1.0).abs() < 1e-3); // AA Bet
     }
 
     #[test]

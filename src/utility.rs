@@ -445,20 +445,6 @@ fn compute_cfvalue_recursive<T: Game>(
     }
     // player node
     else if node.player() == player {
-        // obtain the strategy
-        #[cfg(feature = "custom-alloc")]
-        let strategy = if game.is_compression_enabled() {
-            normalized_strategy_compressed_custom_alloc(node.strategy_compressed(), num_actions)
-        } else {
-            normalized_strategy_custom_alloc(node.strategy(), num_actions)
-        };
-        #[cfg(not(feature = "custom-alloc"))]
-        let strategy = if game.is_compression_enabled() {
-            normalized_strategy_compressed(node.strategy_compressed(), num_actions)
-        } else {
-            normalized_strategy(node.strategy(), num_actions)
-        };
-
         // compute the counterfactual values of each action
         for_each_child(node, |action| {
             compute_cfvalue_recursive(
@@ -470,6 +456,24 @@ fn compute_cfvalue_recursive<T: Game>(
                 save_cfvalues,
             );
         });
+
+        // obtain the strategy
+        #[cfg(feature = "custom-alloc")]
+        let mut strategy = if game.is_compression_enabled() {
+            normalized_strategy_compressed_custom_alloc(node.strategy_compressed(), num_actions)
+        } else {
+            normalized_strategy_custom_alloc(node.strategy(), num_actions)
+        };
+        #[cfg(not(feature = "custom-alloc"))]
+        let mut strategy = if game.is_compression_enabled() {
+            normalized_strategy_compressed(node.strategy_compressed(), num_actions)
+        } else {
+            normalized_strategy(node.strategy(), num_actions)
+        };
+
+        // node-locking
+        let locking = game.locking_strategy(node);
+        apply_locking_strategy(&mut strategy, locking);
 
         // sum up the counterfactual values
         let mut cfv_actions = cfv_actions.lock();
@@ -511,6 +515,10 @@ fn compute_cfvalue_recursive<T: Game>(
         } else {
             normalized_strategy(node.strategy(), num_actions)
         };
+
+        // node-locking
+        let locking = game.locking_strategy(node);
+        apply_locking_strategy(&mut cfreach_actions, locking);
 
         // update the reach probabilities
         let row_size = cfreach.len();
@@ -652,10 +660,17 @@ fn compute_best_cfv_recursive<T: Game>(
             )
         });
 
-        // compute element-wise maximum (take the best response)
+        let locking = game.locking_strategy(node);
         let mut cfv_actions = cfv_actions.lock();
         unsafe { cfv_actions.set_len(num_actions * num_hands) };
-        max_slices_uninit(result, &cfv_actions);
+
+        if locking.is_empty() {
+            // compute element-wise maximum (take the best response)
+            max_slices_uninit(result, &cfv_actions);
+        } else {
+            // when the node is locked
+            max_fma_slices_uninit(result, &cfv_actions, locking);
+        }
     }
     // opponent node
     else {
@@ -672,6 +687,10 @@ fn compute_best_cfv_recursive<T: Game>(
         } else {
             normalized_strategy(node.strategy(), num_actions)
         };
+
+        // node-locking
+        let locking = game.locking_strategy(node);
+        apply_locking_strategy(&mut cfreach_actions, locking);
 
         // update the reach probabilities
         let row_size = cfreach.len();
@@ -793,4 +812,15 @@ pub(crate) fn normalized_strategy_compressed(strategy: &[u16], num_actions: usiz
     });
 
     normalized
+}
+
+#[inline]
+pub(crate) fn apply_locking_strategy(dst: &mut [f32], locking: &[f32]) {
+    if !locking.is_empty() {
+        dst.iter_mut().zip(locking).for_each(|(d, s)| {
+            if s.is_sign_positive() {
+                *d = *s;
+            }
+        });
+    }
 }

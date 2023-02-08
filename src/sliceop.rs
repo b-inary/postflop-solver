@@ -114,6 +114,40 @@ pub(crate) fn max_slices_uninit<'a>(dst: &'a mut [MaybeUninit<f32>], src: &[f32]
 }
 
 #[inline]
+pub(crate) fn max_fma_slices_uninit<'a>(
+    dst: &'a mut [MaybeUninit<f32>],
+    src1: &[f32],
+    src2: &[f32],
+) -> &'a mut [f32] {
+    let len = dst.len();
+    dst.iter_mut()
+        .zip(src1.iter().zip(src2))
+        .for_each(|(d, (s1, s2))| {
+            d.write(if s2.is_sign_positive() {
+                *s1 * *s2
+            } else {
+                *s1
+            });
+        });
+    let dst = unsafe { &mut *(dst as *mut _ as *mut [f32]) };
+    src1[len..]
+        .chunks_exact(len)
+        .zip(src2[len..].chunks_exact(len))
+        .for_each(|(s1, s2)| {
+            dst.iter_mut()
+                .zip(s1.iter().zip(s2))
+                .for_each(|(d, (s1, s2))| {
+                    if s2.is_sign_positive() {
+                        *d += *s1 * *s2;
+                    } else {
+                        *d = max(*d, *s1);
+                    }
+                });
+        });
+    dst
+}
+
+#[inline]
 pub(crate) fn row<T>(slice: &[T], index: usize, row_size: usize) -> &[T] {
     &slice[index * row_size..(index + 1) * row_size]
 }
