@@ -1710,8 +1710,8 @@ impl PostFlopGame {
     /// Returns the expected values of each action of each private hand of the given player.
     ///
     /// If the given player is the current player, the return value is a vector of the length of
-    /// `#(actions) * #(private hands)`. The expected value of `i`-th action with `j`-th private
-    /// hand is stored in the `i * #(private hands) + j`-th element.
+    /// `#(actions) * #(private hands)`. The expected value of the `i`-th action with the `j`-th
+    /// private hand is stored in the `i * #(private hands) + j`-th element.
     ///
     /// Otherwise, this method is the same as the [`expected_values`] method, so the return vector
     /// is the length of `#(private hands)`.
@@ -1787,7 +1787,7 @@ impl PostFlopGame {
     /// Returns the strategy of the current player.
     ///
     /// The return value is a vector of the length of `#(actions) * #(private hands)`.
-    /// The probability of `i`-th action with `j`-th private hand is stored in the
+    /// The probability of the `i`-th action with the `j`-th private hand is stored in the
     /// `i * #(private hands) + j`-th element.
     ///
     /// If a hand overlaps with the board, an undefined value is returned.
@@ -1835,7 +1835,15 @@ impl PostFlopGame {
 
     /// Locks the strategy of the current node.
     ///
-    /// TODO: document
+    /// The `strategy` argument must be a slice of the length of `#(actions) * #(private hands)`.
+    ///
+    /// - A negative value is treated as a zero.
+    /// - If the `i * #(private hands) + j`-th element of the `strategy` is positive for some `i`,
+    ///   the `j`-th private hand will be locked. The probability for each action will be normalized
+    ///   so that their sum is 1.0.
+    /// - If the `i * #(private hands) + j`-th element of the `strategy` is not positive for all
+    ///   `i`, the `j`-th private hand will not be locked. That is, the solver can adjust the
+    ///   strategy of the `j`-th private hand.
     pub fn lock_current_strategy(&mut self, strategy: &[f32]) {
         if self.state < State::MemoryAllocated {
             panic!("Memory is not allocated");
@@ -1852,6 +1860,10 @@ impl PostFlopGame {
         let player = self.current_player();
         let num_actions = self.node().num_actions();
         let num_hands = self.num_private_hands(player);
+
+        if strategy.len() != num_actions * num_hands {
+            panic!("Invalid strategy length");
+        }
 
         let mut locking = vec![-1.0; num_actions * num_hands];
 
@@ -1906,7 +1918,13 @@ impl PostFlopGame {
 
     /// Returns the locking strategy of the current node.
     ///
-    /// TODO: document
+    /// If the current node is not locked, `None` is returned.
+    ///
+    /// Otherwise, returns a reference to the vector of the length of
+    /// `#(actions) * #(private hands)`.
+    /// The probability of the `i`-th action with the `j`-th private hand is stored in the
+    /// `i * #(private hands) + j`-th element.
+    /// If the `j`-th private hand is not locked, returns `-1.0` for all `i`.
     #[inline]
     pub fn current_locking_strategy(&self) -> Option<&Vec<f32>> {
         if self.state < State::MemoryAllocated {
@@ -3570,10 +3588,10 @@ mod tests {
         assert!((ev_ip[0] - 6.25).abs() < 1e-2);
 
         let strategy_oop = game.strategy();
-        assert!((strategy_oop[0] - 1.0).abs() < 1e-3); // QQ Check
-        assert!((strategy_oop[1] - 0.0).abs() < 1e-3); // AA Check
-        assert!((strategy_oop[2] - 0.0).abs() < 1e-3); // QQ Bet
-        assert!((strategy_oop[3] - 1.0).abs() < 1e-3); // AA Bet
+        assert!((strategy_oop[0] - 1.0).abs() < 1e-3); // QQ check
+        assert!((strategy_oop[1] - 0.0).abs() < 1e-3); // AA check
+        assert!((strategy_oop[2] - 0.0).abs() < 1e-3); // QQ bet
+        assert!((strategy_oop[3] - 1.0).abs() < 1e-3); // AA bet
 
         game.allocate_memory(false);
         game.play(1); // all-in
@@ -3590,10 +3608,10 @@ mod tests {
         assert!((ev_ip[0] - 5.0).abs() < 1e-2);
 
         let strategy_oop = game.strategy();
-        assert!((strategy_oop[0] - 0.0).abs() < 1e-3); // QQ Check
-        assert!((strategy_oop[1] - 0.0).abs() < 1e-3); // AA Check
-        assert!((strategy_oop[2] - 1.0).abs() < 1e-3); // QQ Bet
-        assert!((strategy_oop[3] - 1.0).abs() < 1e-3); // AA Bet
+        assert!((strategy_oop[0] - 0.0).abs() < 1e-3); // QQ check
+        assert!((strategy_oop[1] - 0.0).abs() < 1e-3); // AA check
+        assert!((strategy_oop[2] - 1.0).abs() < 1e-3); // QQ bet
+        assert!((strategy_oop[3] - 1.0).abs() < 1e-3); // AA bet
     }
 
     #[test]
@@ -3630,12 +3648,12 @@ mod tests {
         assert!((ev_ip[0] - 5.0).abs() < 1e-2);
 
         let strategy_oop = game.strategy();
-        assert!((strategy_oop[0] - 0.8).abs() < 1e-3); // JJ Check
-        assert!((strategy_oop[1] - 0.7).abs() < 1e-3); // QQ Check
-        assert!((strategy_oop[2] - 0.0).abs() < 1e-3); // AA Check
-        assert!((strategy_oop[3] - 0.2).abs() < 1e-3); // JJ Bet
-        assert!((strategy_oop[4] - 0.3).abs() < 1e-3); // QQ Bet
-        assert!((strategy_oop[5] - 1.0).abs() < 1e-3); // AA Bet
+        assert!((strategy_oop[0] - 0.8).abs() < 1e-3); // JJ check
+        assert!((strategy_oop[1] - 0.7).abs() < 1e-3); // QQ check
+        assert!((strategy_oop[2] - 0.0).abs() < 1e-3); // AA check
+        assert!((strategy_oop[3] - 0.2).abs() < 1e-3); // JJ bet
+        assert!((strategy_oop[4] - 0.3).abs() < 1e-3); // QQ bet
+        assert!((strategy_oop[5] - 1.0).abs() < 1e-3); // AA bet
     }
 
     #[test]
