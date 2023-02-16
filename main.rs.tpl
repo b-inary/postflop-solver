@@ -105,6 +105,15 @@ fn main() {
     let actions = game.available_actions();
     assert_eq!(format!("{:?}", actions), "[Fold, Call, Raise(300)]");
 
+    // confirm that IP does not fold the nut straight
+    let ip_cards = game.private_cards(1);
+    let strategy = game.strategy();
+    assert_eq!(ip_cards.len(), 250);
+    assert_eq!(strategy.len(), 750);
+    assert_eq!(hole_to_string(ip_cards[206]).unwrap(), "KsJs");
+    assert_eq!(strategy[206] + strategy[456] + strategy[706], 1.0);
+    assert_eq!(strategy[206], 0.0);
+
     // play `Call`
     game.play(1);
 
