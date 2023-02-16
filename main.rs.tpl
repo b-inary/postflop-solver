@@ -39,8 +39,10 @@ fn main() {
 
     // obtain the private hands
     let oop_hands = game.private_cards(0);
-    assert_eq!(card_to_string(oop_hands[0].0).unwrap(), "4c");
-    assert_eq!(card_to_string(oop_hands[0].1).unwrap(), "5c");
+    assert_eq!(
+        holes_to_string(&oop_hands[..10]).unwrap(),
+        "5c4c,Ac4c,5d4d,Ad4d,5h4h,Ah4h,5s4s,As4s,6c5c,7c5c"
+    );
 
     // check memory usage
     let (mem_usage, mem_usage_compressed) = game.memory_usage();
