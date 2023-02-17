@@ -224,8 +224,8 @@ pub fn hole_to_string(hole: (u8, u8)) -> Result<String, String> {
 /// ```
 /// use postflop_solver::holes_to_string;
 ///
-/// assert_eq!(hole_to_string([(5, 0), (51, 10)]), Ok("3d2c,As4h".to_string()));
-/// assert!(hole_to_string([(53, 52)]).is_err());
+/// assert_eq!(holes_to_string(&[(5, 0), (51, 10)]), Ok("3d2c,As4h".to_string()));
+/// assert!(holes_to_string(&[(53, 52)]).is_err());
 /// ```
 #[inline]
 pub fn holes_to_string(holes: &[(u8, u8)]) -> Result<String, String> {
