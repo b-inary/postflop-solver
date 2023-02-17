@@ -215,7 +215,11 @@ pub fn card_to_string(card: u8) -> Result<String, String> {
 pub fn hole_to_string(hole: (u8, u8)) -> Result<String, String> {
     let max_card = std::cmp::max(hole.0, hole.1);
     let min_card = std::cmp::min(hole.0, hole.1);
-    Ok(format!("{}{}", card_to_string(max_card)?, card_to_string(min_card)?))
+    Ok(format!(
+        "{}{}",
+        card_to_string(max_card)?,
+        card_to_string(min_card)?
+    ))
 }
 
 /// Attempts to convert a list of hole cards into a range string.

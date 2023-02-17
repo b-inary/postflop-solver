@@ -96,7 +96,10 @@ fn main() {
 
     // get available actions (OOP)
     let actions = game.available_actions();
-    assert_eq!(format!("{:?}", actions), "[Check, Bet(120), Bet(216), AllIn(900)]");
+    assert_eq!(
+        format!("{:?}", actions),
+        "[Check, Bet(120), Bet(216), AllIn(900)]"
+    );
 
     // play `Bet(120)`
     game.play(1);
