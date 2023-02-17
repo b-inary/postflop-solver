@@ -28,9 +28,13 @@ postflop-solver = { git = "https://github.com/b-inary/postflop-solver" }
 
 - Examples
 
-You can find use cases in [main.rs.tpl](main.rs.tpl)
+You can find use cases in [examples/main.rs.tpl](examples/main.rs.tpl).
 
-This script can be run from the [Makefile](Makefile).
+This script can be run with:
+```
+cp examples/main.rs.tpl exemples/main.rs
+cargo run --release --example main
+```
 
 ## Implementation details
 
