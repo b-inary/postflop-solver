@@ -1887,6 +1887,10 @@ impl PostFlopGame {
             }
         }
 
+        locking.chunks_exact_mut(num_hands).for_each(|chunk| {
+            self.apply_swap(chunk, player, true);
+        });
+
         let offset = self.node_offset(self.node());
         self.locking_strategy.insert(offset, locking);
         self.node_mut().is_locked = true;
@@ -1926,7 +1930,7 @@ impl PostFlopGame {
     /// `i * #(private hands) + j`-th element.
     /// If the `j`-th private hand is not locked, returns `-1.0` for all `i`.
     #[inline]
-    pub fn current_locking_strategy(&self) -> Option<&Vec<f32>> {
+    pub fn current_locking_strategy(&self) -> Option<Vec<f32>> {
         if self.state < State::MemoryAllocated {
             panic!("Memory is not allocated");
         }
@@ -1940,7 +1944,15 @@ impl PostFlopGame {
         }
 
         let offset = self.node_offset(self.node());
-        self.locking_strategy.get(&offset)
+        self.locking_strategy.get(&offset).map(|s| {
+            let mut ret = s.clone();
+            let player = self.current_player();
+            let num_hands = self.num_private_hands(player);
+            ret.chunks_exact_mut(num_hands).for_each(|chunk| {
+                self.apply_swap(chunk, player, false);
+            });
+            ret
+        })
     }
 
     /// Returns the reference to the current node.
@@ -3654,6 +3666,67 @@ mod tests {
         assert!((strategy_oop[3] - 0.2).abs() < 1e-3); // JJ bet
         assert!((strategy_oop[4] - 0.3).abs() < 1e-3); // QQ bet
         assert!((strategy_oop[5] - 1.0).abs() < 1e-3); // AA bet
+    }
+
+    #[test]
+    fn node_locking_isomorphism() {
+        let card_config = CardConfig {
+            range: ["AKs".parse().unwrap(), "AKs".parse().unwrap()],
+            flop: flop_from_str("2c3c4c").unwrap(),
+            ..Default::default()
+        };
+
+        let tree_config = TreeConfig {
+            starting_pot: 10,
+            effective_stack: 10,
+            river_bet_sizes: [("a", "").try_into().unwrap(), Default::default()],
+            ..Default::default()
+        };
+
+        let action_tree = ActionTree::new(tree_config).unwrap();
+        let mut game = PostFlopGame::with_config(card_config, action_tree).unwrap();
+
+        game.allocate_memory(false);
+        game.apply_history(&[0, 0, 15, 0, 0, 14]); // Turn: Spades, River: Hearts
+        game.lock_current_strategy(&[0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0]); // AhKh -> check
+
+        finalize(&mut game);
+
+        game.apply_history(&[0, 0, 13, 0, 0, 14]);
+        assert_eq!(
+            game.strategy(),
+            vec![0.5, 0.5, 1.0, 0.5, 0.5, 0.5, 0.0, 0.5]
+        );
+
+        game.apply_history(&[0, 0, 13, 0, 0, 15]);
+        assert_eq!(
+            game.strategy(),
+            vec![0.5, 0.5, 0.5, 1.0, 0.5, 0.5, 0.5, 0.0]
+        );
+
+        game.apply_history(&[0, 0, 14, 0, 0, 13]);
+        assert_eq!(
+            game.strategy(),
+            vec![0.5, 1.0, 0.5, 0.5, 0.5, 0.0, 0.5, 0.5]
+        );
+
+        game.apply_history(&[0, 0, 14, 0, 0, 15]);
+        assert_eq!(
+            game.strategy(),
+            vec![0.5, 0.5, 0.5, 1.0, 0.5, 0.5, 0.5, 0.0]
+        );
+
+        game.apply_history(&[0, 0, 15, 0, 0, 13]);
+        assert_eq!(
+            game.strategy(),
+            vec![0.5, 1.0, 0.5, 0.5, 0.5, 0.0, 0.5, 0.5]
+        );
+
+        game.apply_history(&[0, 0, 15, 0, 0, 14]);
+        assert_eq!(
+            game.strategy(),
+            vec![0.5, 0.5, 1.0, 0.5, 0.5, 0.5, 0.0, 0.5]
+        );
     }
 
     #[test]
