@@ -47,6 +47,18 @@ pub(crate) fn vec_memory_usage<T>(vec: &Vec<T>) -> u64 {
     vec.capacity() as u64 * mem::size_of::<T>() as u64
 }
 
+/// Computes the average with given weights.
+#[inline]
+pub fn compute_average(slice: &[f32], weights: &[f32]) -> f32 {
+    let mut weight_sum = 0.0;
+    let mut value_sum = 0.0;
+    for (&v, &w) in slice.iter().zip(weights.iter()) {
+        weight_sum += w as f64;
+        value_sum += v as f64 * w as f64;
+    }
+    (value_sum / weight_sum) as f32
+}
+
 #[inline]
 fn weighted_sum(values: &[f32], weights: &[f32]) -> f32 {
     let f = |sum: f64, (&v, &w): (&f32, &f32)| sum + v as f64 * w as f64;

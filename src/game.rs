@@ -2,20 +2,17 @@ use crate::action_tree::*;
 use crate::card::*;
 use crate::interface::*;
 use crate::mutex_like::*;
+use crate::node::*;
 use crate::sliceop::*;
 use crate::utility::*;
 use std::collections::BTreeMap;
 use std::mem::{self, MaybeUninit};
 use std::ptr;
-use std::slice;
 
 #[cfg(feature = "bincode")]
-use {
-    bincode::{
-        error::{DecodeError, EncodeError},
-        Decode, Encode,
-    },
-    std::cell::Cell,
+use bincode::{
+    error::{DecodeError, EncodeError},
+    Decode, Encode,
 };
 
 #[cfg(feature = "custom-alloc")]
@@ -97,26 +94,6 @@ pub struct PostFlopGame {
 unsafe impl Send for PostFlopGame {}
 unsafe impl Sync for PostFlopGame {}
 
-/// A struct representing a node in a postflop game tree.
-pub struct PostFlopNode {
-    player: u8,
-    turn: u8,
-    river: u8,
-    is_locked: bool,
-    amount: i32,
-    actions: Vec<Action>,
-    children: Vec<MutexLike<PostFlopNode>>,
-    storage1: *mut u8,
-    storage2: *mut u8,
-    scale1: f32,
-    scale2: f32,
-    num_elements: usize,
-    num_elements_aux: usize,
-}
-
-unsafe impl Send for PostFlopNode {}
-unsafe impl Sync for PostFlopNode {}
-
 struct BuildTreeInfo {
     memory_usage_nodes: u64,
     num_storage_actions: u64,
@@ -145,18 +122,6 @@ fn decode_signed_slice(slice: &[i16], scale: f32) -> Vec<f32> {
         result.set_len(slice.len());
     }
     result
-}
-
-/// Computes the average with given weights.
-#[inline]
-pub fn compute_average(slice: &[f32], weights: &[f32]) -> f32 {
-    let mut weight_sum = 0.0;
-    let mut product_sum = 0.0;
-    for (&v, &w) in slice.iter().zip(weights.iter()) {
-        weight_sum += w as f64;
-        product_sum += v as f64 * w as f64;
-    }
-    (product_sum / weight_sum) as f32
 }
 
 impl Game for PostFlopGame {
@@ -2142,199 +2107,6 @@ impl PostFlopGame {
     }
 }
 
-impl GameNode for PostFlopNode {
-    #[inline]
-    fn is_terminal(&self) -> bool {
-        self.player & PLAYER_TERMINAL_FLAG != 0
-    }
-
-    #[inline]
-    fn is_chance(&self) -> bool {
-        self.player & PLAYER_CHANCE_FLAG != 0
-    }
-
-    #[inline]
-    fn cfvalue_storage(&self, player: usize) -> CfValueStorage {
-        let last_player = self.player & (PLAYER_MASK | PLAYER_CHANCE);
-        let allin_flag = self.player & PLAYER_ALLIN_FLAG != 0;
-        let pair = match (allin_flag, last_player) {
-            (false, PLAYER_OOP) => [CfValueStorage::None, CfValueStorage::All],
-            (false, PLAYER_IP) => [CfValueStorage::Sum, CfValueStorage::All],
-            (true, PLAYER_OOP) => [CfValueStorage::None, CfValueStorage::Sum],
-            (true, PLAYER_IP) => [CfValueStorage::Sum, CfValueStorage::None],
-            _ => [CfValueStorage::None, CfValueStorage::None],
-        };
-        pair[player]
-    }
-
-    #[inline]
-    fn player(&self) -> usize {
-        self.player as usize
-    }
-
-    #[inline]
-    fn num_actions(&self) -> usize {
-        self.actions.len()
-    }
-
-    #[inline]
-    fn chance_factor(&self) -> f32 {
-        [1.0 / 45.0, 1.0 / 44.0][(self.turn != NOT_DEALT) as usize]
-    }
-
-    #[inline]
-    fn play(&self, action: usize) -> MutexGuardLike<Self> {
-        self.children[action].lock()
-    }
-
-    #[inline]
-    fn strategy(&self) -> &[f32] {
-        unsafe { slice::from_raw_parts(self.storage1 as *const f32, self.num_elements) }
-    }
-
-    #[inline]
-    fn strategy_mut(&mut self) -> &mut [f32] {
-        unsafe { slice::from_raw_parts_mut(self.storage1 as *mut f32, self.num_elements) }
-    }
-
-    #[inline]
-    fn regrets(&self) -> &[f32] {
-        unsafe { slice::from_raw_parts(self.storage2 as *const f32, self.num_elements) }
-    }
-
-    #[inline]
-    fn regrets_mut(&mut self) -> &mut [f32] {
-        unsafe { slice::from_raw_parts_mut(self.storage2 as *mut f32, self.num_elements) }
-    }
-
-    #[inline]
-    fn cfvalues(&self) -> &[f32] {
-        unsafe { slice::from_raw_parts(self.storage2 as *const f32, self.num_elements) }
-    }
-
-    #[inline]
-    fn cfvalues_mut(&mut self) -> &mut [f32] {
-        unsafe { slice::from_raw_parts_mut(self.storage2 as *mut f32, self.num_elements) }
-    }
-
-    #[inline]
-    fn cfvalues_chance(&self, player: usize) -> &[f32] {
-        let (base, len) = match player {
-            0 => (self.storage1, self.num_elements),
-            _ => (self.storage2, self.num_elements_aux),
-        };
-        unsafe { slice::from_raw_parts(base as *const f32, len) }
-    }
-
-    #[inline]
-    fn cfvalues_chance_mut(&mut self, player: usize) -> &mut [f32] {
-        let (base, len) = match player {
-            0 => (self.storage1, self.num_elements),
-            _ => (self.storage2, self.num_elements_aux),
-        };
-        unsafe { slice::from_raw_parts_mut(base as *mut f32, len) }
-    }
-
-    #[inline]
-    fn strategy_compressed(&self) -> &[u16] {
-        unsafe { slice::from_raw_parts(self.storage1 as *const u16, self.num_elements) }
-    }
-
-    #[inline]
-    fn strategy_compressed_mut(&mut self) -> &mut [u16] {
-        unsafe { slice::from_raw_parts_mut(self.storage1 as *mut u16, self.num_elements) }
-    }
-
-    #[inline]
-    fn regrets_compressed(&self) -> &[i16] {
-        unsafe { slice::from_raw_parts(self.storage2 as *const i16, self.num_elements) }
-    }
-
-    #[inline]
-    fn regrets_compressed_mut(&mut self) -> &mut [i16] {
-        unsafe { slice::from_raw_parts_mut(self.storage2 as *mut i16, self.num_elements) }
-    }
-
-    #[inline]
-    fn cfvalues_compressed(&self) -> &[i16] {
-        unsafe { slice::from_raw_parts(self.storage2 as *const i16, self.num_elements) }
-    }
-
-    #[inline]
-    fn cfvalues_compressed_mut(&mut self) -> &mut [i16] {
-        unsafe { slice::from_raw_parts_mut(self.storage2 as *mut i16, self.num_elements) }
-    }
-
-    #[inline]
-    fn cfvalues_chance_compressed(&self, player: usize) -> &[i16] {
-        let (base, len) = match player {
-            0 => (self.storage1, self.num_elements),
-            _ => (self.storage2, self.num_elements_aux),
-        };
-        unsafe { slice::from_raw_parts(base as *const i16, len) }
-    }
-
-    #[inline]
-    fn cfvalues_chance_compressed_mut(&mut self, player: usize) -> &mut [i16] {
-        let (base, len) = match player {
-            0 => (self.storage1, self.num_elements),
-            _ => (self.storage2, self.num_elements_aux),
-        };
-        unsafe { slice::from_raw_parts_mut(base as *mut i16, len) }
-    }
-
-    #[inline]
-    fn strategy_scale(&self) -> f32 {
-        self.scale1
-    }
-
-    #[inline]
-    fn set_strategy_scale(&mut self, scale: f32) {
-        self.scale1 = scale;
-    }
-
-    #[inline]
-    fn regret_scale(&self) -> f32 {
-        self.scale2
-    }
-
-    #[inline]
-    fn set_regret_scale(&mut self, scale: f32) {
-        self.scale2 = scale;
-    }
-
-    #[inline]
-    fn cfvalue_scale(&self) -> f32 {
-        self.scale2
-    }
-
-    #[inline]
-    fn set_cfvalue_scale(&mut self, scale: f32) {
-        self.scale2 = scale;
-    }
-
-    #[doc(hidden)]
-    fn cfvalue_chance_scale(&self, player: usize) -> f32 {
-        match player {
-            0 => self.scale1,
-            _ => self.scale2,
-        }
-    }
-
-    #[doc(hidden)]
-    fn set_cfvalue_chance_scale(&mut self, player: usize, scale: f32) {
-        match player {
-            0 => self.scale1 = scale,
-            _ => self.scale2 = scale,
-        }
-    }
-
-    #[inline]
-    fn enable_parallelization(&self) -> bool {
-        self.river == NOT_DEALT
-    }
-}
-
 impl Default for PostFlopGame {
     #[inline]
     fn default() -> Self {
@@ -2390,47 +2162,8 @@ impl Default for PostFlopGame {
     }
 }
 
-impl Default for PostFlopNode {
-    #[inline]
-    fn default() -> Self {
-        Self {
-            player: PLAYER_OOP,
-            turn: NOT_DEALT,
-            river: NOT_DEALT,
-            is_locked: false,
-            amount: 0,
-            actions: Vec::new(),
-            children: Vec::new(),
-            storage1: ptr::null_mut(),
-            storage2: ptr::null_mut(),
-            scale1: 0.0,
-            scale2: 0.0,
-            num_elements: 0,
-            num_elements_aux: 0,
-        }
-    }
-}
-
-impl Default for CardConfig {
-    #[inline]
-    fn default() -> Self {
-        Self {
-            range: Default::default(),
-            flop: [NOT_DEALT; 3],
-            turn: NOT_DEALT,
-            river: NOT_DEALT,
-        }
-    }
-}
-
 #[cfg(feature = "bincode")]
 static VERSION_STR: &str = "2023-02-08";
-
-#[cfg(feature = "bincode")]
-thread_local! {
-    static ACTION_BASE: Cell<(*mut u8, *mut u8)> = Cell::new((ptr::null_mut(), ptr::null_mut()));
-    static CHANCE_BASE: Cell<*mut u8> = Cell::new(ptr::null_mut());
-}
 
 #[cfg(feature = "bincode")]
 impl Encode for PostFlopGame {
@@ -2489,57 +2222,6 @@ impl Encode for PostFlopGame {
 
         // game tree
         self.root.encode(encoder)?;
-
-        Ok(())
-    }
-}
-
-#[cfg(feature = "bincode")]
-impl Encode for PostFlopNode {
-    fn encode<E: bincode::enc::Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
-        // compute pointer offset
-        let (offset, offset_aux) = if self.is_chance() {
-            CHANCE_BASE.with(|p| {
-                let base = p.get();
-                let ret = match self.storage1.is_null() {
-                    true => -1,
-                    false => unsafe { self.storage1.offset_from(base) },
-                };
-                let ret_aux = match self.storage2.is_null() {
-                    true => -1,
-                    false => unsafe { self.storage2.offset_from(base) },
-                };
-                (ret, ret_aux)
-            })
-        } else {
-            ACTION_BASE.with(|ps| {
-                let (base1, _) = ps.get();
-                match self.storage1.is_null() {
-                    true => (-1, -1),
-                    false => {
-                        let ret = unsafe { self.storage1.offset_from(base1) };
-                        (ret, -1)
-                    }
-                }
-            })
-        };
-
-        // contents
-        self.player.encode(encoder)?;
-        self.turn.encode(encoder)?;
-        self.river.encode(encoder)?;
-        self.is_locked.encode(encoder)?;
-        self.amount.encode(encoder)?;
-        self.actions.encode(encoder)?;
-        self.scale1.encode(encoder)?;
-        self.scale2.encode(encoder)?;
-        self.num_elements.encode(encoder)?;
-        self.num_elements_aux.encode(encoder)?;
-        offset.encode(encoder)?;
-        offset_aux.encode(encoder)?;
-
-        // children
-        self.children.encode(encoder)?;
 
         Ok(())
     }
@@ -2643,48 +2325,6 @@ impl Decode for PostFlopGame {
         }
 
         Ok(game)
-    }
-}
-
-#[cfg(feature = "bincode")]
-impl Decode for PostFlopNode {
-    fn decode<D: bincode::de::Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
-        // node instance
-        let mut node = Self {
-            player: Decode::decode(decoder)?,
-            turn: Decode::decode(decoder)?,
-            river: Decode::decode(decoder)?,
-            is_locked: Decode::decode(decoder)?,
-            amount: Decode::decode(decoder)?,
-            actions: Decode::decode(decoder)?,
-            scale1: Decode::decode(decoder)?,
-            scale2: Decode::decode(decoder)?,
-            num_elements: Decode::decode(decoder)?,
-            num_elements_aux: Decode::decode(decoder)?,
-            ..Default::default()
-        };
-
-        // pointers
-        let offset = isize::decode(decoder)?;
-        let offset_aux = isize::decode(decoder)?;
-        if node.is_chance() {
-            let base = CHANCE_BASE.with(|p| p.get());
-            if offset >= 0 {
-                node.storage1 = unsafe { base.offset(offset) };
-            }
-            if offset_aux >= 0 {
-                node.storage2 = unsafe { base.offset(offset_aux) };
-            }
-        } else if offset >= 0 {
-            let (base1, base2) = ACTION_BASE.with(|ps| ps.get());
-            node.storage1 = unsafe { base1.offset(offset) };
-            node.storage2 = unsafe { base2.offset(offset) };
-        }
-
-        // children
-        node.children = Decode::decode(decoder)?;
-
-        Ok(node)
     }
 }
 

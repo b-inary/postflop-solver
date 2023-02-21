@@ -5,6 +5,9 @@ use std::mem;
 #[cfg(feature = "bincode")]
 use bincode::{Decode, Encode};
 
+/// Constant representing that the card is not yet dealt.
+pub const NOT_DEALT: u8 = 0xff;
+
 /// A struct containing the card configuration.
 ///
 /// # Examples
@@ -37,8 +40,17 @@ pub struct CardConfig {
     pub river: u8,
 }
 
-/// Constant representing that the card is not yet dealt.
-pub const NOT_DEALT: u8 = 0xff;
+impl Default for CardConfig {
+    #[inline]
+    fn default() -> Self {
+        Self {
+            range: Default::default(),
+            flop: [NOT_DEALT; 3],
+            turn: NOT_DEALT,
+            river: NOT_DEALT,
+        }
+    }
+}
 
 type PrivateCards = [Vec<(u8, u8)>; 2];
 
