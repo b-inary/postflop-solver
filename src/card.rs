@@ -70,7 +70,7 @@ type IsomorphismData = (
     [SwapList; 4],
     Vec<Vec<u8>>,
     Vec<Vec<u8>>,
-    Vec<[SwapList; 4]>,
+    [[SwapList; 4]; 4],
 );
 
 /// Returns an index of the given card pair.
@@ -285,7 +285,7 @@ impl CardConfig {
 
         let mut river_isomorphism_ref = vec![Vec::new(); 52];
         let mut river_isomorphism_card = vec![Vec::new(); 52];
-        let mut river_isomorphism_swap = vec![Default::default(); 52];
+        let mut river_isomorphism_swap: [[SwapList; 4]; 4] = Default::default();
 
         // river isomorphism
         if self.river == NOT_DEALT {
@@ -309,7 +309,7 @@ impl CardConfig {
                         {
                             isomorphic_suit[suit1 as usize] = Some(suit2);
                             Self::isomorphism_swap_internal(
-                                &mut river_isomorphism_swap[turn as usize],
+                                &mut river_isomorphism_swap[turn as usize & 3],
                                 &mut reverse_table,
                                 suit1,
                                 suit2,
@@ -358,6 +358,10 @@ impl CardConfig {
         };
 
         for player in 0..2 {
+            if !swap_list[player].is_empty() {
+                continue;
+            }
+
             reverse_table.fill(usize::MAX);
             let cards = &private_cards[player];
 

@@ -56,7 +56,7 @@ pub struct PostFlopGame {
     turn_isomorphism_swap: [SwapList; 4],
     river_isomorphism_ref: Vec<Vec<u8>>,
     river_isomorphism_card: Vec<Vec<u8>>,
-    river_isomorphism_swap: Vec<[SwapList; 4]>,
+    river_isomorphism_swap: [[SwapList; 4]; 4],
 
     // store options
     is_compression_enabled: bool,
@@ -414,7 +414,7 @@ impl Game for PostFlopGame {
         if node.turn == NOT_DEALT {
             &self.turn_isomorphism_swap[self.turn_isomorphism_card[index] as usize & 3]
         } else {
-            &self.river_isomorphism_swap[node.turn as usize]
+            &self.river_isomorphism_swap[node.turn as usize & 3]
                 [self.river_isomorphism_card[node.turn as usize][index] as usize & 3]
         }
     }
@@ -832,7 +832,6 @@ impl PostFlopGame {
         memory_usage += vec_memory_usage(&self.turn_isomorphism_card);
         memory_usage += vec_memory_usage(&self.river_isomorphism_ref);
         memory_usage += vec_memory_usage(&self.river_isomorphism_card);
-        memory_usage += vec_memory_usage(&self.river_isomorphism_swap);
 
         for player in 0..2 {
             memory_usage += vec_memory_usage(&self.initial_weights[player]);
@@ -1961,9 +1960,9 @@ impl PostFlopGame {
             .turn_swap
             .map(|suit| &self.turn_isomorphism_swap[suit as usize][player]);
 
-        let river_swap = self
-            .river_swap
-            .map(|(turn, suit)| &self.river_isomorphism_swap[turn as usize][suit as usize][player]);
+        let river_swap = self.river_swap.map(|(turn, suit)| {
+            &self.river_isomorphism_swap[turn as usize & 3][suit as usize][player]
+        });
 
         let swaps = if !reverse {
             [turn_swap, river_swap]
@@ -2131,7 +2130,7 @@ impl Default for PostFlopGame {
             turn_isomorphism_swap: Default::default(),
             river_isomorphism_ref: Vec::default(),
             river_isomorphism_card: Vec::default(),
-            river_isomorphism_swap: Vec::default(),
+            river_isomorphism_swap: Default::default(),
             is_compression_enabled: false,
             misc_memory_usage: 0,
             num_storage_actions: 0,
