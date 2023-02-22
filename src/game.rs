@@ -897,8 +897,11 @@ impl PostFlopGame {
             node.actions.reserve(49);
             node.children.reserve(49);
 
+            let skip_cards = &self.turn_isomorphism_card;
+            let skip_mask: u64 = skip_cards.iter().map(|&card| 1 << card).sum();
+
             for card in 0..52 {
-                if (1 << card) & flop_mask == 0 && !self.turn_isomorphism_card.contains(&card) {
+                if (1 << card) & (flop_mask | skip_mask) == 0 {
                     node.actions.push(Action::Chance(card));
                     node.children.push(MutexLike::new(PostFlopNode {
                         turn: card,
@@ -909,15 +912,15 @@ impl PostFlopGame {
         }
         // deal river
         else {
-            let turn_mask = flop_mask | (1 << node.turn);
-
             node.actions.reserve(48);
             node.children.reserve(48);
 
+            let turn_mask = flop_mask | (1 << node.turn);
+            let skip_cards = &self.river_isomorphism_card[node.turn as usize];
+            let skip_mask: u64 = skip_cards.iter().map(|&card| 1 << card).sum();
+
             for card in 0..52 {
-                if (1 << card) & turn_mask == 0
-                    && !self.river_isomorphism_card[node.turn as usize].contains(&card)
-                {
+                if (1 << card) & (turn_mask | skip_mask) == 0 {
                     node.actions.push(Action::Chance(card));
                     node.children.push(MutexLike::new(PostFlopNode {
                         turn: node.turn,
