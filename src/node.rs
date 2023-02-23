@@ -16,19 +16,20 @@ use {
 
 /// A struct representing a node in a postflop game tree.
 pub struct PostFlopNode {
+    pub(crate) prev_action: Action,
     pub(crate) player: u8,
     pub(crate) turn: u8,
     pub(crate) river: u8,
     pub(crate) is_locked: bool,
     pub(crate) amount: i32,
-    pub(crate) actions: Vec<Action>,
-    pub(crate) children: Vec<MutexLike<PostFlopNode>>,
+    pub(crate) children_offset: u32,
+    pub(crate) num_children: u32,
     pub(crate) storage1: *mut u8,
     pub(crate) storage2: *mut u8,
+    pub(crate) num_elements: u32,
+    pub(crate) num_elements_aux: u32,
     pub(crate) scale1: f32,
     pub(crate) scale2: f32,
-    pub(crate) num_elements: usize,
-    pub(crate) num_elements_aux: usize,
 }
 
 unsafe impl Send for PostFlopNode {}
@@ -66,7 +67,7 @@ impl GameNode for PostFlopNode {
 
     #[inline]
     fn num_actions(&self) -> usize {
-        self.actions.len()
+        self.num_children as usize
     }
 
     #[inline]
@@ -76,37 +77,37 @@ impl GameNode for PostFlopNode {
 
     #[inline]
     fn play(&self, action: usize) -> MutexGuardLike<Self> {
-        self.children[action].lock()
+        self.children()[action].lock()
     }
 
     #[inline]
     fn strategy(&self) -> &[f32] {
-        unsafe { slice::from_raw_parts(self.storage1 as *const f32, self.num_elements) }
+        unsafe { slice::from_raw_parts(self.storage1 as *const f32, self.num_elements as usize) }
     }
 
     #[inline]
     fn strategy_mut(&mut self) -> &mut [f32] {
-        unsafe { slice::from_raw_parts_mut(self.storage1 as *mut f32, self.num_elements) }
+        unsafe { slice::from_raw_parts_mut(self.storage1 as *mut f32, self.num_elements as usize) }
     }
 
     #[inline]
     fn regrets(&self) -> &[f32] {
-        unsafe { slice::from_raw_parts(self.storage2 as *const f32, self.num_elements) }
+        unsafe { slice::from_raw_parts(self.storage2 as *const f32, self.num_elements as usize) }
     }
 
     #[inline]
     fn regrets_mut(&mut self) -> &mut [f32] {
-        unsafe { slice::from_raw_parts_mut(self.storage2 as *mut f32, self.num_elements) }
+        unsafe { slice::from_raw_parts_mut(self.storage2 as *mut f32, self.num_elements as usize) }
     }
 
     #[inline]
     fn cfvalues(&self) -> &[f32] {
-        unsafe { slice::from_raw_parts(self.storage2 as *const f32, self.num_elements) }
+        unsafe { slice::from_raw_parts(self.storage2 as *const f32, self.num_elements as usize) }
     }
 
     #[inline]
     fn cfvalues_mut(&mut self) -> &mut [f32] {
-        unsafe { slice::from_raw_parts_mut(self.storage2 as *mut f32, self.num_elements) }
+        unsafe { slice::from_raw_parts_mut(self.storage2 as *mut f32, self.num_elements as usize) }
     }
 
     #[inline]
@@ -115,7 +116,7 @@ impl GameNode for PostFlopNode {
             0 => (self.storage1, self.num_elements),
             _ => (self.storage2, self.num_elements_aux),
         };
-        unsafe { slice::from_raw_parts(base as *const f32, len) }
+        unsafe { slice::from_raw_parts(base as *const f32, len as usize) }
     }
 
     #[inline]
@@ -124,37 +125,37 @@ impl GameNode for PostFlopNode {
             0 => (self.storage1, self.num_elements),
             _ => (self.storage2, self.num_elements_aux),
         };
-        unsafe { slice::from_raw_parts_mut(base as *mut f32, len) }
+        unsafe { slice::from_raw_parts_mut(base as *mut f32, len as usize) }
     }
 
     #[inline]
     fn strategy_compressed(&self) -> &[u16] {
-        unsafe { slice::from_raw_parts(self.storage1 as *const u16, self.num_elements) }
+        unsafe { slice::from_raw_parts(self.storage1 as *const u16, self.num_elements as usize) }
     }
 
     #[inline]
     fn strategy_compressed_mut(&mut self) -> &mut [u16] {
-        unsafe { slice::from_raw_parts_mut(self.storage1 as *mut u16, self.num_elements) }
+        unsafe { slice::from_raw_parts_mut(self.storage1 as *mut u16, self.num_elements as usize) }
     }
 
     #[inline]
     fn regrets_compressed(&self) -> &[i16] {
-        unsafe { slice::from_raw_parts(self.storage2 as *const i16, self.num_elements) }
+        unsafe { slice::from_raw_parts(self.storage2 as *const i16, self.num_elements as usize) }
     }
 
     #[inline]
     fn regrets_compressed_mut(&mut self) -> &mut [i16] {
-        unsafe { slice::from_raw_parts_mut(self.storage2 as *mut i16, self.num_elements) }
+        unsafe { slice::from_raw_parts_mut(self.storage2 as *mut i16, self.num_elements as usize) }
     }
 
     #[inline]
     fn cfvalues_compressed(&self) -> &[i16] {
-        unsafe { slice::from_raw_parts(self.storage2 as *const i16, self.num_elements) }
+        unsafe { slice::from_raw_parts(self.storage2 as *const i16, self.num_elements as usize) }
     }
 
     #[inline]
     fn cfvalues_compressed_mut(&mut self) -> &mut [i16] {
-        unsafe { slice::from_raw_parts_mut(self.storage2 as *mut i16, self.num_elements) }
+        unsafe { slice::from_raw_parts_mut(self.storage2 as *mut i16, self.num_elements as usize) }
     }
 
     #[inline]
@@ -163,7 +164,7 @@ impl GameNode for PostFlopNode {
             0 => (self.storage1, self.num_elements),
             _ => (self.storage2, self.num_elements_aux),
         };
-        unsafe { slice::from_raw_parts(base as *const i16, len) }
+        unsafe { slice::from_raw_parts(base as *const i16, len as usize) }
     }
 
     #[inline]
@@ -172,7 +173,7 @@ impl GameNode for PostFlopNode {
             0 => (self.storage1, self.num_elements),
             _ => (self.storage2, self.num_elements_aux),
         };
-        unsafe { slice::from_raw_parts_mut(base as *mut i16, len) }
+        unsafe { slice::from_raw_parts_mut(base as *mut i16, len as usize) }
     }
 
     #[inline]
@@ -231,19 +232,33 @@ impl Default for PostFlopNode {
     #[inline]
     fn default() -> Self {
         Self {
+            prev_action: Action::None,
             player: PLAYER_OOP,
             turn: NOT_DEALT,
             river: NOT_DEALT,
             is_locked: false,
             amount: 0,
-            actions: Vec::new(),
-            children: Vec::new(),
+            children_offset: 0,
+            num_children: 0,
             storage1: ptr::null_mut(),
             storage2: ptr::null_mut(),
-            scale1: 0.0,
-            scale2: 0.0,
             num_elements: 0,
             num_elements_aux: 0,
+            scale1: 0.0,
+            scale2: 0.0,
+        }
+    }
+}
+
+impl PostFlopNode {
+    pub(crate) fn children(&self) -> &[MutexLike<PostFlopNode>] {
+        // This is safe because `MutexLike<T>` is a `repr(transparent)` wrapper around `T`.
+        let self_ptr = self as *const _ as *const MutexLike<PostFlopNode>;
+        unsafe {
+            slice::from_raw_parts(
+                self_ptr.add(self.children_offset as usize),
+                self.num_children as usize,
+            )
         }
     }
 }
@@ -286,21 +301,20 @@ impl Encode for PostFlopNode {
         };
 
         // contents
+        self.prev_action.encode(encoder)?;
         self.player.encode(encoder)?;
         self.turn.encode(encoder)?;
         self.river.encode(encoder)?;
         self.is_locked.encode(encoder)?;
         self.amount.encode(encoder)?;
-        self.actions.encode(encoder)?;
-        self.scale1.encode(encoder)?;
-        self.scale2.encode(encoder)?;
+        self.children_offset.encode(encoder)?;
+        self.num_children.encode(encoder)?;
         self.num_elements.encode(encoder)?;
         self.num_elements_aux.encode(encoder)?;
+        self.scale1.encode(encoder)?;
+        self.scale2.encode(encoder)?;
         offset.encode(encoder)?;
         offset_aux.encode(encoder)?;
-
-        // children
-        self.children.encode(encoder)?;
 
         Ok(())
     }
@@ -311,16 +325,18 @@ impl Decode for PostFlopNode {
     fn decode<D: bincode::de::Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
         // node instance
         let mut node = Self {
+            prev_action: Decode::decode(decoder)?,
             player: Decode::decode(decoder)?,
             turn: Decode::decode(decoder)?,
             river: Decode::decode(decoder)?,
             is_locked: Decode::decode(decoder)?,
             amount: Decode::decode(decoder)?,
-            actions: Decode::decode(decoder)?,
-            scale1: Decode::decode(decoder)?,
-            scale2: Decode::decode(decoder)?,
+            children_offset: Decode::decode(decoder)?,
+            num_children: Decode::decode(decoder)?,
             num_elements: Decode::decode(decoder)?,
             num_elements_aux: Decode::decode(decoder)?,
+            scale1: Decode::decode(decoder)?,
+            scale2: Decode::decode(decoder)?,
             ..Default::default()
         };
 
@@ -340,9 +356,6 @@ impl Decode for PostFlopNode {
             node.storage1 = unsafe { base1.offset(offset) };
             node.storage2 = unsafe { base2.offset(offset) };
         }
-
-        // children
-        node.children = Decode::decode(decoder)?;
 
         Ok(node)
     }

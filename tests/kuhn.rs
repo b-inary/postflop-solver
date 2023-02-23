@@ -129,19 +129,19 @@ impl KuhnGame {
         MutexLike::new(root)
     }
 
-    fn build_tree_recursive(node: &mut KuhnNode, last_action: Action) {
+    fn build_tree_recursive(node: &mut KuhnNode, prev_action: Action) {
         if node.is_terminal() {
             return;
         }
 
-        let actions = match last_action {
+        let actions = match prev_action {
             Action::None | Action::Check => vec![Action::Check, Action::Bet],
             Action::Bet => vec![Action::Fold, Action::Call],
             _ => unreachable!(),
         };
 
         for action in &actions {
-            let next_player = match (action, last_action) {
+            let next_player = match (action, prev_action) {
                 (Action::Check, Action::Check) => PLAYER_TERMINAL_FLAG,
                 (Action::Fold, _) => PLAYER_FOLD_FLAG | node.player,
                 (Action::Call, _) => PLAYER_TERMINAL_FLAG,

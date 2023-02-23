@@ -172,7 +172,7 @@ impl LeducGame {
         MutexLike::new(root)
     }
 
-    fn build_tree_recursive(node: &mut LeducNode, last_action: Action, last_amount: [i32; 2]) {
+    fn build_tree_recursive(node: &mut LeducNode, prev_action: Action, last_amount: [i32; 2]) {
         if node.is_terminal() {
             return;
         }
@@ -185,7 +185,7 @@ impl LeducGame {
             return;
         }
 
-        let actions = Self::get_actions(node, last_action, node.board != NOT_DEALT);
+        let actions = Self::get_actions(node, prev_action, node.board != NOT_DEALT);
 
         let mut next_amounts = Vec::new();
         let last_amount_min = last_amount.iter().min().unwrap();
@@ -249,7 +249,7 @@ impl LeducGame {
 
     fn get_actions(
         node: &LeducNode,
-        last_action: Action,
+        prev_action: Action,
         is_second_round: bool,
     ) -> Vec<(Action, usize)> {
         let raise_amount = [2, 4][is_second_round as usize];
@@ -271,7 +271,7 @@ impl LeducGame {
 
         let mut actions = Vec::new();
 
-        match last_action {
+        match prev_action {
             Action::None | Action::Check | Action::Chance(_) => {
                 actions.push((Action::Check, player_after_check));
                 actions.push((Action::Bet(raise_amount), player_opponent));

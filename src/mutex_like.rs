@@ -14,6 +14,7 @@ use bincode::{
 ///   2. it is (manually) guaranteed that data races will not occur, and
 ///   3. the performance is critical.
 #[derive(Debug)]
+#[repr(transparent)]
 pub struct MutexLike<T: ?Sized> {
     data: UnsafeCell<T>,
 }

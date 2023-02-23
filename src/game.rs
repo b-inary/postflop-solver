@@ -6,6 +6,7 @@ use crate::node::*;
 use crate::sliceop::*;
 use crate::utility::*;
 use std::collections::BTreeMap;
+use std::mem::size_of;
 use std::mem::{self, MaybeUninit};
 use std::ptr;
 
@@ -42,7 +43,6 @@ pub struct PostFlopGame {
     action_root: Box<MutexLike<ActionTreeNode>>,
 
     // computed from configurations
-    root: Box<MutexLike<PostFlopNode>>,
     num_combinations: f64,
     initial_weights: [Vec<f32>; 2],
     private_cards: [Vec<(u8, u8)>; 2],
@@ -65,6 +65,7 @@ pub struct PostFlopGame {
     num_storage_chances: u64,
 
     // global storage
+    node_arena: Vec<MutexLike<PostFlopNode>>,
     storage1: MutexLike<Vec<f32>>,
     storage2: MutexLike<Vec<f32>>,
     storage_chance: MutexLike<Vec<f32>>,
@@ -95,7 +96,9 @@ unsafe impl Send for PostFlopGame {}
 unsafe impl Sync for PostFlopGame {}
 
 struct BuildTreeInfo {
-    memory_usage_nodes: u64,
+    flop_index: usize,
+    turn_index: usize,
+    river_index: usize,
     num_storage_actions: u64,
     num_storage_chances: u64,
 }
@@ -129,7 +132,7 @@ impl Game for PostFlopGame {
 
     #[inline]
     fn root(&self) -> MutexGuardLike<Self::Node> {
-        self.root.lock()
+        self.node_arena[0].lock()
     }
 
     #[inline]
@@ -474,8 +477,7 @@ impl PostFlopGame {
         ) = action_tree.eject();
         self.state = State::ConfigError;
         self.check_card_config()?;
-        self.state = State::TreeBuilt;
-        self.init();
+        self.init()?;
         Ok(())
     }
 
@@ -530,23 +532,23 @@ impl PostFlopGame {
     ///
     /// This allows the removal of chance-specific lines (e.g., remove overbets on board-pairing
     /// turns) which we cannot do while building an action tree.
-    pub fn remove_lines(&mut self, lines: &[Vec<Action>]) -> Result<(), String> {
-        if self.state <= State::Uninitialized {
-            return Err("Game is not successfully initialized".to_string());
-        } else if self.state >= State::MemoryAllocated {
-            return Err("Game has already been allocated".to_string());
-        }
+    // pub fn remove_lines(&mut self, lines: &[Vec<Action>]) -> Result<(), String> {
+    //     if self.state <= State::Uninitialized {
+    //         return Err("Game is not successfully initialized".to_string());
+    //     } else if self.state >= State::MemoryAllocated {
+    //         return Err("Game has already been allocated".to_string());
+    //     }
 
-        for line in lines {
-            let mut root = self.root();
-            let info = self.remove_line_recursive(&mut root, line)?;
-            self.misc_memory_usage -= info.memory_usage_nodes;
-            self.num_storage_actions -= info.num_storage_actions;
-            self.num_storage_chances -= info.num_storage_chances;
-        }
+    //     for line in lines {
+    //         let mut root = self.root();
+    //         let info = self.remove_line_recursive(&mut root, line)?;
+    //         self.misc_memory_usage -= info.memory_usage_nodes;
+    //         self.num_storage_actions -= info.num_storage_actions;
+    //         self.num_storage_chances -= info.num_storage_chances;
+    //     }
 
-        Ok(())
-    }
+    //     Ok(())
+    // }
 
     /// Allocates the memory.
     pub fn allocate_memory(&mut self, enable_compression: bool) {
@@ -713,10 +715,11 @@ impl PostFlopGame {
 
     /// Initializes the game.
     #[inline]
-    fn init(&mut self) {
+    fn init(&mut self) -> Result<(), String> {
         self.init_card_fields();
-        self.init_root();
+        self.init_root()?;
         self.init_interpreter();
+        Ok(())
     }
 
     /// Initializes fields related to cards.
@@ -755,25 +758,48 @@ impl PostFlopGame {
     }
 
     /// Initializes the root node of game tree.
-    fn init_root(&mut self) {
+    fn init_root(&mut self) -> Result<(), String> {
+        let num_nodes = self.count_num_nodes();
+        let total_num_nodes = num_nodes[0] + num_nodes[1] + num_nodes[2];
+
+        if total_num_nodes > u32::MAX as u64
+            || size_of::<PostFlopNode>() as u64 * total_num_nodes > isize::MAX as u64
+        {
+            return Err("Too many nodes".to_string());
+        }
+
         let mut info = BuildTreeInfo {
-            memory_usage_nodes: mem::size_of::<PostFlopNode>() as u64,
+            flop_index: 0,
+            turn_index: num_nodes[0] as usize,
+            river_index: (num_nodes[0] + num_nodes[1]) as usize,
             num_storage_actions: 0,
             num_storage_chances: 0,
         };
 
-        let mut root = self.root();
-        *root = PostFlopNode::default();
+        match self.tree_config.initial_state {
+            BoardState::Flop => info.flop_index += 1,
+            BoardState::Turn => info.turn_index += 1,
+            BoardState::River => info.river_index += 1,
+        }
+
+        self.node_arena = (0..total_num_nodes)
+            .map(|_| MutexLike::new(PostFlopNode::default()))
+            .collect::<Vec<_>>();
+
+        let mut root = self.node_arena[0].lock();
         root.turn = self.card_config.turn;
         root.river = self.card_config.river;
 
-        self.build_tree_recursive(&mut root, &self.action_root.lock(), &mut info);
+        self.build_tree_recursive(0, &self.action_root.lock(), &mut info);
 
-        self.misc_memory_usage = self.memory_usage_internal() + info.memory_usage_nodes;
+        self.misc_memory_usage = self.memory_usage_internal();
         self.num_storage_actions = info.num_storage_actions;
         self.num_storage_chances = info.num_storage_chances;
 
         self.clear_storage();
+        self.state = State::TreeBuilt;
+
+        Ok(())
     }
 
     /// Initializes the interpreter.
@@ -807,6 +833,36 @@ impl PostFlopGame {
         self.storage1_compressed.lock().shrink_to_fit();
         self.storage2_compressed.lock().shrink_to_fit();
         self.storage_chance_compressed.lock().shrink_to_fit();
+    }
+
+    /// Counts the number of nodes in the game tree.
+    #[inline]
+    fn count_num_nodes(&self) -> [u64; 3] {
+        let (turn_coef, river_coef) = match (self.card_config.turn, self.card_config.river) {
+            (NOT_DEALT, _) => {
+                let mut river_coef = 0;
+                let flop = self.card_config.flop;
+                let skip_cards = &self.turn_isomorphism_card;
+                let flop_mask: u64 = (1 << flop[0]) | (1 << flop[1]) | (1 << flop[2]);
+                let skip_mask: u64 = skip_cards.iter().map(|&card| 1 << card).sum();
+                for turn in 0..52 {
+                    if (1 << turn) & (flop_mask | skip_mask) == 0 {
+                        river_coef += 48 - self.river_isomorphism_card[turn].len();
+                    }
+                }
+                (49 - self.turn_isomorphism_card.len(), river_coef)
+            }
+            (turn, NOT_DEALT) => (1, 48 - self.river_isomorphism_card[turn as usize].len()),
+            _ => (0, 1),
+        };
+
+        let num_action_nodes = count_num_action_nodes(&self.action_root.lock());
+
+        [
+            num_action_nodes[0],
+            num_action_nodes[1] * turn_coef as u64,
+            num_action_nodes[2] * river_coef as u64,
+        ]
     }
 
     /// Computes the memory usage of this struct.
@@ -857,16 +913,19 @@ impl PostFlopGame {
             }
         }
 
+        memory_usage += vec_memory_usage(&self.node_arena);
+
         memory_usage
     }
 
     /// Builds the game tree recursively.
     fn build_tree_recursive(
         &self,
-        node: &mut PostFlopNode,
+        node_index: usize,
         action_node: &ActionTreeNode,
         info: &mut BuildTreeInfo,
     ) {
+        let mut node = self.node_arena[node_index].lock();
         node.player = action_node.player;
         node.amount = action_node.amount;
 
@@ -875,197 +934,210 @@ impl PostFlopGame {
         }
 
         if node.is_chance() {
-            self.push_chances(node, info);
-            for child in &node.children {
-                self.build_tree_recursive(&mut child.lock(), &action_node.children[0].lock(), info);
+            self.push_chances(node_index, info);
+            for action_index in 0..node.num_actions() {
+                let child_index = node_index + node.children_offset as usize + action_index;
+                self.build_tree_recursive(child_index, &action_node.children[0].lock(), info);
             }
         } else {
-            self.push_actions(node, action_node, info);
-            for (child, action_child) in node.children.iter().zip(action_node.children.iter()) {
-                self.build_tree_recursive(&mut child.lock(), &action_child.lock(), info);
+            self.push_actions(node_index, action_node, info);
+            for action_index in 0..node.num_actions() {
+                let child_index = node_index + node.children_offset as usize + action_index;
+                self.build_tree_recursive(
+                    child_index,
+                    &action_node.children[action_index].lock(),
+                    info,
+                );
             }
         }
     }
 
     /// Pushes the chance actions to the `node`.
-    fn push_chances(&self, node: &mut PostFlopNode, info: &mut BuildTreeInfo) {
+    fn push_chances(&self, node_index: usize, info: &mut BuildTreeInfo) {
+        let mut node = self.node_arena[node_index].lock();
         let flop = self.card_config.flop;
         let flop_mask: u64 = (1 << flop[0]) | (1 << flop[1]) | (1 << flop[2]);
 
         // deal turn
         if node.turn == NOT_DEALT {
-            node.actions.reserve(49);
-            node.children.reserve(49);
-
             let skip_cards = &self.turn_isomorphism_card;
             let skip_mask: u64 = skip_cards.iter().map(|&card| 1 << card).sum();
 
+            node.children_offset = (info.turn_index - node_index) as u32;
             for card in 0..52 {
                 if (1 << card) & (flop_mask | skip_mask) == 0 {
-                    node.actions.push(Action::Chance(card));
-                    node.children.push(MutexLike::new(PostFlopNode {
-                        turn: card,
-                        ..Default::default()
-                    }));
+                    node.num_children += 1;
+                    let mut child = node.children().last().unwrap().lock();
+                    child.prev_action = Action::Chance(card);
+                    child.turn = card;
                 }
             }
+
+            info.turn_index += node.num_children as usize;
         }
         // deal river
         else {
-            node.actions.reserve(48);
-            node.children.reserve(48);
-
             let turn_mask = flop_mask | (1 << node.turn);
             let skip_cards = &self.river_isomorphism_card[node.turn as usize];
             let skip_mask: u64 = skip_cards.iter().map(|&card| 1 << card).sum();
 
+            node.children_offset = (info.river_index - node_index) as u32;
             for card in 0..52 {
                 if (1 << card) & (turn_mask | skip_mask) == 0 {
-                    node.actions.push(Action::Chance(card));
-                    node.children.push(MutexLike::new(PostFlopNode {
-                        turn: node.turn,
-                        river: card,
-                        ..Default::default()
-                    }));
+                    node.num_children += 1;
+                    let mut child = node.children().last().unwrap().lock();
+                    child.prev_action = Action::Chance(card);
+                    child.turn = node.turn;
+                    child.river = card;
                 }
             }
-        }
 
-        node.actions.shrink_to_fit();
-        node.children.shrink_to_fit();
+            info.river_index += node.num_children as usize;
+        }
 
         node.num_elements = match node.cfvalue_storage(PLAYER_OOP as usize) {
             CfValueStorage::None => 0,
             CfValueStorage::Sum => self.num_private_hands(PLAYER_OOP as usize),
             CfValueStorage::All => node.num_actions() * self.num_private_hands(PLAYER_OOP as usize),
-        };
+        } as u32;
 
         node.num_elements_aux = match node.cfvalue_storage(PLAYER_IP as usize) {
             CfValueStorage::None => 0,
             CfValueStorage::Sum => self.num_private_hands(PLAYER_IP as usize),
             CfValueStorage::All => node.num_actions() * self.num_private_hands(PLAYER_IP as usize),
-        };
+        } as u32;
 
-        info.memory_usage_nodes += vec_memory_usage(&node.actions);
-        info.memory_usage_nodes += vec_memory_usage(&node.children);
         info.num_storage_chances += (node.num_elements + node.num_elements_aux) as u64;
     }
 
     /// Pushes the actions to the `node`.
     fn push_actions(
         &self,
-        node: &mut PostFlopNode,
+        node_index: usize,
         action_node: &ActionTreeNode,
         info: &mut BuildTreeInfo,
     ) {
-        for action in &action_node.actions {
-            node.actions.push(*action);
-            node.children.push(MutexLike::new(PostFlopNode {
-                turn: node.turn,
-                river: node.river,
-                ..Default::default()
-            }));
+        let mut node = self.node_arena[node_index].lock();
+
+        let street = match (node.turn, node.river) {
+            (NOT_DEALT, _) => BoardState::Flop,
+            (_, NOT_DEALT) => BoardState::Turn,
+            _ => BoardState::River,
+        };
+
+        let base = match street {
+            BoardState::Flop => &mut info.flop_index,
+            BoardState::Turn => &mut info.turn_index,
+            BoardState::River => &mut info.river_index,
+        };
+
+        node.children_offset = (*base - node_index) as u32;
+        node.num_children = action_node.children.len() as u32;
+        *base += node.num_children as usize;
+
+        for (child, action) in node.children().iter().zip(action_node.actions.iter()) {
+            let mut child = child.lock();
+            child.prev_action = *action;
+            child.turn = node.turn;
+            child.river = node.river;
         }
 
-        node.actions.shrink_to_fit();
-        node.children.shrink_to_fit();
-        node.num_elements = node.num_actions() * self.num_private_hands(node.player as usize);
+        let num_private_hands = self.num_private_hands(node.player as usize);
+        node.num_elements = (node.num_actions() * num_private_hands) as u32;
 
-        info.memory_usage_nodes += vec_memory_usage(&node.actions);
-        info.memory_usage_nodes += vec_memory_usage(&node.children);
         info.num_storage_actions += node.num_elements as u64;
     }
 
     /// Reverse the action of push_chances
-    fn reverse_push_chances(&self, node: &PostFlopNode, info: &mut BuildTreeInfo) {
-        info.memory_usage_nodes += vec_memory_usage(&node.actions);
-        info.memory_usage_nodes += vec_memory_usage(&node.children);
-        info.num_storage_chances += (node.num_elements + node.num_elements_aux) as u64;
-    }
+    // fn reverse_push_chances(&self, node: &PostFlopNode, info: &mut BuildTreeInfo) {
+    //     info.memory_usage_nodes += vec_memory_usage(&node.actions);
+    //     info.memory_usage_nodes += vec_memory_usage(&node.children);
+    //     info.num_storage_chances += (node.num_elements + node.num_elements_aux) as u64;
+    // }
 
-    fn reverse_push_actions(&self, node: &PostFlopNode, info: &mut BuildTreeInfo) {
-        info.memory_usage_nodes += vec_memory_usage(&node.actions);
-        info.memory_usage_nodes += vec_memory_usage(&node.children);
-        info.num_storage_actions += node.num_elements as u64;
-    }
+    // fn reverse_push_actions(&self, node: &PostFlopNode, info: &mut BuildTreeInfo) {
+    //     info.memory_usage_nodes += vec_memory_usage(&node.actions);
+    //     info.memory_usage_nodes += vec_memory_usage(&node.children);
+    //     info.num_storage_actions += node.num_elements as u64;
+    // }
 
-    fn calculate_removed_line_info_recursive(&self, node: &PostFlopNode, info: &mut BuildTreeInfo) {
-        if node.is_terminal() {
-            return;
-        }
+    // fn calculate_removed_line_info_recursive(&self, node: &PostFlopNode, info: &mut BuildTreeInfo) {
+    //     if node.is_terminal() {
+    //         return;
+    //     }
 
-        if node.is_chance() {
-            self.reverse_push_chances(node, info);
-        } else {
-            self.reverse_push_actions(node, info);
-        }
+    //     if node.is_chance() {
+    //         self.reverse_push_chances(node, info);
+    //     } else {
+    //         self.reverse_push_actions(node, info);
+    //     }
 
-        for action in node.action_indices() {
-            self.calculate_removed_line_info_recursive(&node.play(action), info);
-        }
-    }
+    //     for action in node.action_indices() {
+    //         self.calculate_removed_line_info_recursive(&node.play(action), info);
+    //     }
+    // }
 
     /// Recursively remove a line from a PostFlopGame tree
-    fn remove_line_recursive(
-        &self,
-        node: &mut PostFlopNode,
-        line: &[Action],
-    ) -> Result<BuildTreeInfo, String> {
-        if line.is_empty() {
-            return Err("Empty line".to_string());
-        }
+    // fn remove_line_recursive(
+    //     &self,
+    //     node: &mut PostFlopNode,
+    //     line: &[Action],
+    // ) -> Result<BuildTreeInfo, String> {
+    //     if line.is_empty() {
+    //         return Err("Empty line".to_string());
+    //     }
 
-        if node.is_terminal() {
-            return Err("Unexpected terminal node".to_string());
-        }
+    //     if node.is_terminal() {
+    //         return Err("Unexpected terminal node".to_string());
+    //     }
 
-        let action = line[0];
-        let search_result = node.actions.binary_search(&action);
-        if search_result.is_err() {
-            return Err(format!("Action does not exist: {action:?}"));
-        }
+    //     let action = line[0];
+    //     let search_result = node.actions.binary_search(&action);
+    //     if search_result.is_err() {
+    //         return Err(format!("Action does not exist: {action:?}"));
+    //     }
 
-        let index = search_result.unwrap();
-        if line.len() > 1 {
-            let result = self.remove_line_recursive(&mut node.children[index].lock(), &line[1..]);
-            return result;
-        }
+    //     let index = search_result.unwrap();
+    //     if line.len() > 1 {
+    //         let result = self.remove_line_recursive(&mut node.children[index].lock(), &line[1..]);
+    //         return result;
+    //     }
 
-        if node.is_chance() {
-            return Err("Cannot remove a line ending in a chance action".to_string());
-        }
+    //     if node.is_chance() {
+    //         return Err("Cannot remove a line ending in a chance action".to_string());
+    //     }
 
-        if node.num_actions() <= 1 {
-            return Err("Cannot remove the last action from a node".to_string());
-        }
+    //     if node.num_actions() <= 1 {
+    //         return Err("Cannot remove the last action from a node".to_string());
+    //     }
 
-        // Remove action/children at index. To do this we must
-        // 1. compute the storage space required by the tree rooted at action index
-        // 2. remove children and actions
-        // 3. re-define `num_elements` after we remove children and actions
+    //     // Remove action/children at index. To do this we must
+    //     // 1. compute the storage space required by the tree rooted at action index
+    //     // 2. remove children and actions
+    //     // 3. re-define `num_elements` after we remove children and actions
 
-        // STEP 1
-        let mut info = BuildTreeInfo {
-            memory_usage_nodes: (mem::size_of::<Action>() + mem::size_of::<PostFlopNode>()) as u64,
-            num_storage_actions: self.num_private_hands(node.player as usize) as u64,
-            num_storage_chances: 0,
-        };
+    //     // STEP 1
+    //     let mut info = BuildTreeInfo {
+    //         memory_usage_nodes: (mem::size_of::<Action>() + mem::size_of::<PostFlopNode>()) as u64,
+    //         num_storage_actions: self.num_private_hands(node.player as usize) as u64,
+    //         num_storage_chances: 0,
+    //     };
 
-        let node_to_remove = node.play(index);
-        self.calculate_removed_line_info_recursive(&node_to_remove, &mut info);
+    //     let node_to_remove = node.play(index);
+    //     self.calculate_removed_line_info_recursive(&node_to_remove, &mut info);
 
-        // STEP 2
-        node.actions.remove(index);
-        node.children.remove(index);
+    //     // STEP 2
+    //     node.actions.remove(index);
+    //     node.children.remove(index);
 
-        node.actions.shrink_to_fit();
-        node.children.shrink_to_fit();
+    //     node.actions.shrink_to_fit();
+    //     node.children.shrink_to_fit();
 
-        // STEP 3
-        node.num_elements -= self.num_private_hands(node.player as usize);
+    //     // STEP 3
+    //     node.num_elements -= self.num_private_hands(node.player as usize);
 
-        Ok(info)
-    }
+    //     Ok(info)
+    // }
 
     /// Allocates memory recursively.
     fn allocate_memory_recursive(
@@ -1089,7 +1161,7 @@ impl PostFlopGame {
                         node.storage1 = ptr.add(*chance_counter) as *mut u8;
                     }
                 }
-                *chance_counter += node.num_elements;
+                *chance_counter += node.num_elements as usize;
             }
             if node.num_elements_aux > 0 {
                 unsafe {
@@ -1101,7 +1173,7 @@ impl PostFlopGame {
                         node.storage2 = ptr.add(*chance_counter) as *mut u8;
                     }
                 }
-                *chance_counter += node.num_elements_aux;
+                *chance_counter += node.num_elements_aux as usize;
             }
         } else {
             unsafe {
@@ -1117,7 +1189,7 @@ impl PostFlopGame {
                     node.storage2 = ptr2.add(*action_counter) as *mut u8;
                 }
             }
-            *action_counter += node.num_elements;
+            *action_counter += node.num_elements as usize;
         }
 
         for action in node.action_indices() {
@@ -1217,14 +1289,19 @@ impl PostFlopGame {
     ///
     /// [`possible_cards`]: #method.possible_cards
     #[inline]
-    pub fn available_actions(&self) -> &[Action] {
+    pub fn available_actions(&self) -> Vec<Action> {
         if self.state <= State::Uninitialized {
             panic!("Game is not successfully initialized");
         }
 
-        match self.is_terminal_node() {
-            true => &[],
-            false => &self.node().actions,
+        if self.is_terminal_node() {
+            Vec::new()
+        } else {
+            self.node()
+                .children()
+                .iter()
+                .map(|c| c.lock().prev_action)
+                .collect()
         }
     }
 
@@ -1452,7 +1529,7 @@ impl PostFlopGame {
             self.cfvalues_cache[player].copy_from_slice(&vec);
 
             // update the bet amounts
-            match self.node().actions[action] {
+            match self.node().play(action).prev_action {
                 Action::Call => {
                     self.total_bet_amount[player] = self.total_bet_amount[player ^ 1];
                     self.prev_bet_amount = 0;
@@ -1733,7 +1810,7 @@ impl PostFlopGame {
         ret.chunks_exact_mut(num_hands)
             .enumerate()
             .for_each(|(action, row)| {
-                let is_fold = have_actions && self.node().actions[action] == Action::Fold;
+                let is_fold = have_actions && self.node().play(action).prev_action == Action::Fold;
                 self.apply_swap(row, player, false);
                 row.iter_mut()
                     .zip(self.weights[player].iter())
@@ -2119,7 +2196,6 @@ impl Default for PostFlopGame {
             added_lines: Vec::default(),
             removed_lines: Vec::default(),
             action_root: Box::default(),
-            root: Box::default(),
             num_combinations: 0.0,
             initial_weights: Default::default(),
             private_cards: Default::default(),
@@ -2138,6 +2214,7 @@ impl Default for PostFlopGame {
             misc_memory_usage: 0,
             num_storage_actions: 0,
             num_storage_chances: 0,
+            node_arena: Vec::default(),
             storage1: MutexLike::default(),
             storage2: MutexLike::default(),
             storage_chance: MutexLike::default(),
@@ -2165,7 +2242,7 @@ impl Default for PostFlopGame {
 }
 
 #[cfg(feature = "bincode")]
-static VERSION_STR: &str = "2023-02-08";
+static VERSION_STR: &str = "2023-02-23";
 
 #[cfg(feature = "bincode")]
 impl Encode for PostFlopGame {
@@ -2223,7 +2300,7 @@ impl Encode for PostFlopGame {
         self.is_normalized_weight_cached.encode(encoder)?;
 
         // game tree
-        self.root.encode(encoder)?;
+        self.node_arena.encode(encoder)?;
 
         Ok(())
     }
@@ -2311,7 +2388,7 @@ impl Decode for PostFlopGame {
         });
 
         // game tree
-        game.root = Decode::decode(decoder)?;
+        game.node_arena = Decode::decode(decoder)?;
 
         // initialization
         if game.state >= State::TreeBuilt {
@@ -3040,109 +3117,109 @@ mod tests {
         assert!(game.is_err());
     }
 
-    #[test]
-    fn remove_lines() {
-        use crate::bet_size::BetSizeCandidates;
-        let card_config = CardConfig {
-            range: ["TT+,AKo,AQs+".parse().unwrap(), "AA".parse().unwrap()],
-            flop: flop_from_str("2c6dTh").unwrap(),
-            ..Default::default()
-        };
+    // #[test]
+    // fn remove_lines() {
+    //     use crate::bet_size::BetSizeCandidates;
+    //     let card_config = CardConfig {
+    //         range: ["TT+,AKo,AQs+".parse().unwrap(), "AA".parse().unwrap()],
+    //         flop: flop_from_str("2c6dTh").unwrap(),
+    //         ..Default::default()
+    //     };
 
-        // Simple tree: force checks on flop, and only use 1/2 pot bets on turn and river
-        let tree_config = TreeConfig {
-            starting_pot: 60,
-            effective_stack: 970,
-            turn_bet_sizes: [
-                BetSizeCandidates::try_from(("50%", "")).unwrap(),
-                Default::default(),
-            ],
-            river_bet_sizes: [
-                BetSizeCandidates::try_from(("50%", "")).unwrap(),
-                Default::default(),
-            ],
-            ..Default::default()
-        };
+    //     // Simple tree: force checks on flop, and only use 1/2 pot bets on turn and river
+    //     let tree_config = TreeConfig {
+    //         starting_pot: 60,
+    //         effective_stack: 970,
+    //         turn_bet_sizes: [
+    //             BetSizeCandidates::try_from(("50%", "")).unwrap(),
+    //             Default::default(),
+    //         ],
+    //         river_bet_sizes: [
+    //             BetSizeCandidates::try_from(("50%", "")).unwrap(),
+    //             Default::default(),
+    //         ],
+    //         ..Default::default()
+    //     };
 
-        let action_tree = ActionTree::new(tree_config).unwrap();
-        let mut game = PostFlopGame::with_config(card_config, action_tree).unwrap();
+    //     let action_tree = ActionTree::new(tree_config).unwrap();
+    //     let mut game = PostFlopGame::with_config(card_config, action_tree).unwrap();
 
-        let lines = vec![
-            vec![
-                Action::Check,
-                Action::Check,
-                Action::Chance(2),
-                Action::Bet(30),
-            ],
-            vec![
-                Action::Check,
-                Action::Check,
-                Action::Chance(2),
-                Action::Check,
-                Action::Check,
-                Action::Chance(3),
-                Action::Bet(30),
-            ],
-        ];
+    //     let lines = vec![
+    //         vec![
+    //             Action::Check,
+    //             Action::Check,
+    //             Action::Chance(2),
+    //             Action::Bet(30),
+    //         ],
+    //         vec![
+    //             Action::Check,
+    //             Action::Check,
+    //             Action::Chance(2),
+    //             Action::Check,
+    //             Action::Check,
+    //             Action::Chance(3),
+    //             Action::Bet(30),
+    //         ],
+    //     ];
 
-        let res = game.remove_lines(&lines);
-        assert!(res.is_ok());
+    //     let res = game.remove_lines(&lines);
+    //     assert!(res.is_ok());
 
-        game.allocate_memory(false);
+    //     game.allocate_memory(false);
 
-        // Check that the turn line is removed
-        game.back_to_root();
-        game.play(game.node().actions.binary_search(&Action::Check).unwrap());
-        game.play(game.node().actions.binary_search(&Action::Check).unwrap());
-        game.play(2);
-        assert_eq!(game.available_actions(), &[Action::Check]);
-        assert_eq!(game.node().children.len(), 1);
+    //     // Check that the turn line is removed
+    //     game.back_to_root();
+    //     game.play(game.node().actions.binary_search(&Action::Check).unwrap());
+    //     game.play(game.node().actions.binary_search(&Action::Check).unwrap());
+    //     game.play(2);
+    //     assert_eq!(game.available_actions(), &[Action::Check]);
+    //     assert_eq!(game.node().children.len(), 1);
 
-        // Check that other turn lines are correct
-        game.back_to_root();
-        game.play(game.node().actions.binary_search(&Action::Check).unwrap());
-        game.play(game.node().actions.binary_search(&Action::Check).unwrap());
-        game.play(3);
-        assert_eq!(game.available_actions(), &[Action::Check, Action::Bet(30)]);
-        assert_eq!(game.node().children.len(), 2);
+    //     // Check that other turn lines are correct
+    //     game.back_to_root();
+    //     game.play(game.node().actions.binary_search(&Action::Check).unwrap());
+    //     game.play(game.node().actions.binary_search(&Action::Check).unwrap());
+    //     game.play(3);
+    //     assert_eq!(game.available_actions(), &[Action::Check, Action::Bet(30)]);
+    //     assert_eq!(game.node().children.len(), 2);
 
-        // Check that the river line is removed
-        game.back_to_root();
-        game.play(game.node().actions.binary_search(&Action::Check).unwrap());
-        game.play(game.node().actions.binary_search(&Action::Check).unwrap());
-        game.play(2);
-        game.play(game.node().actions.binary_search(&Action::Check).unwrap());
-        game.play(game.node().actions.binary_search(&Action::Check).unwrap());
-        game.play(3);
+    //     // Check that the river line is removed
+    //     game.back_to_root();
+    //     game.play(game.node().actions.binary_search(&Action::Check).unwrap());
+    //     game.play(game.node().actions.binary_search(&Action::Check).unwrap());
+    //     game.play(2);
+    //     game.play(game.node().actions.binary_search(&Action::Check).unwrap());
+    //     game.play(game.node().actions.binary_search(&Action::Check).unwrap());
+    //     game.play(3);
 
-        assert_eq!(game.available_actions(), &[Action::Check]);
-        assert_eq!(game.node().children.len(), 1);
+    //     assert_eq!(game.available_actions(), &[Action::Check]);
+    //     assert_eq!(game.node().children.len(), 1);
 
-        // Check that other river lines are correct
-        game.back_to_root();
-        game.play(game.node().actions.binary_search(&Action::Check).unwrap());
-        game.play(game.node().actions.binary_search(&Action::Check).unwrap());
-        game.play(2);
-        game.play(game.node().actions.binary_search(&Action::Check).unwrap());
-        game.play(game.node().actions.binary_search(&Action::Check).unwrap());
-        game.play(4);
+    //     // Check that other river lines are correct
+    //     game.back_to_root();
+    //     game.play(game.node().actions.binary_search(&Action::Check).unwrap());
+    //     game.play(game.node().actions.binary_search(&Action::Check).unwrap());
+    //     game.play(2);
+    //     game.play(game.node().actions.binary_search(&Action::Check).unwrap());
+    //     game.play(game.node().actions.binary_search(&Action::Check).unwrap());
+    //     game.play(4);
 
-        assert_eq!(game.available_actions(), &[Action::Check, Action::Bet(30)]);
-        assert_eq!(game.node().children.len(), 2);
+    //     assert_eq!(game.available_actions(), &[Action::Check, Action::Bet(30)]);
+    //     assert_eq!(game.node().children.len(), 2);
 
-        game.back_to_root();
-        game.play(game.node().actions.binary_search(&Action::Check).unwrap());
-        game.play(game.node().actions.binary_search(&Action::Check).unwrap());
-        game.play(3);
-        game.play(game.node().actions.binary_search(&Action::Check).unwrap());
-        game.play(game.node().actions.binary_search(&Action::Check).unwrap());
-        game.play(4);
+    //     game.back_to_root();
+    //     game.play(game.node().actions.binary_search(&Action::Check).unwrap());
+    //     game.play(game.node().actions.binary_search(&Action::Check).unwrap());
+    //     game.play(3);
+    //     game.play(game.node().actions.binary_search(&Action::Check).unwrap());
+    //     game.play(game.node().actions.binary_search(&Action::Check).unwrap());
+    //     game.play(4);
 
-        assert_eq!(game.available_actions(), &[Action::Check, Action::Bet(30)]);
-        assert_eq!(game.node().children.len(), 2);
+    //     assert_eq!(game.available_actions(), &[Action::Check, Action::Bet(30)]);
+    //     assert_eq!(game.node().children.len(), 2);
 
-        solve(&mut game, 10, 0.05, false);
-    }
+    //     solve(&mut game, 10, 0.05, false);
+    // }
 
     #[test]
     fn isomorphism_monotone() {

@@ -6,8 +6,8 @@ use bincode::{error::DecodeError, Decode, Encode};
 
 pub(crate) const PLAYER_OOP: u8 = 0;
 pub(crate) const PLAYER_IP: u8 = 1;
-pub(crate) const PLAYER_MASK: u8 = 1;
 pub(crate) const PLAYER_CHANCE: u8 = 2;
+pub(crate) const PLAYER_MASK: u8 = 3;
 pub(crate) const PLAYER_ALLIN_FLAG: u8 = 4;
 pub(crate) const PLAYER_CHANCE_FLAG: u8 = 8;
 pub(crate) const PLAYER_TERMINAL_FLAG: u8 = 16;
@@ -155,7 +155,7 @@ pub(crate) struct ActionTreeNode {
 }
 
 struct BuildTreeInfo {
-    last_action: Action,
+    prev_action: Action,
     allin_flag: bool,
     oop_call_flag: bool,
     stack: [i32; 2],
@@ -552,7 +552,7 @@ impl ActionTree {
         let mut actions = Vec::new();
 
         if donk_candidates.is_some()
-            && matches!(info.last_action, Action::Chance(_))
+            && matches!(info.prev_action, Action::Chance(_))
             && info.oop_call_flag
         {
             // check
@@ -584,7 +584,7 @@ impl ActionTree {
                 actions.push(Action::AllIn(max_amount));
             }
         } else if matches!(
-            info.last_action,
+            info.prev_action,
             Action::None | Action::Check | Action::Chance(_)
         ) {
             // check
@@ -833,12 +833,12 @@ impl ActionTree {
         let is_valid_bet = match action {
             Action::Bet(amount) if amount >= min_amount && amount < max_amount => {
                 matches!(
-                    info.last_action,
+                    info.prev_action,
                     Action::None | Action::Check | Action::Chance(_)
                 )
             }
             Action::Raise(amount) if amount >= min_amount && amount < max_amount => {
-                matches!(info.last_action, Action::Bet(_) | Action::Raise(_))
+                matches!(info.prev_action, Action::Bet(_) | Action::Raise(_))
             }
             Action::AllIn(amount) => amount == max_amount,
             _ => false,
@@ -996,7 +996,7 @@ impl BuildTreeInfo {
     #[inline]
     fn new(stack: i32) -> Self {
         Self {
-            last_action: Action::None,
+            prev_action: Action::None,
             allin_flag: false,
             oop_call_flag: false,
             stack: [stack, stack],
@@ -1030,7 +1030,7 @@ impl BuildTreeInfo {
         }
 
         BuildTreeInfo {
-            last_action: action,
+            prev_action: action,
             allin_flag,
             oop_call_flag,
             stack,
@@ -1050,6 +1050,30 @@ impl Decode for ActionTreeNode {
             actions: Decode::decode(decoder)?,
             children: Decode::decode(decoder)?,
         })
+    }
+}
+
+pub(crate) fn count_num_action_nodes(node: &ActionTreeNode) -> [u64; 3] {
+    let mut ret = [0, 0, 0];
+    count_num_action_nodes_recursive(node, 0, &mut ret);
+    if ret[1] == 0 {
+        ret = [0, 0, ret[0]];
+    } else if ret[2] == 0 {
+        ret = [0, ret[0], ret[1]];
+    }
+    ret
+}
+
+fn count_num_action_nodes_recursive(node: &ActionTreeNode, street: usize, count: &mut [u64; 3]) {
+    count[street] += 1;
+    if node.is_terminal() {
+        // do nothing
+    } else if node.is_chance() {
+        count_num_action_nodes_recursive(&node.children[0].lock(), street + 1, count);
+    } else {
+        for child in &node.children {
+            count_num_action_nodes_recursive(&child.lock(), street, count);
+        }
     }
 }
 
