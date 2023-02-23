@@ -1,5 +1,9 @@
 # List of breaking changes
 
+## 2023-02-23
+
+- `available_actions()` method of `PostFlopGame` now returns `Vec<Action>` instead of `&[Action]`.
+
 ## 2022-12-13
 
 - revert: `compute_exploitability` function is back, and `compute_mes_ev_average` function is removed.

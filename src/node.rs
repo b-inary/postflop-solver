@@ -15,7 +15,9 @@ use {
 };
 
 /// A struct representing a node in a postflop game tree.
-#[derive(Clone, Copy)]
+///
+/// The nodes must be stored as `Vec<MutexLike<PostFlopNode>>`.
+#[derive(Debug, Clone, Copy)]
 pub struct PostFlopNode {
     pub(crate) prev_action: Action,
     pub(crate) player: u8,

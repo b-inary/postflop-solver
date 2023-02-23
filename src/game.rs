@@ -585,9 +585,7 @@ impl PostFlopGame {
             self.storage_chance = MutexLike::new(vec![0.0; num_chances]);
         }
 
-        let mut action_counter = 0;
-        let mut chance_counter = 0;
-        self.allocate_memory_recursive(&mut self.root(), &mut action_counter, &mut chance_counter);
+        self.allocate_memory_nodes();
     }
 
     /// Checks the card configuration.
@@ -1047,19 +1045,22 @@ impl PostFlopGame {
     }
 
     /// Calculates the number of storage elements that will be removed.
-    fn calculate_removed_line_info_recursive(node: &PostFlopNode, info: &mut BuildTreeInfo) {
+    fn calculate_removed_line_info_recursive(node: &mut PostFlopNode, info: &mut BuildTreeInfo) {
         if node.is_terminal() {
             return;
         }
 
         if node.is_chance() {
             info.num_storage_chances += (node.num_elements + node.num_elements_aux) as u64;
+            node.num_elements = 0;
+            node.num_elements_aux = 0;
         } else {
             info.num_storage_actions += node.num_elements as u64;
+            node.num_elements = 0;
         }
 
         for action in node.action_indices() {
-            Self::calculate_removed_line_info_recursive(&node.play(action), info);
+            Self::calculate_removed_line_info_recursive(&mut node.play(action), info);
         }
     }
 
@@ -1111,16 +1112,17 @@ impl PostFlopGame {
             ..Default::default()
         };
 
-        let node_to_remove = node.play(index);
-        Self::calculate_removed_line_info_recursive(&node_to_remove, &mut info);
+        let mut node_to_remove = node.play(index);
+        Self::calculate_removed_line_info_recursive(&mut node_to_remove, &mut info);
 
         // STEP 2
         let children = node.children();
         for i in index..node.num_children as usize - 1 {
-            let child = &mut children[i].lock();
-            **child = *children[i + 1].lock();
-            if child.children_offset > 0 {
-                child.children_offset += 1;
+            let mut x = children[i].lock();
+            let mut y = children[i + 1].lock();
+            mem::swap(&mut *x, &mut *y);
+            if x.children_offset > 0 {
+                x.children_offset += 1;
             }
         }
         node.num_children -= 1;
@@ -1132,60 +1134,55 @@ impl PostFlopGame {
     }
 
     /// Allocates memory recursively.
-    fn allocate_memory_recursive(
-        &self,
-        node: &mut PostFlopNode,
-        action_counter: &mut usize,
-        chance_counter: &mut usize,
-    ) {
-        if node.is_terminal() {
-            return;
-        }
+    fn allocate_memory_nodes(&self) {
+        let mut action_counter = 0;
+        let mut chance_counter = 0;
 
-        if node.is_chance() {
-            if node.num_elements > 0 {
+        for node in &self.node_arena {
+            let mut node = node.lock();
+            if node.is_terminal() {
+                // do nothing
+            } else if node.is_chance() {
+                if node.num_elements > 0 {
+                    unsafe {
+                        if self.is_compression_enabled {
+                            let ptr = self.storage_chance_compressed.lock().as_mut_ptr();
+                            node.storage1 = ptr.add(chance_counter) as *mut u8;
+                        } else {
+                            let ptr = self.storage_chance.lock().as_mut_ptr();
+                            node.storage1 = ptr.add(chance_counter) as *mut u8;
+                        }
+                    }
+                    chance_counter += node.num_elements as usize;
+                }
+                if node.num_elements_aux > 0 {
+                    unsafe {
+                        if self.is_compression_enabled {
+                            let ptr = self.storage_chance_compressed.lock().as_mut_ptr();
+                            node.storage2 = ptr.add(chance_counter) as *mut u8;
+                        } else {
+                            let ptr = self.storage_chance.lock().as_mut_ptr();
+                            node.storage2 = ptr.add(chance_counter) as *mut u8;
+                        }
+                    }
+                    chance_counter += node.num_elements_aux as usize;
+                }
+            } else {
                 unsafe {
                     if self.is_compression_enabled {
-                        let ptr = self.storage_chance_compressed.lock().as_mut_ptr();
-                        node.storage1 = ptr.add(*chance_counter) as *mut u8;
+                        let ptr1 = self.storage1_compressed.lock().as_mut_ptr();
+                        let ptr2 = self.storage2_compressed.lock().as_mut_ptr();
+                        node.storage1 = ptr1.add(action_counter) as *mut u8;
+                        node.storage2 = ptr2.add(action_counter) as *mut u8;
                     } else {
-                        let ptr = self.storage_chance.lock().as_mut_ptr();
-                        node.storage1 = ptr.add(*chance_counter) as *mut u8;
+                        let ptr1 = self.storage1.lock().as_mut_ptr();
+                        let ptr2 = self.storage2.lock().as_mut_ptr();
+                        node.storage1 = ptr1.add(action_counter) as *mut u8;
+                        node.storage2 = ptr2.add(action_counter) as *mut u8;
                     }
                 }
-                *chance_counter += node.num_elements as usize;
+                action_counter += node.num_elements as usize;
             }
-            if node.num_elements_aux > 0 {
-                unsafe {
-                    if self.is_compression_enabled {
-                        let ptr = self.storage_chance_compressed.lock().as_mut_ptr();
-                        node.storage2 = ptr.add(*chance_counter) as *mut u8;
-                    } else {
-                        let ptr = self.storage_chance.lock().as_mut_ptr();
-                        node.storage2 = ptr.add(*chance_counter) as *mut u8;
-                    }
-                }
-                *chance_counter += node.num_elements_aux as usize;
-            }
-        } else {
-            unsafe {
-                if self.is_compression_enabled {
-                    let ptr1 = self.storage1_compressed.lock().as_mut_ptr();
-                    let ptr2 = self.storage2_compressed.lock().as_mut_ptr();
-                    node.storage1 = ptr1.add(*action_counter) as *mut u8;
-                    node.storage2 = ptr2.add(*action_counter) as *mut u8;
-                } else {
-                    let ptr1 = self.storage1.lock().as_mut_ptr();
-                    let ptr2 = self.storage2.lock().as_mut_ptr();
-                    node.storage1 = ptr1.add(*action_counter) as *mut u8;
-                    node.storage2 = ptr2.add(*action_counter) as *mut u8;
-                }
-            }
-            *action_counter += node.num_elements as usize;
-        }
-
-        for action in node.action_indices() {
-            self.allocate_memory_recursive(&mut node.play(action), action_counter, chance_counter);
         }
     }
 
@@ -3141,16 +3138,16 @@ mod tests {
                 Action::Check,
                 Action::Check,
                 Action::Chance(2),
-                Action::Bet(30),
+                Action::Check,
             ],
             vec![
                 Action::Check,
                 Action::Check,
                 Action::Chance(2),
-                Action::Check,
-                Action::Check,
-                Action::Chance(3),
                 Action::Bet(30),
+                Action::Call,
+                Action::Chance(3),
+                Action::Bet(60),
             ],
         ];
 
@@ -3164,7 +3161,7 @@ mod tests {
         game.play(0);
         game.play(0);
         game.play(2);
-        assert_eq!(game.available_actions(), vec![Action::Check]);
+        assert_eq!(game.available_actions(), vec![Action::Bet(30)]);
 
         // Check that other turn lines are correct
         game.back_to_root();
@@ -3182,7 +3179,7 @@ mod tests {
         game.play(0);
         game.play(2);
         game.play(0);
-        game.play(0);
+        game.play(1);
         game.play(3);
         assert_eq!(game.available_actions(), vec![Action::Check]);
 
@@ -3192,23 +3189,23 @@ mod tests {
         game.play(0);
         game.play(2);
         game.play(0);
-        game.play(0);
+        game.play(1);
         game.play(4);
         assert_eq!(
             game.available_actions(),
-            vec![Action::Check, Action::Bet(30)]
+            vec![Action::Check, Action::Bet(60)]
         );
 
         game.back_to_root();
         game.play(0);
         game.play(0);
         game.play(3);
-        game.play(0);
-        game.play(0);
+        game.play(1);
+        game.play(1);
         game.play(4);
         assert_eq!(
             game.available_actions(),
-            vec![Action::Check, Action::Bet(30)]
+            vec![Action::Check, Action::Bet(60)]
         );
 
         solve(&mut game, 10, 0.05, false);
