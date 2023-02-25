@@ -757,52 +757,28 @@ fn remove_lines() {
     game.allocate_memory(false);
 
     // Check that the turn line is removed
-    game.back_to_root();
-    game.play(0);
-    game.play(0);
-    game.play(2);
+    game.apply_history(&[0, 0, 2]);
     assert_eq!(game.available_actions(), vec![Action::Bet(30)]);
 
     // Check that other turn lines are correct
-    game.back_to_root();
-    game.play(0);
-    game.play(0);
-    game.play(3);
+    game.apply_history(&[0, 0, 3]);
     assert_eq!(
         game.available_actions(),
         vec![Action::Check, Action::Bet(30)]
     );
 
     // Check that the river line is removed
-    game.back_to_root();
-    game.play(0);
-    game.play(0);
-    game.play(2);
-    game.play(0);
-    game.play(1);
-    game.play(3);
+    game.apply_history(&[0, 0, 2, 0, 1, 3]);
     assert_eq!(game.available_actions(), vec![Action::Check]);
 
     // Check that other river lines are correct
-    game.back_to_root();
-    game.play(0);
-    game.play(0);
-    game.play(2);
-    game.play(0);
-    game.play(1);
-    game.play(4);
+    game.apply_history(&[0, 0, 2, 0, 1, 4]);
     assert_eq!(
         game.available_actions(),
         vec![Action::Check, Action::Bet(60)]
     );
 
-    game.back_to_root();
-    game.play(0);
-    game.play(0);
-    game.play(3);
-    game.play(1);
-    game.play(1);
-    game.play(4);
+    game.apply_history(&[0, 0, 3, 1, 1, 4]);
     assert_eq!(
         game.available_actions(),
         vec![Action::Check, Action::Bet(60)]
