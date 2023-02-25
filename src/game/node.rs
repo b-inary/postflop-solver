@@ -1,38 +1,28 @@
-use crate::action_tree::*;
-use crate::card::*;
-use crate::interface::*;
-use crate::mutex_like::*;
-use std::ptr;
+use super::*;
 use std::slice;
 
 #[cfg(feature = "bincode")]
-use {
-    bincode::{
-        error::{DecodeError, EncodeError},
-        Decode, Encode,
-    },
-    std::cell::Cell,
-};
+use std::cell::Cell;
 
 /// A struct representing a node in a postflop game tree.
 ///
 /// The nodes must be stored as `Vec<MutexLike<PostFlopNode>>`.
 #[derive(Debug, Clone, Copy)]
 pub struct PostFlopNode {
-    pub(crate) prev_action: Action,
-    pub(crate) player: u8,
-    pub(crate) turn: u8,
-    pub(crate) river: u8,
-    pub(crate) is_locked: bool,
-    pub(crate) amount: i32,
-    pub(crate) children_offset: u32,
-    pub(crate) num_children: u32,
-    pub(crate) storage1: *mut u8,
-    pub(crate) storage2: *mut u8,
-    pub(crate) num_elements: u32,
-    pub(crate) num_elements_aux: u32,
-    pub(crate) scale1: f32,
-    pub(crate) scale2: f32,
+    pub(super) prev_action: Action,
+    pub(super) player: u8,
+    pub(super) turn: u8,
+    pub(super) river: u8,
+    pub(super) is_locked: bool,
+    pub(super) amount: i32,
+    pub(super) children_offset: u32,
+    pub(super) num_children: u32,
+    pub(super) storage1: *mut u8,
+    pub(super) storage2: *mut u8,
+    pub(super) num_elements: u32,
+    pub(super) num_elements_aux: u32,
+    pub(super) scale1: f32,
+    pub(super) scale2: f32,
 }
 
 unsafe impl Send for PostFlopNode {}
@@ -254,7 +244,7 @@ impl Default for PostFlopNode {
 }
 
 impl PostFlopNode {
-    pub(crate) fn children(&self) -> &[MutexLike<PostFlopNode>] {
+    pub(super) fn children(&self) -> &[MutexLike<PostFlopNode>] {
         // This is safe because `MutexLike<T>` is a `repr(transparent)` wrapper around `T`.
         let self_ptr = self as *const _ as *const MutexLike<PostFlopNode>;
         unsafe {
@@ -268,9 +258,9 @@ impl PostFlopNode {
 
 #[cfg(feature = "bincode")]
 thread_local! {
-    pub(crate) static ACTION_BASE: Cell<(*mut u8, *mut u8)> =
+    pub(super) static ACTION_BASE: Cell<(*mut u8, *mut u8)> =
         Cell::new((ptr::null_mut(), ptr::null_mut()));
-    pub(crate) static CHANCE_BASE: Cell<*mut u8> = Cell::new(ptr::null_mut());
+    pub(super) static CHANCE_BASE: Cell<*mut u8> = Cell::new(ptr::null_mut());
 }
 
 #[cfg(feature = "bincode")]
