@@ -171,9 +171,6 @@ mod sliceop;
 mod solver;
 mod utility;
 
-#[cfg(feature = "custom-alloc")]
-pub use alloc::*;
-
 pub use action_tree::*;
 pub use bet_size::*;
 pub use card::*;

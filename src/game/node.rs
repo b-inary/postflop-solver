@@ -1,9 +1,6 @@
 use super::*;
 use std::slice;
 
-#[cfg(feature = "bincode")]
-use std::cell::Cell;
-
 /// A struct representing a node in a postflop game tree.
 ///
 /// The nodes must be stored as `Vec<MutexLike<PostFlopNode>>`.
@@ -256,103 +253,5 @@ impl PostFlopNode {
                 self.num_children as usize,
             )
         }
-    }
-}
-
-#[cfg(feature = "bincode")]
-thread_local! {
-    pub(super) static ACTION_BASE: Cell<(*mut u8, *mut u8)> =
-        Cell::new((ptr::null_mut(), ptr::null_mut()));
-    pub(super) static CHANCE_BASE: Cell<*mut u8> = Cell::new(ptr::null_mut());
-}
-
-#[cfg(feature = "bincode")]
-impl Encode for PostFlopNode {
-    fn encode<E: bincode::enc::Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
-        // compute pointer offset
-        let (offset, offset_aux) = if self.is_chance() {
-            CHANCE_BASE.with(|p| {
-                let base = p.get();
-                let ret = match self.storage1.is_null() {
-                    true => -1,
-                    false => unsafe { self.storage1.offset_from(base) },
-                };
-                let ret_aux = match self.storage2.is_null() {
-                    true => -1,
-                    false => unsafe { self.storage2.offset_from(base) },
-                };
-                (ret, ret_aux)
-            })
-        } else {
-            ACTION_BASE.with(|ps| {
-                let (base1, _) = ps.get();
-                match self.storage1.is_null() {
-                    true => (-1, -1),
-                    false => {
-                        let ret = unsafe { self.storage1.offset_from(base1) };
-                        (ret, -1)
-                    }
-                }
-            })
-        };
-
-        // contents
-        self.prev_action.encode(encoder)?;
-        self.player.encode(encoder)?;
-        self.turn.encode(encoder)?;
-        self.river.encode(encoder)?;
-        self.is_locked.encode(encoder)?;
-        self.amount.encode(encoder)?;
-        self.children_offset.encode(encoder)?;
-        self.num_children.encode(encoder)?;
-        self.num_elements.encode(encoder)?;
-        self.num_elements_aux.encode(encoder)?;
-        self.scale1.encode(encoder)?;
-        self.scale2.encode(encoder)?;
-        offset.encode(encoder)?;
-        offset_aux.encode(encoder)?;
-
-        Ok(())
-    }
-}
-
-#[cfg(feature = "bincode")]
-impl Decode for PostFlopNode {
-    fn decode<D: bincode::de::Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
-        // node instance
-        let mut node = Self {
-            prev_action: Decode::decode(decoder)?,
-            player: Decode::decode(decoder)?,
-            turn: Decode::decode(decoder)?,
-            river: Decode::decode(decoder)?,
-            is_locked: Decode::decode(decoder)?,
-            amount: Decode::decode(decoder)?,
-            children_offset: Decode::decode(decoder)?,
-            num_children: Decode::decode(decoder)?,
-            num_elements: Decode::decode(decoder)?,
-            num_elements_aux: Decode::decode(decoder)?,
-            scale1: Decode::decode(decoder)?,
-            scale2: Decode::decode(decoder)?,
-            ..Default::default()
-        };
-
-        // pointers
-        let offset = isize::decode(decoder)?;
-        let offset_aux = isize::decode(decoder)?;
-        if node.is_chance() {
-            let base = CHANCE_BASE.with(|p| p.get());
-            if offset >= 0 {
-                node.storage1 = unsafe { base.offset(offset) };
-            }
-            if offset_aux >= 0 {
-                node.storage2 = unsafe { base.offset(offset_aux) };
-            }
-        } else if offset >= 0 {
-            let (base1, base2) = ACTION_BASE.with(|ps| ps.get());
-            node.storage1 = unsafe { base1.offset(offset) };
-            node.storage2 = unsafe { base2.offset(offset) };
-        }
-
-        Ok(node)
     }
 }

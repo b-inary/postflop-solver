@@ -132,7 +132,7 @@ unsafe impl Allocator for StackAlloc {
 /// use rayon::prelude::*;
 /// rayon::broadcast(|_| free_custom_alloc_buffer());
 /// ```
-pub fn free_custom_alloc_buffer() {
+pub(crate) fn free_custom_alloc_buffer() {
     STACK_ALLOC_DATA.with(|data| {
         let mut data = data.borrow_mut();
         data.free();
