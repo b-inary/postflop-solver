@@ -37,6 +37,7 @@ enum State {
 }
 
 /// A struct representing a postflop game.
+#[derive(Default)]
 pub struct PostFlopGame {
     // state
     state: State,
@@ -951,61 +952,6 @@ impl PostFlopGame {
                 }
                 action_counter += node.num_elements as usize;
             }
-        }
-    }
-}
-
-impl Default for PostFlopGame {
-    #[inline]
-    fn default() -> Self {
-        Self {
-            state: State::default(),
-            card_config: CardConfig::default(),
-            tree_config: TreeConfig::default(),
-            added_lines: Vec::default(),
-            removed_lines: Vec::default(),
-            action_root: Box::default(),
-            num_combinations: 0.0,
-            initial_weights: Default::default(),
-            private_cards: Default::default(),
-            same_hand_index: Default::default(),
-            valid_indices_flop: Default::default(),
-            valid_indices_turn: Default::default(),
-            valid_indices_river: Default::default(),
-            hand_strength: Vec::default(),
-            turn_isomorphism_ref: Vec::default(),
-            turn_isomorphism_card: Vec::default(),
-            turn_isomorphism_swap: Default::default(),
-            river_isomorphism_ref: Vec::default(),
-            river_isomorphism_card: Vec::default(),
-            river_isomorphism_swap: Default::default(),
-            is_compression_enabled: false,
-            misc_memory_usage: 0,
-            num_storage_actions: 0,
-            num_storage_chances: 0,
-            node_arena: Vec::default(),
-            storage1: MutexLike::default(),
-            storage2: MutexLike::default(),
-            storage_chance: MutexLike::default(),
-            storage1_compressed: MutexLike::default(),
-            storage2_compressed: MutexLike::default(),
-            storage_chance_compressed: MutexLike::default(),
-            locking_strategy: BTreeMap::default(),
-            root_cfvalue_ip: Vec::default(),
-            history: Vec::default(),
-            node_history: Vec::default(),
-            is_normalized_weight_cached: false,
-            turn: NOT_DEALT,
-            river: NOT_DEALT,
-            chance_factor: 0,
-            turn_swapped_suit: None,
-            turn_swap: None,
-            river_swap: None,
-            total_bet_amount: [0, 0],
-            prev_bet_amount: 0,
-            weights: Default::default(),
-            normalized_weights: Default::default(),
-            cfvalues_cache: Default::default(),
         }
     }
 }

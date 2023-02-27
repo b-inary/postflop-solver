@@ -65,7 +65,10 @@ impl GameNode for PostFlopNode {
 
     #[inline]
     fn chance_factor(&self) -> f32 {
-        [1.0 / 45.0, 1.0 / 44.0][(self.turn != NOT_DEALT) as usize]
+        match self.turn {
+            NOT_DEALT => 1.0 / 45.0,
+            _ => 1.0 / 44.0,
+        }
     }
 
     #[inline]
