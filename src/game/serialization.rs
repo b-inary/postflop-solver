@@ -3,37 +3,38 @@ use super::*;
 use bincode::error::{DecodeError, EncodeError};
 use std::cell::Cell;
 
-static VERSION_STR: &str = "2023-02-24";
+static VERSION_STR: &str = "2023-03-01";
 
 thread_local! {
     static ACTION_BASE: Cell<(*mut u8, *mut u8)> = Cell::new((ptr::null_mut(), ptr::null_mut()));
+    static IP_BASE: Cell<*mut u8> = Cell::new(ptr::null_mut());
     static CHANCE_BASE: Cell<*mut u8> = Cell::new(ptr::null_mut());
 }
 
 impl Encode for PostFlopGame {
     fn encode<E: bincode::enc::Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
         // store base pointers
-        ACTION_BASE.with(|ps| {
+        ACTION_BASE.with(|c| {
             if self.state >= State::MemoryAllocated {
-                let base1 = match self.is_compression_enabled {
-                    true => self.storage1_compressed.lock().as_mut_ptr() as *mut u8,
-                    false => self.storage1.lock().as_mut_ptr() as *mut u8,
-                };
-                ps.set((base1, ptr::null_mut()));
+                c.set((self.storage1.lock().as_mut_ptr(), ptr::null_mut()));
             } else {
-                ps.set((ptr::null_mut(), ptr::null_mut()));
+                c.set((ptr::null_mut(), ptr::null_mut()));
             }
         });
 
-        CHANCE_BASE.with(|p| {
+        IP_BASE.with(|c| {
             if self.state >= State::MemoryAllocated {
-                let base = match self.is_compression_enabled {
-                    true => self.storage_chance_compressed.lock().as_mut_ptr() as *mut u8,
-                    false => self.storage_chance.lock().as_mut_ptr() as *mut u8,
-                };
-                p.set(base);
+                c.set(self.storage_ip.lock().as_mut_ptr());
             } else {
-                p.set(ptr::null_mut());
+                c.set(ptr::null_mut());
+            }
+        });
+
+        CHANCE_BASE.with(|c| {
+            if self.state >= State::MemoryAllocated {
+                c.set(self.storage_chance.lock().as_mut_ptr());
+            } else {
+                c.set(ptr::null_mut());
             }
         });
 
@@ -50,17 +51,14 @@ impl Encode for PostFlopGame {
         self.card_config.encode(encoder)?;
         self.num_combinations.encode(encoder)?;
         self.is_compression_enabled.encode(encoder)?;
-        self.misc_memory_usage.encode(encoder)?;
         self.num_storage_actions.encode(encoder)?;
         self.num_storage_chances.encode(encoder)?;
+        self.misc_memory_usage.encode(encoder)?;
         self.storage1.encode(encoder)?;
         self.storage2.encode(encoder)?;
+        self.storage_ip.encode(encoder)?;
         self.storage_chance.encode(encoder)?;
-        self.storage1_compressed.encode(encoder)?;
-        self.storage2_compressed.encode(encoder)?;
-        self.storage_chance_compressed.encode(encoder)?;
         self.locking_strategy.encode(encoder)?;
-        self.root_cfvalue_ip.encode(encoder)?;
         self.history.encode(encoder)?;
         self.is_normalized_weight_cached.encode(encoder)?;
 
@@ -105,49 +103,44 @@ impl Decode for PostFlopGame {
             action_root,
             num_combinations: Decode::decode(decoder)?,
             is_compression_enabled: Decode::decode(decoder)?,
-            misc_memory_usage: Decode::decode(decoder)?,
             num_storage_actions: Decode::decode(decoder)?,
             num_storage_chances: Decode::decode(decoder)?,
+            misc_memory_usage: Decode::decode(decoder)?,
             storage1: Decode::decode(decoder)?,
             storage2: Decode::decode(decoder)?,
+            storage_ip: Decode::decode(decoder)?,
             storage_chance: Decode::decode(decoder)?,
-            storage1_compressed: Decode::decode(decoder)?,
-            storage2_compressed: Decode::decode(decoder)?,
-            storage_chance_compressed: Decode::decode(decoder)?,
             locking_strategy: Decode::decode(decoder)?,
             ..Default::default()
         };
 
-        let root_cfvalue_ip = Vec::<f32>::decode(decoder)?;
         let history = Vec::<usize>::decode(decoder)?;
         let is_normalized_weight_cached = bool::decode(decoder)?;
 
         // store base pointers
-        ACTION_BASE.with(|ps| {
+        ACTION_BASE.with(|c| {
             if game.state >= State::MemoryAllocated {
-                let (base1, base2);
-                if game.is_compression_enabled {
-                    base1 = game.storage1_compressed.lock().as_mut_ptr() as *mut u8;
-                    base2 = game.storage2_compressed.lock().as_mut_ptr() as *mut u8;
-                } else {
-                    base1 = game.storage1.lock().as_mut_ptr() as *mut u8;
-                    base2 = game.storage2.lock().as_mut_ptr() as *mut u8;
-                }
-                ps.set((base1, base2));
+                let base1 = game.storage1.lock().as_mut_ptr();
+                let base2 = game.storage2.lock().as_mut_ptr();
+                c.set((base1, base2));
             } else {
-                ps.set((ptr::null_mut(), ptr::null_mut()));
+                c.set((ptr::null_mut(), ptr::null_mut()));
             }
         });
 
-        CHANCE_BASE.with(|p| {
+        IP_BASE.with(|c| {
             if game.state >= State::MemoryAllocated {
-                let base = match game.is_compression_enabled {
-                    true => game.storage_chance_compressed.lock().as_mut_ptr() as *mut u8,
-                    false => game.storage_chance.lock().as_mut_ptr() as *mut u8,
-                };
-                p.set(base);
+                c.set(game.storage_ip.lock().as_mut_ptr());
             } else {
-                p.set(ptr::null_mut());
+                c.set(ptr::null_mut());
+            }
+        });
+
+        CHANCE_BASE.with(|c| {
+            if game.state >= State::MemoryAllocated {
+                c.set(game.storage_chance.lock().as_mut_ptr());
+            } else {
+                c.set(ptr::null_mut());
             }
         });
 
@@ -160,7 +153,6 @@ impl Decode for PostFlopGame {
             game.init_card_fields();
             game.init_interpreter();
 
-            game.root_cfvalue_ip.copy_from_slice(&root_cfvalue_ip);
             game.apply_history(&history);
             if is_normalized_weight_cached {
                 game.cache_normalized_weights();
@@ -173,33 +165,6 @@ impl Decode for PostFlopGame {
 
 impl Encode for PostFlopNode {
     fn encode<E: bincode::enc::Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
-        // compute pointer offset
-        let (offset, offset_aux) = if self.is_chance() {
-            CHANCE_BASE.with(|p| {
-                let base = p.get();
-                let ret = match self.storage1.is_null() {
-                    true => -1,
-                    false => unsafe { self.storage1.offset_from(base) },
-                };
-                let ret_aux = match self.storage2.is_null() {
-                    true => -1,
-                    false => unsafe { self.storage2.offset_from(base) },
-                };
-                (ret, ret_aux)
-            })
-        } else {
-            ACTION_BASE.with(|ps| {
-                let (base1, _) = ps.get();
-                match self.storage1.is_null() {
-                    true => (-1, -1),
-                    false => {
-                        let ret = unsafe { self.storage1.offset_from(base1) };
-                        (ret, -1)
-                    }
-                }
-            })
-        };
-
         // contents
         self.prev_action.encode(encoder)?;
         self.player.encode(encoder)?;
@@ -209,12 +174,26 @@ impl Encode for PostFlopNode {
         self.amount.encode(encoder)?;
         self.children_offset.encode(encoder)?;
         self.num_children.encode(encoder)?;
+        self.num_elements_ip.encode(encoder)?;
         self.num_elements.encode(encoder)?;
-        self.num_elements_aux.encode(encoder)?;
         self.scale1.encode(encoder)?;
         self.scale2.encode(encoder)?;
-        offset.encode(encoder)?;
-        offset_aux.encode(encoder)?;
+        self.scale3.encode(encoder)?;
+
+        // pointer offset
+        if !self.storage1.is_null() {
+            if self.is_terminal() {
+                // do nothing
+            } else if self.is_chance() {
+                let offset = CHANCE_BASE.with(|c| unsafe { self.storage1.offset_from(c.get()) });
+                offset.encode(encoder)?;
+            } else {
+                let offset = ACTION_BASE.with(|c| unsafe { self.storage1.offset_from(c.get().0) });
+                let offset_ip = IP_BASE.with(|c| unsafe { self.storage3.offset_from(c.get()) });
+                offset.encode(encoder)?;
+                offset_ip.encode(encoder)?;
+            }
+        }
 
         Ok(())
     }
@@ -232,28 +211,32 @@ impl Decode for PostFlopNode {
             amount: Decode::decode(decoder)?,
             children_offset: Decode::decode(decoder)?,
             num_children: Decode::decode(decoder)?,
+            num_elements_ip: Decode::decode(decoder)?,
             num_elements: Decode::decode(decoder)?,
-            num_elements_aux: Decode::decode(decoder)?,
             scale1: Decode::decode(decoder)?,
             scale2: Decode::decode(decoder)?,
+            scale3: Decode::decode(decoder)?,
             ..Default::default()
         };
 
         // pointers
-        let offset = isize::decode(decoder)?;
-        let offset_aux = isize::decode(decoder)?;
-        if node.is_chance() {
-            let base = CHANCE_BASE.with(|p| p.get());
-            if offset >= 0 {
-                node.storage1 = unsafe { base.offset(offset) };
+        if node.is_terminal() {
+            // do nothing
+        } else if node.is_chance() {
+            let base = CHANCE_BASE.with(|c| c.get());
+            if !base.is_null() {
+                node.storage1 = unsafe { base.offset(isize::decode(decoder)?) };
             }
-            if offset_aux >= 0 {
-                node.storage2 = unsafe { base.offset(offset_aux) };
+        } else {
+            let base3 = IP_BASE.with(|c| c.get());
+            if !base3.is_null() {
+                let (base1, base2) = ACTION_BASE.with(|c| c.get());
+                let offset = isize::decode(decoder)?;
+                let offset_ip = isize::decode(decoder)?;
+                node.storage1 = unsafe { base1.offset(offset) };
+                node.storage2 = unsafe { base2.offset(offset) };
+                node.storage3 = unsafe { base3.offset(offset_ip) };
             }
-        } else if offset >= 0 {
-            let (base1, base2) = ACTION_BASE.with(|ps| ps.get());
-            node.storage1 = unsafe { base1.offset(offset) };
-            node.storage2 = unsafe { base2.offset(offset) };
         }
 
         Ok(node)

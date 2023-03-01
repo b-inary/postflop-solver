@@ -8,10 +8,9 @@ pub(crate) const PLAYER_OOP: u8 = 0;
 pub(crate) const PLAYER_IP: u8 = 1;
 pub(crate) const PLAYER_CHANCE: u8 = 2;
 pub(crate) const PLAYER_MASK: u8 = 3;
-pub(crate) const PLAYER_ALLIN_FLAG: u8 = 4;
-pub(crate) const PLAYER_CHANCE_FLAG: u8 = 8;
-pub(crate) const PLAYER_TERMINAL_FLAG: u8 = 16;
-pub(crate) const PLAYER_FOLD_FLAG: u8 = 48;
+pub(crate) const PLAYER_CHANCE_FLAG: u8 = 4; // chance_player = PLAYER_CHANCE_FLAG | prev_player
+pub(crate) const PLAYER_TERMINAL_FLAG: u8 = 8;
+pub(crate) const PLAYER_FOLD_FLAG: u8 = 24;
 
 /// Available actions of the postflop game.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
@@ -492,7 +491,7 @@ impl ActionTree {
 
             let next_player = match (info.allin_flag, node.board_state) {
                 (false, _) => PLAYER_OOP,
-                (true, BoardState::Flop) => PLAYER_CHANCE_FLAG | PLAYER_ALLIN_FLAG | PLAYER_CHANCE,
+                (true, BoardState::Flop) => PLAYER_CHANCE_FLAG | PLAYER_CHANCE,
                 (true, _) => PLAYER_TERMINAL_FLAG,
             };
 
@@ -694,14 +693,9 @@ impl ActionTree {
         // merge bet actions with close amounts
         actions = merge_bet_actions(actions, pot, prev_amount, self.config.merging_threshold);
 
-        let player_allin_flag = match info.allin_flag {
-            true => PLAYER_ALLIN_FLAG,
-            false => 0,
-        };
-
         let player_after_call = match node.board_state {
             BoardState::River => PLAYER_TERMINAL_FLAG,
-            _ => PLAYER_CHANCE_FLAG | player_allin_flag | player,
+            _ => PLAYER_CHANCE_FLAG | player,
         };
 
         let player_after_check = match player {
@@ -862,14 +856,9 @@ impl ActionTree {
             };
         }
 
-        let player_allin_flag = match info.allin_flag {
-            true => PLAYER_ALLIN_FLAG,
-            false => 0,
-        };
-
         let player_after_call = match node.board_state {
             BoardState::River => PLAYER_TERMINAL_FLAG,
-            _ => PLAYER_CHANCE_FLAG | player_allin_flag | player,
+            _ => PLAYER_CHANCE_FLAG | player,
         };
 
         let player_after_check = match player {

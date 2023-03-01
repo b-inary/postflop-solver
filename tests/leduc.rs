@@ -133,7 +133,7 @@ impl Game for LeducGame {
     }
 
     #[inline]
-    fn set_solved(&mut self, _root_cfvalue_ip: &[f32]) {
+    fn set_solved(&mut self) {
         self.is_solved = true;
     }
 

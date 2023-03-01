@@ -9,8 +9,8 @@ impl PostFlopGame {
         }
 
         self.history.clear();
-        self.node_history = vec![0];
         self.is_normalized_weight_cached = false;
+        self.current_node_index = 0;
         self.turn = self.card_config.turn;
         self.river = self.card_config.river;
         self.chance_factor = 1;
@@ -22,7 +22,6 @@ impl PostFlopGame {
 
         self.weights[0].copy_from_slice(&self.initial_weights[0]);
         self.weights[1].copy_from_slice(&self.initial_weights[1]);
-        self.cfvalues_cache[1].copy_from_slice(&self.root_cfvalue_ip);
     }
 
     /// Returns the history of the current node.
@@ -282,24 +281,8 @@ impl PostFlopGame {
                     });
             }
 
-            // cache the counterfactual values
-            let node = self.node();
-            let player_ip = PLAYER_IP as usize;
-            let num_hands = self.num_private_hands(player_ip);
-            let vec = if self.is_compression_enabled {
-                let src = node.cfvalues_chance_compressed(player_ip);
-                let slice = row(src, action_index, num_hands);
-                let scale = node.cfvalue_chance_scale(player_ip);
-                decode_signed_slice(slice, scale)
-            } else {
-                let src = node.cfvalues_chance(player_ip);
-                row(src, action_index, num_hands).to_vec()
-            };
-            self.cfvalues_cache[player_ip].copy_from_slice(&vec);
-
             // update the state
-            let offset = self.node_offset(&self.node().play(action_index));
-            self.node_history.push(offset);
+            self.current_node_index = self.node_index(&self.node().play(action_index));
             if is_turn {
                 self.turn = actual_card;
                 self.chance_factor *= 45;
@@ -353,8 +336,7 @@ impl PostFlopGame {
             }
 
             // update the node
-            let offset = self.node_offset(&self.node().play(action));
-            self.node_history.push(offset);
+            self.current_node_index = self.node_index(&self.node().play(action));
         }
 
         self.history.push(action);
@@ -601,18 +583,33 @@ impl PostFlopGame {
             self.evaluate(ret.spare_capacity_mut(), &node, player, &cfreach);
             unsafe { ret.set_len(num_hands) };
             ret
-        } else if node.is_chance() {
-            self.cfvalues_chance(player)
-        } else if player != self.current_player() {
-            self.cfvalues_cache[player].to_vec()
-        } else if self.is_compression_enabled {
+        } else if node.is_chance() && node.cfvalue_storage_player() == Some(player) {
+            if self.is_compression_enabled {
+                let slice = node.cfvalues_chance_compressed();
+                let scale = node.cfvalue_chance_scale();
+                decode_signed_slice(slice, scale)
+            } else {
+                node.cfvalues_chance().to_vec()
+            }
+        } else if node.has_cfvalues_ip() && player == PLAYER_IP as usize {
+            if self.is_compression_enabled {
+                let slice = node.cfvalues_ip_compressed();
+                let scale = node.cfvalue_ip_scale();
+                decode_signed_slice(slice, scale)
+            } else {
+                node.cfvalues_ip().to_vec()
+            }
+        } else if player == self.current_player() {
             have_actions = true;
-            let slice = node.cfvalues_compressed();
-            let scale = node.cfvalue_scale();
-            decode_signed_slice(slice, scale)
+            if self.is_compression_enabled {
+                let slice = node.cfvalues_compressed();
+                let scale = node.cfvalue_scale();
+                decode_signed_slice(slice, scale)
+            } else {
+                node.cfvalues().to_vec()
+            }
         } else {
-            have_actions = true;
-            node.cfvalues().to_vec()
+            self.cfvalues_cache[player].to_vec()
         };
 
         let starting_pot = self.tree_config.starting_pot;
@@ -750,8 +747,8 @@ impl PostFlopGame {
         });
 
         node.is_locked = true;
-        let offset = self.node_offset(&node);
-        self.locking_strategy.insert(offset, locking);
+        let index = self.node_index(&node);
+        self.locking_strategy.insert(index, locking);
     }
 
     /// Unlocks the strategy of the current node.
@@ -775,8 +772,8 @@ impl PostFlopGame {
         }
 
         node.is_locked = false;
-        let offset = self.node_offset(&node);
-        self.locking_strategy.remove(&offset);
+        let index = self.node_index(&node);
+        self.locking_strategy.remove(&index);
     }
 
     /// Returns the locking strategy of the current node.
@@ -802,8 +799,8 @@ impl PostFlopGame {
             panic!("Chance node is not allowed");
         }
 
-        let offset = self.node_offset(&self.node());
-        self.locking_strategy.get(&offset).map(|s| {
+        let index = self.node_index(&self.node());
+        self.locking_strategy.get(&index).map(|s| {
             let mut ret = s.clone();
             let player = self.current_player();
             let num_hands = self.num_private_hands(player);
@@ -817,12 +814,12 @@ impl PostFlopGame {
     /// Returns the reference to the current node.
     #[inline]
     fn node(&self) -> MutexGuardLike<PostFlopNode> {
-        self.node_arena[*self.node_history.last().unwrap()].lock()
+        self.node_arena[self.current_node_index].lock()
     }
 
-    /// Returns the offset of the given node.
+    /// Returns the index of the given node.
     #[inline]
-    pub(super) fn node_offset(&self, node: &PostFlopNode) -> usize {
+    pub(super) fn node_index(&self, node: &PostFlopNode) -> usize {
         let node_ptr = node as *const _ as *const MutexLike<PostFlopNode>;
         unsafe { node_ptr.offset_from(self.node_arena.as_ptr()) as usize }
     }
@@ -926,67 +923,5 @@ impl PostFlopGame {
                 *result.get_unchecked_mut(index as usize) -= amount * opponent_weight;
             }
         }
-    }
-
-    /// Returns the counterfactual values vector of the chance node.
-    fn cfvalues_chance(&self, player: usize) -> Vec<f32> {
-        let node = self.node();
-        let num_hands = self.num_private_hands(player);
-        let storage = node.cfvalue_storage(player);
-
-        if storage == CfValueStorage::None {
-            return self.cfvalues_cache[player].to_vec();
-        }
-
-        let mut vec = if self.is_compression_enabled {
-            let slice = node.cfvalues_chance_compressed(player);
-            let scale = node.cfvalue_chance_scale(player);
-            decode_signed_slice(slice, scale)
-        } else {
-            node.cfvalues_chance(player).to_vec()
-        };
-
-        if storage == CfValueStorage::Sum {
-            return vec;
-        }
-
-        let mut ret_f64 = vec![0.0; num_hands];
-
-        vec.chunks_exact(num_hands).for_each(|row| {
-            ret_f64.iter_mut().zip(row).for_each(|(r, &v)| {
-                *r += v as f64;
-            });
-        });
-
-        let isomorphic_chances = self.isomorphic_chances(&node);
-
-        for (i, &isomorphic_index) in isomorphic_chances.iter().enumerate() {
-            let swap_list = &self.isomorphic_swap(&node, i)[player];
-            let tmp = row_mut(&mut vec, isomorphic_index as usize, num_hands);
-
-            for &(i, j) in swap_list {
-                unsafe {
-                    ptr::swap(
-                        tmp.get_unchecked_mut(i as usize),
-                        tmp.get_unchecked_mut(j as usize),
-                    );
-                }
-            }
-
-            ret_f64.iter_mut().zip(&*tmp).for_each(|(r, &v)| {
-                *r += v as f64;
-            });
-
-            for &(i, j) in swap_list {
-                unsafe {
-                    ptr::swap(
-                        tmp.get_unchecked_mut(i as usize),
-                        tmp.get_unchecked_mut(j as usize),
-                    );
-                }
-            }
-        }
-
-        ret_f64.iter().map(|&v| v as f32).collect()
     }
 }

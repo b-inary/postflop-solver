@@ -228,27 +228,21 @@ pub fn finalize<T: Game>(game: &mut T) {
         panic!("the game is not ready");
     }
 
-    let mut cfvalues = [
-        Vec::with_capacity(game.num_private_hands(0)),
-        Vec::with_capacity(game.num_private_hands(1)),
-    ];
-
     // compute the expected values and save them
     for player in 0..2 {
-        let cfreach = game.initial_weights(player ^ 1);
+        let mut cfvalues = Vec::with_capacity(game.num_private_hands(player));
         compute_cfvalue_recursive(
-            cfvalues[player].spare_capacity_mut(),
+            cfvalues.spare_capacity_mut(),
             game,
             &mut game.root(),
             player,
-            cfreach,
+            game.initial_weights(player ^ 1),
             true,
         );
-        unsafe { cfvalues[player].set_len(game.num_private_hands(player)) };
     }
 
     // set the game solved
-    game.set_solved(&cfvalues[1]);
+    game.set_solved();
 
     // free buffer
     #[cfg(all(feature = "custom-alloc", feature = "rayon"))]
@@ -435,23 +429,14 @@ fn compute_cfvalue_recursive<T: Game>(
             r.write(v as f32);
         });
 
-        let result = unsafe { &*(result as *const _ as *const [f32]) };
-
         // save the counterfactual values
-        if save_cfvalues {
-            let slice: &[f32] = match node.cfvalue_storage(player) {
-                CfValueStorage::None => &[],
-                CfValueStorage::Sum => result,
-                CfValueStorage::All => cfv_actions.as_slice(),
-            };
-            if !slice.is_empty() {
-                if game.is_compression_enabled() {
-                    let dst = node.cfvalues_chance_compressed_mut(player);
-                    let cfv_scale = encode_signed_slice(dst, slice);
-                    node.set_cfvalue_chance_scale(player, cfv_scale);
-                } else {
-                    node.cfvalues_chance_mut(player).copy_from_slice(slice);
-                }
+        if save_cfvalues && node.cfvalue_storage_player() == Some(player) {
+            let result = unsafe { &*(result as *const _ as *const [f32]) };
+            if game.is_compression_enabled() {
+                let cfv_scale = encode_signed_slice(node.cfvalues_chance_compressed_mut(), result);
+                node.set_cfvalue_chance_scale(cfv_scale);
+            } else {
+                node.cfvalues_chance_mut().copy_from_slice(result);
             }
         }
     }
@@ -554,6 +539,17 @@ fn compute_cfvalue_recursive<T: Game>(
         let mut cfv_actions = cfv_actions.lock();
         unsafe { cfv_actions.set_len(num_actions * num_hands) };
         sum_slices_uninit(result, &cfv_actions);
+    }
+
+    // save the counterfactual values for IP
+    if save_cfvalues && node.has_cfvalues_ip() && player == 1 {
+        let result = unsafe { &*(result as *const _ as *const [f32]) };
+        if game.is_compression_enabled() {
+            let cfv_scale = encode_signed_slice(node.cfvalues_ip_compressed_mut(), result);
+            node.set_cfvalue_ip_scale(cfv_scale);
+        } else {
+            node.cfvalues_ip_mut().copy_from_slice(result);
+        }
     }
 }
 

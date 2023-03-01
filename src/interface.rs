@@ -2,14 +2,6 @@ use crate::mutex_like::*;
 use std::mem::MaybeUninit;
 use std::ops::Range;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-#[doc(hidden)]
-pub enum CfValueStorage {
-    None,
-    Sum,
-    All,
-}
-
 /// The trait representing a game.
 pub trait Game: Send + Sync {
     /// The type representing a node in game tree.
@@ -44,7 +36,7 @@ pub trait Game: Send + Sync {
 
     /// Sets the instance to be solved.
     #[doc(hidden)]
-    fn set_solved(&mut self, root_cfvalue_ip: &[f32]);
+    fn set_solved(&mut self);
 
     /// Returns whether the game is raked.
     #[doc(hidden)]
@@ -133,21 +125,39 @@ pub trait GameNode: Send + Sync {
     #[doc(hidden)]
     fn cfvalues_mut(&mut self) -> &mut [f32];
 
-    /// Returns the option for storing counterfactual values for chance node.
+    /// Returns whether IP's counterfactual values are stored.
     #[doc(hidden)]
-    fn cfvalue_storage(&self, _player: usize) -> CfValueStorage {
-        CfValueStorage::None
+    fn has_cfvalues_ip(&self) -> bool {
+        false
+    }
+
+    /// Returns IP's counterfactual values.
+    #[doc(hidden)]
+    fn cfvalues_ip(&self) -> &[f32] {
+        unreachable!()
+    }
+
+    /// Returns the mutable reference to IP's counterfactual values.
+    #[doc(hidden)]
+    fn cfvalues_ip_mut(&mut self) -> &mut [f32] {
+        unreachable!()
+    }
+
+    /// Returns the player whose counterfactual values are stored (for chance node).
+    #[doc(hidden)]
+    fn cfvalue_storage_player(&self) -> Option<usize> {
+        None
     }
 
     /// Returns the buffer for counterfactual values.
     #[doc(hidden)]
-    fn cfvalues_chance(&self, _player: usize) -> &[f32] {
+    fn cfvalues_chance(&self) -> &[f32] {
         unreachable!()
     }
 
     /// Returns the mutable reference to the buffer for counterfactual values.
     #[doc(hidden)]
-    fn cfvalues_chance_mut(&mut self, _player: usize) -> &mut [f32] {
+    fn cfvalues_chance_mut(&mut self) -> &mut [f32] {
         unreachable!()
     }
 
@@ -193,15 +203,27 @@ pub trait GameNode: Send + Sync {
         unreachable!()
     }
 
+    /// Returns IP's compressed counterfactual values.
+    #[doc(hidden)]
+    fn cfvalues_ip_compressed(&self) -> &[i16] {
+        unreachable!()
+    }
+
+    /// Returns the mutable reference to IP's compressed counterfactual values.
+    #[doc(hidden)]
+    fn cfvalues_ip_compressed_mut(&mut self) -> &mut [i16] {
+        unreachable!()
+    }
+
     /// Returns the compressed buffer for counterfactual values.
     #[doc(hidden)]
-    fn cfvalues_chance_compressed(&self, _player: usize) -> &[i16] {
+    fn cfvalues_chance_compressed(&self) -> &[i16] {
         unreachable!()
     }
 
     /// Returns the mutable reference to the compressed buffer for counterfactual values.
     #[doc(hidden)]
-    fn cfvalues_chance_compressed_mut(&mut self, _player: usize) -> &mut [i16] {
+    fn cfvalues_chance_compressed_mut(&mut self) -> &mut [i16] {
         unreachable!()
     }
 
@@ -241,15 +263,27 @@ pub trait GameNode: Send + Sync {
         unreachable!()
     }
 
+    /// Returns the scale of the compressed counterfactual values for IP.
+    #[doc(hidden)]
+    fn cfvalue_ip_scale(&self) -> f32 {
+        unreachable!()
+    }
+
+    /// Sets the scale of the compressed counterfactual values for IP.
+    #[doc(hidden)]
+    fn set_cfvalue_ip_scale(&mut self, _scale: f32) {
+        unreachable!()
+    }
+
     /// Returns the scale of the compressed buffer for counterfactual values.
     #[doc(hidden)]
-    fn cfvalue_chance_scale(&self, _player: usize) -> f32 {
+    fn cfvalue_chance_scale(&self) -> f32 {
         unreachable!()
     }
 
     /// Sets the scale of the compressed buffer for counterfactual values.
     #[doc(hidden)]
-    fn set_cfvalue_chance_scale(&mut self, _player: usize, _scale: f32) {
+    fn set_cfvalue_chance_scale(&mut self, _scale: f32) {
         unreachable!()
     }
 
