@@ -71,10 +71,10 @@ pub struct PostFlopGame {
 
     // global storage (storage1: strategy, storage2: regret or cfvalue)
     node_arena: Vec<MutexLike<PostFlopNode>>,
-    storage1: MutexLike<Vec<u8>>,
-    storage2: MutexLike<Vec<u8>>,
-    storage_ip: MutexLike<Vec<u8>>,
-    storage_chance: MutexLike<Vec<u8>>,
+    storage1: Vec<u8>,
+    storage2: Vec<u8>,
+    storage_ip: Vec<u8>,
+    storage_chance: Vec<u8>,
     locking_strategy: BTreeMap<usize, Vec<f32>>,
 
     // result interpreter
@@ -345,10 +345,10 @@ impl PostFlopGame {
         let num_ip_values = self.num_storage_ip_values as usize;
         let num_chances = self.num_storage_chances as usize;
 
-        self.storage1 = MutexLike::new(vec![0; num_bytes * num_actions]);
-        self.storage2 = MutexLike::new(vec![0; num_bytes * num_actions]);
-        self.storage_ip = MutexLike::new(vec![0; num_bytes * num_ip_values]);
-        self.storage_chance = MutexLike::new(vec![0; num_bytes * num_chances]);
+        self.storage1 = vec![0; num_bytes * num_actions];
+        self.storage2 = vec![0; num_bytes * num_actions];
+        self.storage_ip = vec![0; num_bytes * num_ip_values];
+        self.storage_chance = vec![0; num_bytes * num_chances];
 
         self.allocate_memory_nodes();
     }
@@ -581,15 +581,15 @@ impl PostFlopGame {
 
     /// Clears the storage.
     #[inline]
-    fn clear_storage(&self) {
-        self.storage1.lock().clear();
-        self.storage2.lock().clear();
-        self.storage_ip.lock().clear();
-        self.storage_chance.lock().clear();
-        self.storage1.lock().shrink_to_fit();
-        self.storage2.lock().shrink_to_fit();
-        self.storage_ip.lock().shrink_to_fit();
-        self.storage_chance.lock().shrink_to_fit();
+    fn clear_storage(&mut self) {
+        self.storage1.clear();
+        self.storage2.clear();
+        self.storage_ip.clear();
+        self.storage_chance.clear();
+        self.storage1.shrink_to_fit();
+        self.storage2.shrink_to_fit();
+        self.storage_ip.shrink_to_fit();
+        self.storage_chance.shrink_to_fit();
     }
 
     /// Counts the number of nodes in the game tree.
@@ -893,7 +893,7 @@ impl PostFlopGame {
     }
 
     /// Allocates memory recursively.
-    fn allocate_memory_nodes(&self) {
+    fn allocate_memory_nodes(&mut self) {
         let num_bytes = if self.is_compression_enabled { 2 } else { 4 };
         let mut action_counter = 0;
         let mut ip_counter = 0;
@@ -905,15 +905,15 @@ impl PostFlopGame {
                 // do nothing
             } else if node.is_chance() {
                 unsafe {
-                    let ptr = self.storage_chance.lock().as_mut_ptr();
+                    let ptr = self.storage_chance.as_mut_ptr();
                     node.storage1 = ptr.add(chance_counter);
                 }
                 chance_counter += num_bytes * node.num_elements as usize;
             } else {
                 unsafe {
-                    let ptr1 = self.storage1.lock().as_mut_ptr();
-                    let ptr2 = self.storage2.lock().as_mut_ptr();
-                    let ptr3 = self.storage_ip.lock().as_mut_ptr();
+                    let ptr1 = self.storage1.as_mut_ptr();
+                    let ptr2 = self.storage2.as_mut_ptr();
+                    let ptr3 = self.storage_ip.as_mut_ptr();
                     node.storage1 = ptr1.add(action_counter);
                     node.storage2 = ptr2.add(action_counter);
                     node.storage3 = ptr3.add(ip_counter);
