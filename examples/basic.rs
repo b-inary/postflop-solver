@@ -38,10 +38,11 @@ fn main() {
     let mut game = PostFlopGame::with_config(card_config, action_tree).unwrap();
 
     // obtain the private hands
-    let oop_hands = game.private_cards(0);
+    let oop_cards = game.private_cards(0);
+    let oop_cards_str = holes_to_strings(oop_cards).unwrap();
     assert_eq!(
-        holes_to_string(&oop_hands[..10]).unwrap(),
-        "5c4c,Ac4c,5d4d,Ad4d,5h4h,Ah4h,5s4s,As4s,6c5c,7c5c"
+        &oop_cards_str[..10],
+        &["5c4c", "Ac4c", "5d4d", "Ad4d", "5h4h", "Ah4h", "5s4s", "As4s", "6c5c", "7c5c"]
     );
 
     // check memory usage
@@ -114,8 +115,8 @@ fn main() {
     assert_eq!(ip_cards.len(), 250);
     assert_eq!(strategy.len(), 750);
     assert_eq!(hole_to_string(ip_cards[206]).unwrap(), "KsJs");
-    assert_eq!(strategy[206] + strategy[456] + strategy[706], 1.0);
     assert_eq!(strategy[206], 0.0);
+    assert!((strategy[206] + strategy[456] + strategy[706] - 1.0).abs() < 1e-6);
 
     // play `Call`
     game.play(1);

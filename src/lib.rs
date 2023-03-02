@@ -41,9 +41,12 @@
 //! let mut game = PostFlopGame::with_config(card_config, action_tree).unwrap();
 //!
 //! // obtain the private hands
-//! let oop_hands = game.private_cards(0);
-//! assert_eq!(card_to_string(oop_hands[0].0).unwrap(), "4c");
-//! assert_eq!(card_to_string(oop_hands[0].1).unwrap(), "5c");
+//! let oop_cards = game.private_cards(0);
+//! let oop_cards_str = holes_to_strings(oop_cards).unwrap();
+//! assert_eq!(
+//!     &oop_cards_str[..10],
+//!     &["5c4c", "Ac4c", "5d4d", "Ad4d", "5h4h", "Ah4h", "5s4s", "As4s", "6c5c", "7c5c"]
+//! );
 //!
 //! // check memory usage
 //! let (mem_usage, mem_usage_compressed) = game.memory_usage();
@@ -97,7 +100,10 @@
 //!
 //! // get available actions (OOP)
 //! let actions = game.available_actions();
-//! assert_eq!(format!("{:?}", actions), "[Check, Bet(120), Bet(216), AllIn(900)]");
+//! assert_eq!(
+//!     format!("{:?}", actions),
+//!     "[Check, Bet(120), Bet(216), AllIn(900)]"
+//! );
 //!
 //! // play `Bet(120)`
 //! game.play(1);
@@ -105,6 +111,15 @@
 //! // get available actions (IP)
 //! let actions = game.available_actions();
 //! assert_eq!(format!("{:?}", actions), "[Fold, Call, Raise(300)]");
+//!
+//! // confirm that IP does not fold the nut straight
+//! let ip_cards = game.private_cards(1);
+//! let strategy = game.strategy();
+//! assert_eq!(ip_cards.len(), 250);
+//! assert_eq!(strategy.len(), 750);
+//! assert_eq!(hole_to_string(ip_cards[206]).unwrap(), "KsJs");
+//! assert_eq!(strategy[206], 0.0);
+//! assert!((strategy[206] + strategy[456] + strategy[706] - 1.0).abs() < 1e-6);
 //!
 //! // play `Call`
 //! game.play(1);

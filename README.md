@@ -28,12 +28,10 @@ postflop-solver = { git = "https://github.com/b-inary/postflop-solver" }
 
 - Examples
 
-You can find use cases in [examples/main.rs.tpl](examples/main.rs.tpl).
+You can find use cases in [examples/basic.rs](examples/basic.rs).
 
-This script can be run with:
-```
-cp examples/main.rs.tpl exemples/main.rs
-cargo run --release --example main
+```sh
+$ cargo run --release --example basic
 ```
 
 ## Implementation details

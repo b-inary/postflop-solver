@@ -213,8 +213,8 @@ pub fn card_to_string(card: u8) -> Result<String, String> {
 /// ```
 #[inline]
 pub fn hole_to_string(hole: (u8, u8)) -> Result<String, String> {
-    let max_card = std::cmp::max(hole.0, hole.1);
-    let min_card = std::cmp::min(hole.0, hole.1);
+    let max_card = u8::max(hole.0, hole.1);
+    let min_card = u8::min(hole.0, hole.1);
     Ok(format!(
         "{}{}",
         card_to_string(max_card)?,
@@ -222,22 +222,21 @@ pub fn hole_to_string(hole: (u8, u8)) -> Result<String, String> {
     ))
 }
 
-/// Attempts to convert a list of hole cards into a range string.
+/// Attempts to convert a list of hole cards into a list of string.
 ///
 /// # Examples
 /// ```
-/// use postflop_solver::holes_to_string;
+/// use postflop_solver::holes_to_strings;
 ///
-/// assert_eq!(holes_to_string(&[(5, 0), (51, 10)]), Ok("3d2c,As4h".to_string()));
-/// assert!(holes_to_string(&[(53, 52)]).is_err());
+/// assert_eq!(
+///     holes_to_strings(&[(5, 0), (51, 10)]),
+///     Ok(vec!["3d2c".to_string(), "As4h".to_string()])
+/// );
+/// assert!(holes_to_strings(&[(53, 52)]).is_err());
 /// ```
 #[inline]
-pub fn holes_to_string(holes: &[(u8, u8)]) -> Result<String, String> {
-    let mut result = Vec::new();
-    for hole in holes {
-        result.push(hole_to_string(*hole)?);
-    }
-    Ok(result.join(","))
+pub fn holes_to_strings(holes: &[(u8, u8)]) -> Result<Vec<String>, String> {
+    holes.iter().map(|&hole| hole_to_string(hole)).collect()
 }
 
 /// Attempts to read the next card from a char iterator.

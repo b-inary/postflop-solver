@@ -18,6 +18,7 @@ jobs:
     - name: Build
       run: |
         cargo build --release --features bincode
+        cargo run --release --features bincode --example basic
         cargo +nightly build --release --features custom-alloc
     - name: Run tests
       run: |
