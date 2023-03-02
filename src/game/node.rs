@@ -3,32 +3,6 @@ use crate::interface::*;
 use std::ptr;
 use std::slice;
 
-/// A struct representing a node in a postflop game tree.
-///
-/// The nodes must be stored as `Vec<MutexLike<PostFlopNode>>`.
-#[derive(Debug, Clone, Copy)]
-pub struct PostFlopNode {
-    pub(super) prev_action: Action,
-    pub(super) player: u8,
-    pub(super) turn: u8,
-    pub(super) river: u8,
-    pub(super) is_locked: bool,
-    pub(super) amount: i32,
-    pub(super) children_offset: u32,
-    pub(super) num_children: u16,
-    pub(super) num_elements_ip: u16,
-    pub(super) storage1: *mut u8, // strategy
-    pub(super) storage2: *mut u8, // regrets or cfvalues
-    pub(super) storage3: *mut u8, // IP cfvalues
-    pub(super) num_elements: u32,
-    pub(super) scale1: f32,
-    pub(super) scale2: f32,
-    pub(super) scale3: f32,
-}
-
-unsafe impl Send for PostFlopNode {}
-unsafe impl Sync for PostFlopNode {}
-
 impl GameNode for PostFlopNode {
     #[inline]
     fn is_terminal(&self) -> bool {

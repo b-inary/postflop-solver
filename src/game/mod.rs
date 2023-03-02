@@ -12,7 +12,6 @@ mod tests;
 use crate::action_tree::*;
 use crate::card::*;
 use crate::mutex_like::*;
-use node::*;
 use std::collections::BTreeMap;
 
 #[cfg(feature = "bincode")]
@@ -93,5 +92,31 @@ pub struct PostFlopGame {
     cfvalues_cache: [Vec<f32>; 2],
 }
 
+/// A struct representing a node in a postflop game tree.
+///
+/// The nodes must be stored as `Vec<MutexLike<PostFlopNode>>`.
+#[derive(Debug, Clone, Copy)]
+pub struct PostFlopNode {
+    prev_action: Action,
+    player: u8,
+    turn: u8,
+    river: u8,
+    is_locked: bool,
+    amount: i32,
+    children_offset: u32,
+    num_children: u16,
+    num_elements_ip: u16,
+    storage1: *mut u8, // strategy
+    storage2: *mut u8, // regrets or cfvalues
+    storage3: *mut u8, // IP cfvalues
+    num_elements: u32,
+    scale1: f32,
+    scale2: f32,
+    scale3: f32,
+}
+
 unsafe impl Send for PostFlopGame {}
 unsafe impl Sync for PostFlopGame {}
+
+unsafe impl Send for PostFlopNode {}
+unsafe impl Sync for PostFlopNode {}
