@@ -1,6 +1,7 @@
 use super::*;
 
 use crate::interface::*;
+use crate::utility::*;
 use bincode::error::{DecodeError, EncodeError};
 use std::cell::Cell;
 use std::ptr;
@@ -33,18 +34,15 @@ impl PostFlopGame {
     }
 
     /// Returns the number of storage elements required for the target storage mode.
-    fn num_target_storage(&self) -> [usize; 3] {
+    fn num_target_storage(&self) -> [usize; 4] {
         if self.state <= State::TreeBuilt {
-            return [0; 3];
+            return [0; 4];
         }
 
         let num_bytes = if self.is_compression_enabled { 2 } else { 4 };
         if self.target_storage_mode == BoardState::River {
-            return [
-                num_bytes * self.num_storage as usize,
-                num_bytes * self.num_storage_ip as usize,
-                num_bytes * self.num_storage_chance as usize,
-            ];
+            // omit storing the counterfactual values
+            return [num_bytes * self.num_storage as usize, 0, 0, 0];
         }
 
         let mut node_index = match self.target_storage_mode {
@@ -52,7 +50,7 @@ impl PostFlopGame {
             _ => self.num_nodes[0] + self.num_nodes[1],
         } as usize;
 
-        let mut num_storage = [0; 3];
+        let mut num_storage = [0; 4];
 
         while num_storage.iter().any(|&x| x == 0) {
             node_index -= 1;
@@ -63,12 +61,13 @@ impl PostFlopGame {
                 let len = num_bytes * node.num_elements as usize;
                 let len_ip = num_bytes * node.num_elements_ip as usize;
                 num_storage[0] = offset as usize + len;
-                num_storage[1] = offset_ip as usize + len_ip;
+                num_storage[1] = offset as usize + len;
+                num_storage[2] = offset_ip as usize + len_ip;
             }
-            if num_storage[2] == 0 && node.is_chance() {
+            if num_storage[3] == 0 && node.is_chance() {
                 let offset = unsafe { node.storage1.offset_from(self.storage_chance.as_ptr()) };
                 let len = num_bytes * node.num_elements as usize;
-                num_storage[2] = offset as usize + len;
+                num_storage[3] = offset as usize + len;
             }
         }
 
@@ -76,7 +75,7 @@ impl PostFlopGame {
     }
 }
 
-static VERSION_STR: &str = "2023-03-02.3";
+static VERSION_STR: &str = "2023-03-03";
 
 thread_local! {
     static PTR_BASE: Cell<[*const u8; 2]> = Cell::new([ptr::null(); 2]);
@@ -93,7 +92,7 @@ impl Encode for PostFlopGame {
             ));
         }
 
-        let num_target_storage = self.num_target_storage();
+        let num_storage = self.num_target_storage();
 
         // version
         VERSION_STR.to_string().encode(encoder)?;
@@ -114,13 +113,11 @@ impl Encode for PostFlopGame {
         self.num_storage_ip.encode(encoder)?;
         self.num_storage_chance.encode(encoder)?;
         self.misc_memory_usage.encode(encoder)?;
-        self.storage1[0..num_target_storage[0]].encode(encoder)?;
-        self.storage2[0..num_target_storage[0]].encode(encoder)?;
-        self.storage_ip[0..num_target_storage[1]].encode(encoder)?;
-        self.storage_chance[0..num_target_storage[2]].encode(encoder)?;
+        self.storage1[0..num_storage[0]].encode(encoder)?;
+        self.storage2[0..num_storage[1]].encode(encoder)?;
+        self.storage_ip[0..num_storage[2]].encode(encoder)?;
+        self.storage_chance[0..num_storage[3]].encode(encoder)?;
         self.locking_strategy.encode(encoder)?;
-        self.history.encode(encoder)?;
-        self.is_normalized_weight_cached.encode(encoder)?;
 
         // store base pointers
         PTR_BASE.with(|c| {
@@ -146,6 +143,10 @@ impl Encode for PostFlopGame {
             BoardState::River => self.node_arena.len(),
         };
         self.node_arena[0..num_nodes].encode(encoder)?;
+
+        // interpreter
+        self.history.encode(encoder)?;
+        self.is_normalized_weight_cached.encode(encoder)?;
 
         Ok(())
     }
@@ -200,9 +201,12 @@ impl Decode for PostFlopGame {
         };
 
         game.target_storage_mode = game.storage_mode;
-
-        let history = Vec::<usize>::decode(decoder)?;
-        let is_normalized_weight_cached = bool::decode(decoder)?;
+        if game.storage_mode == BoardState::River && game.state >= State::MemoryAllocated {
+            let num_bytes = if game.is_compression_enabled { 2 } else { 4 };
+            game.storage2 = vec![0; (num_bytes * game.num_storage) as usize];
+            game.storage_ip = vec![0; (num_bytes * game.num_storage_ip) as usize];
+            game.storage_chance = vec![0; (num_bytes * game.num_storage_chance) as usize];
+        }
 
         // store base pointers
         PTR_BASE_MUT.with(|c| {
@@ -228,11 +232,21 @@ impl Decode for PostFlopGame {
         // game tree
         game.node_arena = Decode::decode(decoder)?;
 
+        // interpreter
+        let history = Vec::<usize>::decode(decoder)?;
+        let is_normalized_weight_cached = bool::decode(decoder)?;
+
         // initialization
         if game.state >= State::TreeBuilt {
             game.init_hands();
             game.init_card_fields();
             game.init_interpreter();
+
+            // restore the counterfactual values
+            if game.storage_mode == BoardState::River && game.state == State::Solved {
+                game.state = State::MemoryAllocated;
+                finalize(&mut game);
+            }
 
             game.apply_history(&history);
             if is_normalized_weight_cached {

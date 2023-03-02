@@ -38,6 +38,12 @@ pub trait Game: Send + Sync {
     #[doc(hidden)]
     fn set_solved(&mut self);
 
+    /// Returns whether the instance is ready to be solved.
+    #[doc(hidden)]
+    fn is_ready(&self) -> bool {
+        true
+    }
+
     /// Returns whether the game is raked.
     #[doc(hidden)]
     fn is_raked(&self) -> bool {
@@ -60,12 +66,6 @@ pub trait Game: Send + Sync {
     #[doc(hidden)]
     fn locking_strategy(&self, _node: &Self::Node) -> &[f32] {
         &[]
-    }
-
-    /// Returns whether the instance is ready to be solved.
-    #[doc(hidden)]
-    fn is_ready(&self) -> bool {
-        true
     }
 
     /// Returns whether the compression is enabled.

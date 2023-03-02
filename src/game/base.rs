@@ -55,6 +55,11 @@ impl Game for PostFlopGame {
     }
 
     #[inline]
+    fn is_ready(&self) -> bool {
+        self.state == State::MemoryAllocated && self.storage_mode == BoardState::River
+    }
+
+    #[inline]
     fn is_raked(&self) -> bool {
         self.tree_config.rake_rate > 0.0 && self.tree_config.rake_cap > 0.0
     }
@@ -86,11 +91,6 @@ impl Game for PostFlopGame {
             let index = self.node_index(node);
             self.locking_strategy.get(&index).unwrap()
         }
-    }
-
-    #[inline]
-    fn is_ready(&self) -> bool {
-        self.state == State::MemoryAllocated
     }
 
     #[inline]
@@ -226,7 +226,9 @@ impl PostFlopGame {
             panic!("Game is not successfully initialized");
         }
 
-        if self.state == State::MemoryAllocated && self.is_compression_enabled == enable_compression
+        if self.state == State::MemoryAllocated
+            && self.storage_mode == BoardState::River
+            && self.is_compression_enabled == enable_compression
         {
             return;
         }
