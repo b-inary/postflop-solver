@@ -64,12 +64,12 @@ pub struct PostFlopGame {
 
     // store options
     is_compression_enabled: bool,
-    num_storage_actions: u64,
-    num_storage_ip_values: u64,
-    num_storage_chances: u64,
+    num_storage: u64,
+    num_storage_ip: u64,
+    num_storage_chance: u64,
     misc_memory_usage: u64,
 
-    // global storage (storage1: strategy, storage2: regret or cfvalue)
+    // global storage
     node_arena: Vec<MutexLike<PostFlopNode>>,
     storage1: Vec<u8>,
     storage2: Vec<u8>,
@@ -102,9 +102,9 @@ struct BuildTreeInfo {
     flop_index: usize,
     turn_index: usize,
     river_index: usize,
-    num_storage_actions: u64,
-    num_storage_ip_values: u64,
-    num_storage_chances: u64,
+    num_storage: u64,
+    num_storage_ip: u64,
+    num_storage_chance: u64,
 }
 
 /// Decodes the encoded `i16` slice to the `f32` slice.
@@ -287,8 +287,7 @@ impl PostFlopGame {
             panic!("Game is not successfully initialized");
         }
 
-        let num_elements =
-            2 * self.num_storage_actions + self.num_storage_ip_values + self.num_storage_chances;
+        let num_elements = 2 * self.num_storage + self.num_storage_ip + self.num_storage_chance;
         let uncompressed = 4 * num_elements + self.misc_memory_usage;
         let compressed = 2 * num_elements + self.misc_memory_usage;
 
@@ -309,9 +308,9 @@ impl PostFlopGame {
         for line in lines {
             let mut root = self.root();
             let info = self.remove_line_recursive(&mut root, line)?;
-            self.num_storage_actions -= info.num_storage_actions;
-            self.num_storage_ip_values -= info.num_storage_ip_values;
-            self.num_storage_chances -= info.num_storage_chances;
+            self.num_storage -= info.num_storage;
+            self.num_storage_ip -= info.num_storage_ip;
+            self.num_storage_chance -= info.num_storage_chance;
         }
 
         Ok(())
@@ -328,9 +327,9 @@ impl PostFlopGame {
             return;
         }
 
-        let bytes = if enable_compression { 2 } else { 4 };
-        if bytes * self.num_storage_actions > isize::MAX as u64
-            || bytes * self.num_storage_chances > isize::MAX as u64
+        let num_bytes = if enable_compression { 2 } else { 4 };
+        if num_bytes * self.num_storage > isize::MAX as u64
+            || num_bytes * self.num_storage_chance > isize::MAX as u64
         {
             panic!("Memory usage exceeds maximum size");
         }
@@ -340,15 +339,14 @@ impl PostFlopGame {
 
         self.clear_storage();
 
-        let num_bytes = if enable_compression { 2 } else { 4 };
-        let num_actions = self.num_storage_actions as usize;
-        let num_ip_values = self.num_storage_ip_values as usize;
-        let num_chances = self.num_storage_chances as usize;
+        let storage_bytes = (num_bytes * self.num_storage) as usize;
+        let storage_ip_bytes = (num_bytes * self.num_storage_ip) as usize;
+        let storage_chance_bytes = (num_bytes * self.num_storage_chance) as usize;
 
-        self.storage1 = vec![0; num_bytes * num_actions];
-        self.storage2 = vec![0; num_bytes * num_actions];
-        self.storage_ip = vec![0; num_bytes * num_ip_values];
-        self.storage_chance = vec![0; num_bytes * num_chances];
+        self.storage1 = vec![0; storage_bytes];
+        self.storage2 = vec![0; storage_bytes];
+        self.storage_ip = vec![0; storage_ip_bytes];
+        self.storage_chance = vec![0; storage_chance_bytes];
 
         self.allocate_memory_nodes();
     }
@@ -553,9 +551,9 @@ impl PostFlopGame {
 
         self.build_tree_recursive(0, &self.action_root.lock(), &mut info);
 
-        self.num_storage_actions = info.num_storage_actions;
-        self.num_storage_ip_values = info.num_storage_ip_values;
-        self.num_storage_chances = info.num_storage_chances;
+        self.num_storage = info.num_storage;
+        self.num_storage_ip = info.num_storage_ip;
+        self.num_storage_chance = info.num_storage_chance;
         self.misc_memory_usage = self.memory_usage_internal();
 
         self.clear_storage();
@@ -756,7 +754,7 @@ impl PostFlopGame {
             .cfvalue_storage_player()
             .map_or(0, |player| self.num_private_hands(player)) as u32;
 
-        info.num_storage_chances += node.num_elements as u64;
+        info.num_storage_chance += node.num_elements as u64;
     }
 
     /// Pushes the actions to the `node`.
@@ -798,8 +796,8 @@ impl PostFlopGame {
             _ => 0,
         };
 
-        info.num_storage_actions += node.num_elements as u64;
-        info.num_storage_ip_values += node.num_elements_ip as u64;
+        info.num_storage += node.num_elements as u64;
+        info.num_storage_ip += node.num_elements_ip as u64;
     }
 
     /// Calculates the number of storage elements that will be removed.
@@ -809,11 +807,11 @@ impl PostFlopGame {
         }
 
         if node.is_chance() {
-            info.num_storage_chances += node.num_elements as u64;
+            info.num_storage_chance += node.num_elements as u64;
             node.num_elements = 0;
         } else {
-            info.num_storage_actions += node.num_elements as u64;
-            info.num_storage_ip_values += node.num_elements_ip as u64;
+            info.num_storage += node.num_elements as u64;
+            info.num_storage_ip += node.num_elements_ip as u64;
             node.num_elements = 0;
             node.num_elements_ip = 0;
         }
@@ -867,7 +865,7 @@ impl PostFlopGame {
 
         // STEP 1
         let mut info = BuildTreeInfo {
-            num_storage_actions: self.num_private_hands(node.player as usize) as u64,
+            num_storage: self.num_private_hands(node.player as usize) as u64,
             ..Default::default()
         };
 

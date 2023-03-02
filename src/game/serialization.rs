@@ -3,7 +3,7 @@ use super::*;
 use bincode::error::{DecodeError, EncodeError};
 use std::cell::Cell;
 
-static VERSION_STR: &str = "2023-03-02";
+static VERSION_STR: &str = "2023-03-02.2";
 
 thread_local! {
     static PTR_BASE: Cell<[*const u8; 2]> = Cell::new([ptr::null(); 2]);
@@ -44,8 +44,9 @@ impl Encode for PostFlopGame {
         self.card_config.encode(encoder)?;
         self.num_combinations.encode(encoder)?;
         self.is_compression_enabled.encode(encoder)?;
-        self.num_storage_actions.encode(encoder)?;
-        self.num_storage_chances.encode(encoder)?;
+        self.num_storage.encode(encoder)?;
+        self.num_storage_ip.encode(encoder)?;
+        self.num_storage_chance.encode(encoder)?;
         self.misc_memory_usage.encode(encoder)?;
         self.storage1.encode(encoder)?;
         self.storage2.encode(encoder)?;
@@ -96,8 +97,9 @@ impl Decode for PostFlopGame {
             action_root,
             num_combinations: Decode::decode(decoder)?,
             is_compression_enabled: Decode::decode(decoder)?,
-            num_storage_actions: Decode::decode(decoder)?,
-            num_storage_chances: Decode::decode(decoder)?,
+            num_storage: Decode::decode(decoder)?,
+            num_storage_ip: Decode::decode(decoder)?,
+            num_storage_chance: Decode::decode(decoder)?,
             misc_memory_usage: Decode::decode(decoder)?,
             storage1: Decode::decode(decoder)?,
             storage2: Decode::decode(decoder)?,
