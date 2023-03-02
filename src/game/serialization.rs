@@ -1,7 +1,9 @@
 use super::*;
 
+use crate::interface::*;
 use bincode::error::{DecodeError, EncodeError};
 use std::cell::Cell;
+use std::ptr;
 
 impl PostFlopGame {
     /// Returns the storage mode of this instance.
@@ -85,6 +87,12 @@ thread_local! {
 
 impl Encode for PostFlopGame {
     fn encode<E: bincode::enc::Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
+        if self.state == State::ConfigError {
+            return Err(EncodeError::Other(
+                "Cannot serialize a game with a config error",
+            ));
+        }
+
         let num_target_storage = self.num_target_storage();
 
         // version

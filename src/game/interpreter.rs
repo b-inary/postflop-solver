@@ -1,4 +1,22 @@
 use super::*;
+use crate::interface::*;
+use crate::sliceop::*;
+use crate::utility::*;
+
+/// Decodes the encoded `i16` slice to the `f32` slice.
+#[inline]
+fn decode_signed_slice(slice: &[i16], scale: f32) -> Vec<f32> {
+    let decoder = scale / i16::MAX as f32;
+    let mut result = Vec::<f32>::with_capacity(slice.len());
+    let ptr = result.as_mut_ptr();
+    unsafe {
+        for i in 0..slice.len() {
+            *ptr.add(i) = (*slice.get_unchecked(i)) as f32 * decoder;
+        }
+        result.set_len(slice.len());
+    }
+    result
+}
 
 impl PostFlopGame {
     /// Moves the current node back to the root node.

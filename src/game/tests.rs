@@ -1,6 +1,7 @@
 use super::*;
 use crate::range::*;
 use crate::solver::*;
+use crate::utility::*;
 
 #[cfg(feature = "bincode")]
 use std::{
