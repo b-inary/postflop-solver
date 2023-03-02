@@ -3,7 +3,78 @@ use super::*;
 use bincode::error::{DecodeError, EncodeError};
 use std::cell::Cell;
 
-static VERSION_STR: &str = "2023-03-02.2";
+impl PostFlopGame {
+    /// Returns the storage mode of this instance.
+    #[inline]
+    pub fn storage_mode(&self) -> BoardState {
+        self.storage_mode
+    }
+
+    /// Returns the target storage mode, which is used for serialization.
+    #[inline]
+    pub fn target_storage_mode(&self) -> BoardState {
+        self.target_storage_mode
+    }
+
+    /// Sets the target storage mode.
+    #[inline]
+    pub fn set_target_storage_mode(&mut self, mode: BoardState) {
+        if mode > self.storage_mode {
+            panic!("Cannot set target storage mode to a higher value than the current storage");
+        }
+
+        if mode < self.tree_config.initial_state {
+            panic!("Cannot set target storage mode to a lower value than the initial state");
+        }
+
+        self.target_storage_mode = mode;
+    }
+
+    /// Returns the number of storage elements required for the target storage mode.
+    fn num_target_storage(&self) -> [usize; 3] {
+        if self.state <= State::TreeBuilt {
+            return [0; 3];
+        }
+
+        let num_bytes = if self.is_compression_enabled { 2 } else { 4 };
+        if self.target_storage_mode == BoardState::River {
+            return [
+                num_bytes * self.num_storage as usize,
+                num_bytes * self.num_storage_ip as usize,
+                num_bytes * self.num_storage_chance as usize,
+            ];
+        }
+
+        let mut node_index = match self.target_storage_mode {
+            BoardState::Flop => self.num_nodes[0],
+            _ => self.num_nodes[0] + self.num_nodes[1],
+        } as usize;
+
+        let mut num_storage = [0; 3];
+
+        while num_storage.iter().any(|&x| x == 0) {
+            node_index -= 1;
+            let node = self.node_arena[node_index].lock();
+            if num_storage[0] == 0 && !node.is_terminal() && !node.is_chance() {
+                let offset = unsafe { node.storage1.offset_from(self.storage1.as_ptr()) };
+                let offset_ip = unsafe { node.storage3.offset_from(self.storage_ip.as_ptr()) };
+                let len = num_bytes * node.num_elements as usize;
+                let len_ip = num_bytes * node.num_elements_ip as usize;
+                num_storage[0] = offset as usize + len;
+                num_storage[1] = offset_ip as usize + len_ip;
+            }
+            if num_storage[2] == 0 && node.is_chance() {
+                let offset = unsafe { node.storage1.offset_from(self.storage_chance.as_ptr()) };
+                let len = num_bytes * node.num_elements as usize;
+                num_storage[2] = offset as usize + len;
+            }
+        }
+
+        num_storage
+    }
+}
+
+static VERSION_STR: &str = "2023-03-02.3";
 
 thread_local! {
     static PTR_BASE: Cell<[*const u8; 2]> = Cell::new([ptr::null(); 2]);
@@ -14,6 +85,35 @@ thread_local! {
 
 impl Encode for PostFlopGame {
     fn encode<E: bincode::enc::Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
+        let num_target_storage = self.num_target_storage();
+
+        // version
+        VERSION_STR.to_string().encode(encoder)?;
+
+        // action tree
+        self.tree_config.encode(encoder)?;
+        self.added_lines.encode(encoder)?;
+        self.removed_lines.encode(encoder)?;
+
+        // contents
+        self.state.encode(encoder)?;
+        self.card_config.encode(encoder)?;
+        self.num_combinations.encode(encoder)?;
+        self.target_storage_mode.encode(encoder)?;
+        self.num_nodes.encode(encoder)?;
+        self.is_compression_enabled.encode(encoder)?;
+        self.num_storage.encode(encoder)?;
+        self.num_storage_ip.encode(encoder)?;
+        self.num_storage_chance.encode(encoder)?;
+        self.misc_memory_usage.encode(encoder)?;
+        self.storage1[0..num_target_storage[0]].encode(encoder)?;
+        self.storage2[0..num_target_storage[0]].encode(encoder)?;
+        self.storage_ip[0..num_target_storage[1]].encode(encoder)?;
+        self.storage_chance[0..num_target_storage[2]].encode(encoder)?;
+        self.locking_strategy.encode(encoder)?;
+        self.history.encode(encoder)?;
+        self.is_normalized_weight_cached.encode(encoder)?;
+
         // store base pointers
         PTR_BASE.with(|c| {
             if self.state >= State::MemoryAllocated {
@@ -31,33 +131,13 @@ impl Encode for PostFlopGame {
             }
         });
 
-        // version
-        VERSION_STR.to_string().encode(encoder)?;
-
-        // action tree
-        self.tree_config.encode(encoder)?;
-        self.added_lines.encode(encoder)?;
-        self.removed_lines.encode(encoder)?;
-
-        // contents
-        self.state.encode(encoder)?;
-        self.card_config.encode(encoder)?;
-        self.num_combinations.encode(encoder)?;
-        self.is_compression_enabled.encode(encoder)?;
-        self.num_storage.encode(encoder)?;
-        self.num_storage_ip.encode(encoder)?;
-        self.num_storage_chance.encode(encoder)?;
-        self.misc_memory_usage.encode(encoder)?;
-        self.storage1.encode(encoder)?;
-        self.storage2.encode(encoder)?;
-        self.storage_ip.encode(encoder)?;
-        self.storage_chance.encode(encoder)?;
-        self.locking_strategy.encode(encoder)?;
-        self.history.encode(encoder)?;
-        self.is_normalized_weight_cached.encode(encoder)?;
-
         // game tree
-        self.node_arena.encode(encoder)?;
+        let num_nodes = match self.target_storage_mode {
+            BoardState::Flop => self.num_nodes[0] as usize,
+            BoardState::Turn => (self.num_nodes[0] + self.num_nodes[1]) as usize,
+            BoardState::River => self.node_arena.len(),
+        };
+        self.node_arena[0..num_nodes].encode(encoder)?;
 
         Ok(())
     }
@@ -96,6 +176,8 @@ impl Decode for PostFlopGame {
             removed_lines,
             action_root,
             num_combinations: Decode::decode(decoder)?,
+            storage_mode: Decode::decode(decoder)?,
+            num_nodes: Decode::decode(decoder)?,
             is_compression_enabled: Decode::decode(decoder)?,
             num_storage: Decode::decode(decoder)?,
             num_storage_ip: Decode::decode(decoder)?,
@@ -108,6 +190,8 @@ impl Decode for PostFlopGame {
             locking_strategy: Decode::decode(decoder)?,
             ..Default::default()
         };
+
+        game.target_storage_mode = game.storage_mode;
 
         let history = Vec::<usize>::decode(decoder)?;
         let is_normalized_weight_cached = bool::decode(decoder)?;

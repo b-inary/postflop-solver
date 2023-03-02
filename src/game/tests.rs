@@ -832,19 +832,19 @@ fn isomorphism_monotone() {
     check(&[0, 0, 4, 0, 0, 8], None, None);
     check(&[0, 0, 4, 0, 0, 9], None, None);
     check(&[0, 0, 4, 0, 0, 10], None, None);
-    check(&[0, 0, 4, 0, 0, 11], None, Some((4, 3)));
+    check(&[0, 0, 4, 0, 0, 11], None, Some((0, 3)));
 
     check(&[0, 0, 5, 0, 0, 8], Some(1), None);
     check(&[0, 0, 5, 0, 0, 9], Some(1), None);
     check(&[0, 0, 5, 0, 0, 10], Some(1), None);
-    check(&[0, 0, 5, 0, 0, 11], Some(1), Some((5, 3)));
+    check(&[0, 0, 5, 0, 0, 11], Some(1), Some((1, 3)));
 
     check(&[0, 0, 6, 0, 0, 8], None, None);
-    check(&[0, 0, 6, 0, 0, 9], None, Some((6, 1)));
+    check(&[0, 0, 6, 0, 0, 9], None, Some((2, 1)));
     check(&[0, 0, 6, 0, 0, 10], None, None);
-    check(&[0, 0, 6, 0, 0, 11], None, Some((6, 3)));
+    check(&[0, 0, 6, 0, 0, 11], None, Some((2, 3)));
 
-    check(&[0, 0, 7, 0, 0, 8], Some(3), Some((7, 1)));
+    check(&[0, 0, 7, 0, 0, 8], Some(3), Some((3, 1)));
     check(&[0, 0, 7, 0, 0, 9], Some(3), None);
     check(&[0, 0, 7, 0, 0, 10], Some(3), None);
     check(&[0, 0, 7, 0, 0, 11], Some(3), None);
@@ -1026,7 +1026,8 @@ fn serialize_and_deserialize() {
     let tree_config = TreeConfig {
         starting_pot: 60,
         effective_stack: 970,
-        river_bet_sizes: [("50%", "").try_into().unwrap(), Default::default()],
+        flop_bet_sizes: [("50%", "").try_into().unwrap(), Default::default()],
+        turn_bet_sizes: [("50%", "").try_into().unwrap(), Default::default()],
         ..Default::default()
     };
 
@@ -1049,6 +1050,30 @@ fn serialize_and_deserialize() {
     let mut read_buf = BufReader::new(file);
     let mut game: PostFlopGame = bincode::decode_from_std_read(&mut read_buf, config).unwrap();
 
+    // save (turn)
+    game.set_target_storage_mode(BoardState::Turn);
+    let file = File::create("tmpfile.bin").unwrap();
+    let mut write_buf = BufWriter::new(file);
+    bincode::encode_into_std_write(&game, &mut write_buf, config).unwrap();
+    write_buf.flush().unwrap();
+
+    // load (turn)
+    let file = File::open("tmpfile.bin").unwrap();
+    let mut read_buf = BufReader::new(file);
+    let mut game: PostFlopGame = bincode::decode_from_std_read(&mut read_buf, config).unwrap();
+
+    // save (flop)
+    game.set_target_storage_mode(BoardState::Flop);
+    let file = File::create("tmpfile.bin").unwrap();
+    let mut write_buf = BufWriter::new(file);
+    bincode::encode_into_std_write(&game, &mut write_buf, config).unwrap();
+    write_buf.flush().unwrap();
+
+    // load (flop)
+    let file = File::open("tmpfile.bin").unwrap();
+    let mut read_buf = BufReader::new(file);
+    let mut game: PostFlopGame = bincode::decode_from_std_read(&mut read_buf, config).unwrap();
+
     // remove tmpfile
     std::fs::remove_file("tmpfile.bin").unwrap();
 
@@ -1062,8 +1087,8 @@ fn serialize_and_deserialize() {
 
     assert!((root_equity_oop - 0.5).abs() < 1e-5);
     assert!((root_equity_ip - 0.5).abs() < 1e-5);
-    assert!((root_ev_oop - 37.5).abs() < 1e-4);
-    assert!((root_ev_ip - 22.5).abs() < 1e-4);
+    assert!((root_ev_oop - 45.0).abs() < 1e-4);
+    assert!((root_ev_ip - 15.0).abs() < 1e-4);
 }
 
 #[test]

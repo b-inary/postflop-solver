@@ -206,6 +206,12 @@ impl PostFlopGame {
         // chance node
         if self.is_chance_node() {
             let is_turn = self.turn == NOT_DEALT;
+            if self.storage_mode == BoardState::Flop
+                || (!is_turn && self.storage_mode == BoardState::Turn)
+            {
+                panic!("Storage mode is not compatible");
+            }
+
             let actual_card = if action == usize::MAX {
                 self.possible_cards().trailing_zeros() as u8
             } else {
@@ -255,7 +261,7 @@ impl PostFlopGame {
                             // In this case, there is only one suit that can be swapped and the
                             // following code works correctly.
                             self.river_swap = Some((
-                                self.turn,
+                                self.turn & 3,
                                 self.river_isomorphism_card[self.turn as usize][i] & 3,
                             ));
                         }
@@ -841,8 +847,8 @@ impl PostFlopGame {
             .turn_swap
             .map(|suit| &self.turn_isomorphism_swap[suit as usize][player]);
 
-        let river_swap = self.river_swap.map(|(turn, suit)| {
-            &self.river_isomorphism_swap[turn as usize & 3][suit as usize][player]
+        let river_swap = self.river_swap.map(|(turn_suit, suit)| {
+            &self.river_isomorphism_swap[turn_suit as usize][suit as usize][player]
         });
 
         let swaps = if !reverse {

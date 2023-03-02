@@ -63,6 +63,9 @@ pub struct PostFlopGame {
     river_isomorphism_swap: [[SwapList; 4]; 4],
 
     // store options
+    storage_mode: BoardState,
+    target_storage_mode: BoardState,
+    num_nodes: [u64; 3],
     is_compression_enabled: bool,
     num_storage: u64,
     num_storage_ip: u64,
@@ -316,6 +319,19 @@ impl PostFlopGame {
         Ok(())
     }
 
+    /// Returns whether the memory is allocated.
+    ///
+    /// If the memory is allocated, returns `Some(is_compression_enabled)`;
+    /// otherwise, returns `None`.
+    #[inline]
+    pub fn is_memory_allocated(&self) -> Option<bool> {
+        if self.state <= State::TreeBuilt {
+            None
+        } else {
+            Some(self.is_compression_enabled)
+        }
+    }
+
     /// Allocates the memory.
     pub fn allocate_memory(&mut self, enable_compression: bool) {
         if self.state <= State::Uninitialized {
@@ -349,6 +365,9 @@ impl PostFlopGame {
         self.storage_chance = vec![0; storage_chance_bytes];
 
         self.allocate_memory_nodes();
+
+        self.storage_mode = BoardState::River;
+        self.target_storage_mode = BoardState::River;
     }
 
     /// Checks the card configuration.
@@ -529,6 +548,12 @@ impl PostFlopGame {
             return Err("Too many nodes".to_string());
         }
 
+        self.num_nodes = num_nodes;
+        self.node_arena = (0..total_num_nodes)
+            .map(|_| MutexLike::new(PostFlopNode::default()))
+            .collect::<Vec<_>>();
+        self.clear_storage();
+
         let mut info = BuildTreeInfo {
             turn_index: num_nodes[0] as usize,
             river_index: (num_nodes[0] + num_nodes[1]) as usize,
@@ -541,10 +566,6 @@ impl PostFlopGame {
             BoardState::River => info.river_index += 1,
         }
 
-        self.node_arena = (0..total_num_nodes)
-            .map(|_| MutexLike::new(PostFlopNode::default()))
-            .collect::<Vec<_>>();
-
         let mut root = self.node_arena[0].lock();
         root.turn = self.card_config.turn;
         root.river = self.card_config.river;
@@ -556,7 +577,6 @@ impl PostFlopGame {
         self.num_storage_chance = info.num_storage_chance;
         self.misc_memory_usage = self.memory_usage_internal();
 
-        self.clear_storage();
         self.state = State::TreeBuilt;
 
         Ok(())
