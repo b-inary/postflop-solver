@@ -30,6 +30,8 @@ postflop-solver = { git = "https://github.com/b-inary/postflop-solver" }
 
 You can find use cases in [examples/basic.rs](examples/basic.rs).
 
+If you have cloned this repository, you can run the example with the following command:
+
 ```sh
 $ cargo run --release --example basic
 ```
