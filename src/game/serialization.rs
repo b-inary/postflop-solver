@@ -145,7 +145,7 @@ impl Encode for PostFlopGame {
         self.node_arena[0..num_nodes].encode(encoder)?;
 
         // interpreter
-        self.history.encode(encoder)?;
+        self.action_history.encode(encoder)?;
         self.is_normalized_weight_cached.encode(encoder)?;
 
         Ok(())
@@ -233,7 +233,7 @@ impl Decode for PostFlopGame {
         game.node_arena = Decode::decode(decoder)?;
 
         // interpreter
-        let history = Vec::<usize>::decode(decoder)?;
+        let action_history = Vec::<usize>::decode(decoder)?;
         let is_normalized_weight_cached = bool::decode(decoder)?;
 
         // initialization
@@ -248,7 +248,7 @@ impl Decode for PostFlopGame {
                 finalize(&mut game);
             }
 
-            game.apply_history(&history);
+            game.apply_history(&action_history);
             if is_normalized_weight_cached {
                 game.cache_normalized_weights();
             }

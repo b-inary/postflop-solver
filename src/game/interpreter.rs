@@ -26,17 +26,15 @@ impl PostFlopGame {
             panic!("Game is not successfully initialized");
         }
 
-        self.history.clear();
+        self.action_history.clear();
+        self.node_history.clear();
         self.is_normalized_weight_cached = false;
-        self.current_node_index = 0;
         self.turn = self.card_config.turn;
         self.river = self.card_config.river;
-        self.chance_factor = 1;
         self.turn_swapped_suit = None;
         self.turn_swap = None;
         self.river_swap = None;
         self.total_bet_amount = [0, 0];
-        self.prev_bet_amount = 0;
 
         self.weights[0].copy_from_slice(&self.initial_weights[0]);
         self.weights[1].copy_from_slice(&self.initial_weights[1]);
@@ -54,7 +52,7 @@ impl PostFlopGame {
             panic!("Game is not successfully initialized");
         }
 
-        &self.history
+        &self.action_history
     }
 
     /// Applies the given history from the root node.
@@ -306,13 +304,12 @@ impl PostFlopGame {
             }
 
             // update the state
-            self.current_node_index = self.node_index(&self.node().play(action_index));
+            let node_index = self.node_index(&self.node().play(action_index));
+            self.node_history.push(node_index);
             if is_turn {
                 self.turn = actual_card;
-                self.chance_factor *= 45;
             } else {
                 self.river = actual_card;
-                self.chance_factor *= 44;
             }
         }
         // player node
@@ -346,24 +343,28 @@ impl PostFlopGame {
             self.cfvalues_cache[player].copy_from_slice(&vec);
 
             // update the bet amounts
-            match self.node().play(action).prev_action {
+            let node = self.node();
+            match node.play(action).prev_action {
                 Action::Call => {
                     self.total_bet_amount[player] = self.total_bet_amount[player ^ 1];
-                    self.prev_bet_amount = 0;
                 }
                 Action::Bet(amount) | Action::Raise(amount) | Action::AllIn(amount) => {
+                    let prev_bet_amount = match node.prev_action {
+                        Action::Bet(a) | Action::Raise(a) | Action::AllIn(a) => a,
+                        _ => 0,
+                    };
                     let to_call = self.total_bet_amount[player ^ 1] - self.total_bet_amount[player];
-                    self.total_bet_amount[player] += amount - self.prev_bet_amount + to_call;
-                    self.prev_bet_amount = amount;
+                    self.total_bet_amount[player] += amount - prev_bet_amount + to_call;
                 }
                 _ => {}
             }
 
             // update the node
-            self.current_node_index = self.node_index(&self.node().play(action));
+            let node_index = self.node_index(&self.node().play(action));
+            self.node_history.push(node_index);
         }
 
-        self.history.push(action);
+        self.action_history.push(action);
         self.is_normalized_weight_cached = false;
     }
 
@@ -596,8 +597,16 @@ impl PostFlopGame {
         let node = self.node();
         let num_hands = self.num_private_hands(player);
 
+        let mut chance_factor = 1.0;
+        if self.card_config.turn == NOT_DEALT && self.turn != NOT_DEALT {
+            chance_factor *= 45.0;
+        }
+        if self.card_config.river == NOT_DEALT && self.river != NOT_DEALT {
+            chance_factor *= 44.0;
+        }
+
         let mut have_actions = false;
-        let mut normalizer = (self.num_combinations * self.chance_factor as f64) as f32;
+        let mut normalizer = (self.num_combinations * chance_factor) as f32;
 
         let mut ret = if node.is_terminal() {
             normalizer = self.num_combinations as f32;
@@ -838,7 +847,7 @@ impl PostFlopGame {
     /// Returns the reference to the current node.
     #[inline]
     fn node(&self) -> MutexGuardLike<PostFlopNode> {
-        self.node_arena[self.current_node_index].lock()
+        self.node_arena[self.node_history.last().cloned().unwrap_or(0)].lock()
     }
 
     /// Returns the index of the given node.
