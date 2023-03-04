@@ -48,9 +48,9 @@ pub enum Action {
 #[cfg_attr(feature = "bincode", derive(Decode, Encode))]
 pub enum BoardState {
     #[default]
-    Flop,
-    Turn,
-    River,
+    Flop = 0,
+    Turn = 1,
+    River = 2,
 }
 
 /// A struct containing the game tree configuration.
@@ -481,7 +481,7 @@ impl ActionTree {
     /// Recursively builds the action tree.
     fn build_tree_recursive(&self, node: &mut ActionTreeNode, info: BuildTreeInfo) {
         if node.is_terminal() {
-            // Do nothing
+            // do nothing
         } else if node.is_chance() {
             let next_state = match node.board_state {
                 BoardState::Flop => BoardState::Turn,
@@ -740,7 +740,7 @@ impl ActionTree {
         line: &mut Vec<Action>,
     ) {
         if node.is_terminal() {
-            // Do nothing
+            // do nothing
         } else if node.children.is_empty() {
             result.push(line.clone());
         } else if node.is_chance() {

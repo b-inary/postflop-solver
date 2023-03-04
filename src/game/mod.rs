@@ -18,6 +18,7 @@ use std::collections::BTreeMap;
 use bincode::{Decode, Encode};
 
 #[derive(Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[repr(u8)]
 #[cfg_attr(feature = "bincode", derive(Decode, Encode))]
 enum State {
     ConfigError = 0,
@@ -96,6 +97,7 @@ pub struct PostFlopGame {
 ///
 /// The nodes must be stored as `Vec<MutexLike<PostFlopNode>>`.
 #[derive(Debug, Clone, Copy)]
+#[repr(C)]
 pub struct PostFlopNode {
     prev_action: Action,
     player: u8,
@@ -106,13 +108,13 @@ pub struct PostFlopNode {
     children_offset: u32,
     num_children: u16,
     num_elements_ip: u16,
-    storage1: *mut u8, // strategy
-    storage2: *mut u8, // regrets or cfvalues
-    storage3: *mut u8, // IP cfvalues
     num_elements: u32,
     scale1: f32,
     scale2: f32,
     scale3: f32,
+    storage1: *mut u8, // strategy
+    storage2: *mut u8, // regrets or cfvalues
+    storage3: *mut u8, // IP cfvalues
 }
 
 unsafe impl Send for PostFlopGame {}
