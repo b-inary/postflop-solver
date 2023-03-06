@@ -174,7 +174,9 @@
 mod alloc;
 
 mod action_tree;
+mod atomic_float;
 mod bet_size;
+mod bunching;
 mod card;
 mod game;
 mod hand;
@@ -188,6 +190,7 @@ mod utility;
 
 pub use action_tree::*;
 pub use bet_size::*;
+pub use bunching::*;
 pub use card::*;
 pub use game::*;
 pub use interface::*;
