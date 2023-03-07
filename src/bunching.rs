@@ -1,19 +1,10 @@
 use crate::atomic_float::*;
 use crate::range::*;
+use crate::utility::*;
 use std::io::{self, Write};
 
 #[cfg(feature = "rayon")]
 use rayon::prelude::*;
-
-#[cfg(feature = "rayon")]
-fn par_iter(range: std::ops::Range<usize>) -> rayon::range::Iter<usize> {
-    range.into_par_iter()
-}
-
-#[cfg(not(feature = "rayon"))]
-fn par_iter(range: std::ops::Range<usize>) -> std::ops::Range<usize> {
-    range
-}
 
 const COMB_49_1: usize = 49;
 const COMB_49_2: usize = 1176;
@@ -179,7 +170,7 @@ impl BunchingConfig {
         }
     }
 
-    /// Returns a reference to the folded ranges.
+    /// Returns a reference to the fold ranges.
     #[inline]
     pub fn fold_ranges(&self) -> &[Range] {
         &self.fold_ranges
@@ -233,7 +224,7 @@ impl BunchingConfig {
                 io::stdout().flush().unwrap();
             }
 
-            self.phase1_proceed_percent();
+            self.phase1_proceed_by_percent();
         }
 
         if print_progress {
@@ -257,7 +248,7 @@ impl BunchingConfig {
                 io::stdout().flush().unwrap();
             }
 
-            self.phase2_proceed_percent();
+            self.phase2_proceed_by_percent();
         }
 
         if print_progress {
@@ -281,7 +272,7 @@ impl BunchingConfig {
                 io::stdout().flush().unwrap();
             }
 
-            self.phase3_proceed_percent();
+            self.phase3_proceed_by_percent();
         }
 
         if print_progress {
@@ -352,53 +343,50 @@ impl BunchingConfig {
 
     /// Manually proceeds the phase 1 by one percent.
     #[inline]
-    pub fn phase1_proceed_percent(&mut self) {
+    pub fn phase1_proceed_by_percent(&mut self) {
         if self.phase != 1 || self.progress_percent == 100 {
             panic!("Invalid state");
         }
 
         match self.fold_ranges.len() {
             1 => self.phase1_process1(),
-            2 => self.phase1_process2(),
-            3 => self.phase1_process3(),
-            _ => self.phase1_process4(),
+            2 => self.phase1_process::<4>(),
+            3 => self.phase1_process::<6>(),
+            _ => self.phase1_process::<8>(),
         }
 
         self.progress_percent += 1;
 
         if self.progress_percent == 100 {
-            self.temp_table1.clear();
-            self.temp_table2.clear();
-            self.temp_table1.shrink_to_fit();
-            self.temp_table2.shrink_to_fit();
+            self.temp_table1 = Vec::new();
+            self.temp_table2 = Vec::new();
         }
     }
 
     /// Manually proceeds the phase 2 by one percent.
     #[inline]
-    pub fn phase2_proceed_percent(&mut self) {
+    pub fn phase2_proceed_by_percent(&mut self) {
         if self.phase != 2 || self.progress_percent == 100 {
             panic!("Invalid state");
         }
 
         match self.fold_ranges.len() {
-            1 => self.phase2_process1(),
-            2 => self.phase2_process2(),
-            3 => self.phase2_process3(),
-            _ => self.phase2_process4(),
+            1 => self.phase2_process::<2>(),
+            2 => self.phase2_process::<4>(),
+            3 => self.phase2_process::<6>(),
+            _ => self.phase2_process::<8>(),
         }
 
         self.progress_percent += 1;
 
         if self.progress_percent == 100 && self.fold_ranges.len() == 4 {
-            self.temp_table3.clear();
-            self.temp_table3.shrink_to_fit();
+            self.temp_table3 = Vec::new();
         }
     }
 
     /// Manually proceeds the phase 3 by one percent.
     #[inline]
-    pub fn phase3_proceed_percent(&mut self) {
+    pub fn phase3_proceed_by_percent(&mut self) {
         if self.phase != 3 || self.progress_percent == 100 {
             panic!("Invalid state");
         }
@@ -419,38 +407,72 @@ impl BunchingConfig {
 
         if self.progress_percent == 100 {
             self.sum.iter_mut().for_each(|s| {
-                s.clear();
-                s.shrink_to_fit();
+                *s = Vec::new();
             });
         }
+    }
+
+    pub(crate) fn result_4cards(&self, mask: u64) -> f32 {
+        let index = mask_to_index(compress_mask(mask, self.flop), 4);
+        self.result4[index].load()
+    }
+
+    pub(crate) fn result_5cards(&self, mask: u64) -> f32 {
+        let index = mask_to_index(compress_mask(mask, self.flop), 5);
+        self.result5[index].load()
+    }
+
+    pub(crate) fn result_6cards(&self, mask: u64) -> f32 {
+        let index = mask_to_index(compress_mask(mask, self.flop), 6);
+        self.result6[index].load()
     }
 
     /* Phase 1: Preparation */
 
     fn phase1_prepare1(&mut self) {
-        todo!()
+        self.temp_table1 = vec![0.0; COMB_49_2];
+        Self::phase1_compress(&mut self.temp_table1, &self.fold_ranges[0], self.flop);
+        self.sum[2] = (0..COMB_49_2).map(|_| AtomicF64::new(0.0)).collect();
     }
 
     fn phase1_prepare2(&mut self) {
-        todo!()
+        self.temp_table1 = vec![0.0; COMB_49_2];
+        self.temp_table2 = vec![0.0; COMB_49_2];
+
+        Self::phase1_compress(&mut self.temp_table1, &self.fold_ranges[0], self.flop);
+        Self::phase1_compress(&mut self.temp_table2, &self.fold_ranges[1], self.flop);
+
+        self.sum[4] = (0..COMB_49_4).map(|_| AtomicF64::new(0.0)).collect();
     }
 
     fn phase1_prepare3(&mut self) {
-        todo!()
-    }
-
-    fn phase1_prepare4(&mut self) {
         self.temp_table1 = vec![0.0; COMB_49_4];
-        self.temp_table2 = vec![0.0; COMB_49_4];
+        self.temp_table2 = vec![0.0; COMB_49_2];
 
-        Self::phase1_combine2(
+        Self::phase1_combine(
             &mut self.temp_table1,
             &self.fold_ranges[0],
             &self.fold_ranges[1],
             self.flop,
         );
 
-        Self::phase1_combine2(
+        Self::phase1_compress(&mut self.temp_table2, &self.fold_ranges[2], self.flop);
+
+        self.sum[6] = (0..COMB_49_6).map(|_| AtomicF64::new(0.0)).collect();
+    }
+
+    fn phase1_prepare4(&mut self) {
+        self.temp_table1 = vec![0.0; COMB_49_4];
+        self.temp_table2 = vec![0.0; COMB_49_4];
+
+        Self::phase1_combine(
+            &mut self.temp_table1,
+            &self.fold_ranges[0],
+            &self.fold_ranges[1],
+            self.flop,
+        );
+
+        Self::phase1_combine(
             &mut self.temp_table2,
             &self.fold_ranges[2],
             &self.fold_ranges[3],
@@ -460,7 +482,35 @@ impl BunchingConfig {
         self.temp_table3 = (0..COMB_49_8).map(|_| AtomicF64::new(0.0)).collect();
     }
 
-    fn phase1_combine2(table: &mut [f64], range1: &Range, range2: &Range, flop: [u8; 3]) {
+    fn phase1_compress(table: &mut [f64], range: &Range, flop: [u8; 3]) {
+        let range = range.raw_data();
+        let flop_mask: u64 = flop.iter().map(|&c| 1 << c).sum();
+
+        let mut src_index = 0;
+
+        for card1 in 0..52 {
+            let mask1 = 1 << card1;
+            if flop_mask & mask1 != 0 {
+                src_index += 51 - card1;
+                continue;
+            }
+
+            for card2 in card1 + 1..52 {
+                let freq = range[src_index] as f64;
+                src_index += 1;
+
+                let mask2 = 1 << card2;
+                if flop_mask & mask2 != 0 || freq == 0.0 {
+                    continue;
+                }
+
+                let index = mask_to_index(compress_mask(mask1 | mask2, flop), 2);
+                table[index] = freq;
+            }
+        }
+    }
+
+    fn phase1_combine(table: &mut [f64], range1: &Range, range2: &Range, flop: [u8; 3]) {
         let range1 = range1.raw_data();
         let range2 = range2.raw_data();
         let flop_mask: u64 = flop.iter().map(|&c| 1 << c).sum();
@@ -515,20 +565,28 @@ impl BunchingConfig {
     /* Phase 1: Main process */
 
     fn phase1_process1(&mut self) {
-        todo!()
+        if self.progress_percent != 0 {
+            return;
+        }
+
+        self.sum[2]
+            .iter_mut()
+            .zip(self.temp_table1.iter())
+            .for_each(|(dst, &src)| {
+                dst.store(src);
+            });
     }
 
-    fn phase1_process2(&mut self) {
-        todo!()
-    }
+    fn phase1_process<const K: usize>(&mut self) {
+        let (k1, k2, src_len1, src_len2, dst_table) = match K {
+            4 => (2, 2, COMB_49_2, COMB_49_2, &mut self.sum[4]),
+            6 => (4, 2, COMB_49_4, COMB_49_2, &mut self.sum[6]),
+            8 => (4, 4, COMB_49_4, COMB_49_4, &mut self.temp_table3),
+            _ => unreachable!(),
+        };
 
-    fn phase1_process3(&mut self) {
-        todo!()
-    }
-
-    fn phase1_process4(&mut self) {
-        let start_index = (COMB_49_4 as f64 * self.progress_percent as f64 / 100.0) as usize;
-        let end_index = (COMB_49_4 as f64 * (self.progress_percent + 1) as f64 / 100.0) as usize;
+        let start_index = (src_len1 as f64 * self.progress_percent as f64 / 100.0) as usize;
+        let end_index = (src_len1 as f64 * (self.progress_percent + 1) as f64 / 100.0) as usize;
 
         par_iter(start_index..end_index).for_each(|src_index1| {
             let freq1 = self.temp_table1[src_index1];
@@ -536,16 +594,16 @@ impl BunchingConfig {
                 return;
             }
 
-            let mask1 = index_to_mask(src_index1, 4);
-            let mut mask2 = 0b1111;
+            let mask1 = index_to_mask(src_index1, k1);
+            let mut mask2 = (1 << k2) - 1;
 
-            for src_index2 in 0..COMB_49_4 {
+            for src_index2 in 0..src_len2 {
                 if mask1 & mask2 == 0 {
                     let freq2 = self.temp_table2[src_index2];
                     if freq2 > 0.0 {
                         let mask = mask1 | mask2;
-                        let dst_index = mask_to_index(mask, 8);
-                        self.temp_table3[dst_index].add(freq1 * freq2);
+                        let dst_index = mask_to_index(mask, K);
+                        dst_table[dst_index].add(freq1 * freq2);
                     }
                 }
                 mask2 = next_combination(mask2);
@@ -555,23 +613,19 @@ impl BunchingConfig {
 
     /* Phase 2: Main process */
 
-    fn phase2_process1(&mut self) {
-        todo!()
-    }
+    fn phase2_process<const K: usize>(&mut self) {
+        let (src_len, src_table) = match K {
+            2 => (COMB_49_2, &self.sum[2]),
+            4 => (COMB_49_4, &self.sum[4]),
+            6 => (COMB_49_6, &self.sum[6]),
+            8 => (COMB_49_8, &self.temp_table3),
+            _ => unreachable!(),
+        };
 
-    fn phase2_process2(&mut self) {
-        todo!()
-    }
+        let start_index = (src_len as f64 * self.progress_percent as f64 / 100.0) as usize;
+        let end_index = (src_len as f64 * (self.progress_percent + 1) as f64 / 100.0) as usize;
 
-    fn phase2_process3(&mut self) {
-        todo!()
-    }
-
-    fn phase2_process4(&mut self) {
-        let start_index = (COMB_49_8 as f64 * self.progress_percent as f64 / 100.0) as usize;
-        let end_index = (COMB_49_8 as f64 * (self.progress_percent + 1) as f64 / 100.0) as usize;
-
-        let num_ones = (0u8..=252)
+        let num_ones = (0u32..(1 << K) - 1)
             .map(|x| x.count_ones() as u8)
             .collect::<Vec<_>>();
 
@@ -579,31 +633,31 @@ impl BunchingConfig {
             .step_by(100)
             .for_each(|chunk_start_index| {
                 let chunk_end_index = usize::min(chunk_start_index + 100, end_index);
-                let mut src_mask = index_to_mask(chunk_start_index, 8);
+                let mut src_mask = index_to_mask(chunk_start_index, K);
 
                 for src_index in chunk_start_index..chunk_end_index {
                     let mut src_mask_copy = src_mask;
                     src_mask = next_combination(src_mask);
 
-                    let freq = self.temp_table3[src_index].load();
+                    let freq = src_table[src_index].load();
                     if freq == 0.0 {
                         continue;
                     }
 
-                    let mut src_mask_bit = [0; 8];
-                    for i in 0..8 {
+                    let mut src_mask_bit = [0; K];
+                    for i in 0..K {
                         let lsb = src_mask_copy & src_mask_copy.wrapping_neg();
                         src_mask_copy ^= lsb;
                         src_mask_bit[i] = lsb;
                     }
 
-                    for i in 0..=252 {
+                    for i in 0..(1 << K) - 1 {
                         if num_ones[i] > 6 {
                             continue;
                         }
 
                         let mut dst_mask = 0;
-                        for j in 0..8 {
+                        for j in 0..K {
                             if i & (1 << j) != 0 {
                                 dst_mask |= src_mask_bit[j];
                             }
@@ -667,7 +721,7 @@ impl BunchingConfig {
                         }
                     }
 
-                    dst_table[dst_index].store(ret as f32);
+                    dst_table[dst_index].store(f32::max(ret as f32, 0.0));
                 }
             })
     }
@@ -739,6 +793,119 @@ mod tests {
     }
 
     #[test]
+    fn test_bunching_independent_1() {
+        let range1 = "33+,A3+,K3+,Q3+,J3+,T3+,93+,83+,73+,63+,53+,43+,33";
+        let flop = flop_from_str("2s2h2d").unwrap();
+        let mut bunching = BunchingConfig::new(&[range1.parse().unwrap()], flop);
+
+        bunching.phase1(false);
+        bunching.phase2(false);
+
+        // equality is exact because the result is an integer (< 2^53)
+        assert_eq!(bunching.sum[0][0].load(), 48.0 * 47.0 / 2.0);
+
+        for (i, a) in bunching.sum[1].iter().enumerate() {
+            if i == 0 {
+                assert_eq!(a.load(), 0.0); // 2c
+            } else {
+                assert_eq!(a.load(), 47.0);
+            }
+        }
+
+        bunching.phase3(false);
+
+        assert_eq!(bunching.result4[0].load(), 45.0 * 44.0 / 2.0);
+        assert_eq!(bunching.result4[4].load(), 44.0 * 43.0 / 2.0);
+        assert_eq!(bunching.result5[0].load(), 44.0 * 43.0 / 2.0);
+        assert_eq!(bunching.result5[5].load(), 43.0 * 42.0 / 2.0);
+        assert_eq!(bunching.result6[0].load(), 43.0 * 42.0 / 2.0);
+        assert_eq!(bunching.result6[6].load(), 42.0 * 41.0 / 2.0);
+    }
+
+    #[test]
+    fn test_bunching_independent_2() {
+        let range1 = "77,76,75,74,73,72,66,65,64,63,62,55,54,53,52,44,43,42,33,32,22";
+        let range2 = "AA,AK,AQ,AJ,AT,A9,KK,KQ,KJ,KT,K9,QQ,QJ,QT,Q9,JJ,JT,J9,TT,T9,99";
+
+        let mut bunching = BunchingConfig::new(
+            &[range1.parse().unwrap(), range2.parse().unwrap()],
+            flop_from_str("8s8h8d").unwrap(),
+        );
+
+        bunching.phase1(false);
+        bunching.phase2(false);
+
+        assert_eq!(bunching.sum[0][0].load(), f64::powi(24.0 * 23.0 / 2.0, 2));
+
+        for (i, a) in bunching.sum[1].iter().enumerate() {
+            if i == 24 {
+                assert_eq!(a.load(), 0.0); // 8c
+            } else {
+                assert_eq!(a.load(), 24.0 * 23.0 / 2.0 * 23.0);
+            }
+        }
+
+        bunching.phase3(false);
+
+        assert_eq!(
+            bunching.result4[0].load(),
+            (20.0 * 19.0 / 2.0) * 24.0 * 23.0 / 2.0
+        );
+        assert_eq!(
+            bunching.result5[0].load(),
+            (19.0 * 18.0 / 2.0) * 24.0 * 23.0 / 2.0
+        );
+        assert_eq!(
+            bunching.result6[0].load(),
+            (18.0 * 17.0 / 2.0) * 24.0 * 23.0 / 2.0
+        );
+    }
+
+    #[test]
+    fn test_bunching_independent_3() {
+        let range1 = "55,54,53,52,44,43,42,33,32,22";
+        let range2 = "99,98,97,96,88,87,86,77,76,66";
+        let range3 = "KK,KQ,KJ,KT,QQ,QJ,QT,JJ,JT,TT";
+
+        let mut bunching = BunchingConfig::new(
+            &[
+                range1.parse().unwrap(),
+                range2.parse().unwrap(),
+                range3.parse().unwrap(),
+            ],
+            flop_from_str("AsAhAd").unwrap(),
+        );
+
+        bunching.phase1(false);
+        bunching.phase2(false);
+
+        assert_eq!(bunching.sum[0][0].load(), f64::powi(16.0 * 15.0 / 2.0, 3));
+
+        for (i, a) in bunching.sum[1].iter().enumerate() {
+            if i == 48 {
+                assert_eq!(a.load(), 0.0); // Ac
+            } else {
+                assert_eq!(a.load(), f64::powi(16.0 * 15.0 / 2.0, 2) * 15.0);
+            }
+        }
+
+        bunching.phase3(false);
+
+        assert_eq!(
+            bunching.result4[0].load(),
+            (12.0 * 11.0 / 2.0) * f32::powi(16.0 * 15.0 / 2.0, 2)
+        );
+        assert_eq!(
+            bunching.result5[0].load(),
+            (11.0 * 10.0 / 2.0) * f32::powi(16.0 * 15.0 / 2.0, 2)
+        );
+        assert_eq!(
+            bunching.result6[0].load(),
+            (10.0 * 9.0 / 2.0) * f32::powi(16.0 * 15.0 / 2.0, 2)
+        );
+    }
+
+    #[test]
     #[ignore]
     fn test_bunching_independent_4() {
         let range1 = "44,43,42,33,32,22";
@@ -759,7 +926,6 @@ mod tests {
         bunching.phase1(true);
         bunching.phase2(true);
 
-        // equality is exact because the result is an integer (< 2^53)
         assert_eq!(bunching.sum[0][0].load(), f64::powi(12.0 * 11.0 / 2.0, 4));
 
         for (i, a) in bunching.sum[1].iter().enumerate() {

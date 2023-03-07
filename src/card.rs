@@ -69,19 +69,29 @@ type IsomorphismData = (
     Vec<u8>,
     [SwapList; 4],
     Vec<Vec<u8>>,
-    Vec<Vec<u8>>,
+    [Vec<u8>; 4],
     [[SwapList; 4]; 4],
 );
 
 /// Returns an index of the given card pair.
 ///
-/// `"2d2c"` => `0`, `"2h2c"` => `1`, ..., `"AsAh"` => `1325`.
+/// `"2d2c"` => `0`, `"2h2c"` => `1`, `"2s2c"` => `2`, ..., `"AsAh"` => `1325`.
 #[inline]
-pub(crate) fn card_pair_index(mut card1: u8, mut card2: u8) -> usize {
+pub(crate) fn card_pair_to_index(mut card1: u8, mut card2: u8) -> usize {
     if card1 > card2 {
         mem::swap(&mut card1, &mut card2);
     }
     card1 as usize * (101 - card1 as usize) / 2 + card2 as usize - 1
+}
+
+/// Returns a card pair from the given index.
+///
+/// `0` => `"2d2c"`, `1` => `"2h2c"` , `2` => `"2s2c"`, ..., `1325` => `"AsAh"`.
+#[inline]
+pub(crate) fn index_to_card_pair(index: usize) -> (u8, u8) {
+    let card1 = (103 - (103.0 * 103.0 - 8.0 * index as f64).sqrt().ceil() as u16) / 2;
+    let card2 = index as u16 - card1 * (101 - card1) / 2 + 1;
+    (card1 as u8, card2 as u8)
 }
 
 impl CardConfig {
@@ -114,7 +124,7 @@ impl CardConfig {
                     && (self.turn == NOT_DEALT || board1 == self.turn || board2 == self.turn)
                     && (self.river == NOT_DEALT || board1 == self.river || board2 == self.river)
                 {
-                    let index = card_pair_index(board1, board2);
+                    let index = card_pair_to_index(board1, board2);
                     ret_river[index] = Self::valid_indices_internal(private_cards, board1, board2);
                 }
             }
@@ -215,7 +225,7 @@ impl CardConfig {
                         strength[player].sort_unstable();
                     }
 
-                    ret[card_pair_index(board1, board2)] = strength;
+                    ret[card_pair_to_index(board1, board2)] = strength;
                 }
             }
         }
@@ -251,9 +261,9 @@ impl CardConfig {
         let mut isomorphic_suit = [None; 4];
         let mut reverse_table = vec![usize::MAX; 52 * 51 / 2];
 
-        let mut turn_isomorphism_ref = Vec::new();
-        let mut turn_isomorphism_card = Vec::new();
-        let mut turn_isomorphism_swap = Default::default();
+        let mut isomorphism_ref_turn = Vec::new();
+        let mut isomorphism_card_turn = Vec::new();
+        let mut isomorphism_swap_turn = Default::default();
 
         // turn isomorphism
         if self.turn == NOT_DEALT {
@@ -264,7 +274,7 @@ impl CardConfig {
                     {
                         isomorphic_suit[suit1 as usize] = Some(suit2);
                         Self::isomorphism_swap_internal(
-                            &mut turn_isomorphism_swap,
+                            &mut isomorphism_swap_turn,
                             &mut reverse_table,
                             suit1,
                             suit2,
@@ -276,16 +286,16 @@ impl CardConfig {
             }
 
             Self::isomorphism_internal(
-                &mut turn_isomorphism_ref,
-                &mut turn_isomorphism_card,
+                &mut isomorphism_ref_turn,
+                &mut isomorphism_card_turn,
                 flop_mask,
                 &isomorphic_suit,
             );
         }
 
-        let mut river_isomorphism_ref = vec![Vec::new(); 52];
-        let mut river_isomorphism_card = vec![Vec::new(); 52];
-        let mut river_isomorphism_swap: [[SwapList; 4]; 4] = Default::default();
+        let mut isomorphism_ref_river = vec![Vec::new(); 52];
+        let mut isomorphism_card_river: [Vec<u8>; 4] = Default::default();
+        let mut isomorphism_swap_river: [[SwapList; 4]; 4] = Default::default();
 
         // river isomorphism
         if self.river == NOT_DEALT {
@@ -309,7 +319,7 @@ impl CardConfig {
                         {
                             isomorphic_suit[suit1 as usize] = Some(suit2);
                             Self::isomorphism_swap_internal(
-                                &mut river_isomorphism_swap[turn as usize & 3],
+                                &mut isomorphism_swap_river[turn as usize & 3],
                                 &mut reverse_table,
                                 suit1,
                                 suit2,
@@ -321,8 +331,8 @@ impl CardConfig {
                 }
 
                 Self::isomorphism_internal(
-                    &mut river_isomorphism_ref[turn as usize],
-                    &mut river_isomorphism_card[turn as usize],
+                    &mut isomorphism_ref_river[turn as usize],
+                    &mut isomorphism_card_river[turn as usize & 3],
                     turn_mask,
                     &isomorphic_suit,
                 );
@@ -330,12 +340,12 @@ impl CardConfig {
         }
 
         (
-            turn_isomorphism_ref,
-            turn_isomorphism_card,
-            turn_isomorphism_swap,
-            river_isomorphism_ref,
-            river_isomorphism_card,
-            river_isomorphism_swap,
+            isomorphism_ref_turn,
+            isomorphism_card_turn,
+            isomorphism_swap_turn,
+            isomorphism_ref_river,
+            isomorphism_card_river,
+            isomorphism_swap_river,
         )
     }
 
@@ -366,13 +376,13 @@ impl CardConfig {
             let cards = &private_cards[player];
 
             for i in 0..cards.len() {
-                reverse_table[card_pair_index(cards[i].0, cards[i].1)] = i;
+                reverse_table[card_pair_to_index(cards[i].0, cards[i].1)] = i;
             }
 
             for (i, &(c1, c2)) in cards.iter().enumerate() {
                 let c1 = replacer(c1);
                 let c2 = replacer(c2);
-                let index = reverse_table[card_pair_index(c1, c2)];
+                let index = reverse_table[card_pair_to_index(c1, c2)];
                 if i < index {
                     swap_list[player].push((i as u16, index as u16));
                 }
@@ -386,6 +396,7 @@ impl CardConfig {
         mask: u64,
         isomorphic_suit: &[Option<u8>; 4],
     ) {
+        let push_card = isomorphism_card.is_empty();
         let mut counter = 0;
         let mut indices = [0; 52];
 
@@ -399,7 +410,9 @@ impl CardConfig {
             if let Some(replace_suit) = isomorphic_suit[suit as usize] {
                 let replace_card = card - suit + replace_suit;
                 isomorphism_ref.push(indices[replace_card as usize]);
-                isomorphism_card.push(card);
+                if push_card {
+                    isomorphism_card.push(card);
+                }
             } else {
                 indices[card as usize] = counter;
                 counter += 1;
@@ -417,8 +430,9 @@ mod tests {
         let mut k = 0;
         for i in 0..52 {
             for j in (i + 1)..52 {
-                assert_eq!(card_pair_index(i, j), k);
-                assert_eq!(card_pair_index(j, i), k);
+                assert_eq!(card_pair_to_index(i, j), k);
+                assert_eq!(card_pair_to_index(j, i), k);
+                assert_eq!(index_to_card_pair(k), (i, j));
                 k += 1;
             }
         }

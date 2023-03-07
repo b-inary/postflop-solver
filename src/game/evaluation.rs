@@ -46,7 +46,7 @@ impl PostFlopGame {
             };
 
             let valid_indices = if node.river != NOT_DEALT {
-                &self.valid_indices_river[card_pair_index(node.turn, node.river)]
+                &self.valid_indices_river[card_pair_to_index(node.turn, node.river)]
             } else if node.turn != NOT_DEALT {
                 &self.valid_indices_turn[node.turn as usize]
             } else {
@@ -92,7 +92,7 @@ impl PostFlopGame {
         }
         // showdown (optimized for no rake; 2-pass)
         else if rake == 0.0 {
-            let pair_index = card_pair_index(node.turn, node.river);
+            let pair_index = card_pair_to_index(node.turn, node.river);
             let hand_strength = &self.hand_strength[pair_index];
             let player_strength = &hand_strength[player];
             let opponent_strength = &hand_strength[player ^ 1];
@@ -153,7 +153,7 @@ impl PostFlopGame {
             let amount_tie = -0.5 * rake / self.num_combinations;
             let same_hand_index = &self.same_hand_index[player];
 
-            let pair_index = card_pair_index(node.turn, node.river);
+            let pair_index = card_pair_to_index(node.turn, node.river);
             let hand_strength = &self.hand_strength[pair_index];
             let player_strength = &hand_strength[player];
             let opponent_strength = &hand_strength[player ^ 1];

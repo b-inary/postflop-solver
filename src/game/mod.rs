@@ -51,12 +51,20 @@ pub struct PostFlopGame {
     valid_indices_turn: Vec<[Vec<u16>; 2]>,
     valid_indices_river: Vec<[Vec<u16>; 2]>,
     hand_strength: Vec<[Vec<StrengthItem>; 2]>,
-    turn_isomorphism_ref: Vec<u8>,
-    turn_isomorphism_card: Vec<u8>,
-    turn_isomorphism_swap: [SwapList; 4],
-    river_isomorphism_ref: Vec<Vec<u8>>,
-    river_isomorphism_card: Vec<Vec<u8>>,
-    river_isomorphism_swap: [[SwapList; 4]; 4],
+    isomorphism_ref_turn: Vec<u8>,
+    isomorphism_card_turn: Vec<u8>,
+    isomorphism_swap_turn: [SwapList; 4],
+    isomorphism_ref_river: Vec<Vec<u8>>,
+    isomorphism_card_river: [Vec<u8>; 4],
+    isomorphism_swap_river: [[SwapList; 4]; 4],
+
+    // bunching effect
+    bunching_num_dead_cards: usize,
+    bunching_arena: Vec<f32>,
+    bunching_strength: Vec<[Vec<u16>; 2]>,
+    bunching_num_flop: [Vec<usize>; 2],
+    bunching_num_turn: [Vec<Vec<Option<usize>>>; 2],
+    bunching_num_river: [Vec<Vec<Option<usize>>>; 2],
 
     // store options
     storage_mode: BoardState,

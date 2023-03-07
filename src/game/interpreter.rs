@@ -278,7 +278,7 @@ impl PostFlopGame {
                             // following code works correctly.
                             self.river_swap = Some((
                                 self.turn & 3,
-                                self.river_isomorphism_card[self.turn as usize][i] & 3,
+                                self.isomorphism_card_river[self.turn as usize & 3][i] & 3,
                             ));
                         }
                         break;
@@ -861,9 +861,9 @@ impl PostFlopGame {
     #[inline]
     fn isomorphic_cards(&self, node: &PostFlopNode) -> &[u8] {
         if node.turn == NOT_DEALT {
-            &self.turn_isomorphism_card
+            &self.isomorphism_card_turn
         } else {
-            &self.river_isomorphism_card[node.turn as usize]
+            &self.isomorphism_card_river[node.turn as usize & 3]
         }
     }
 
@@ -872,10 +872,10 @@ impl PostFlopGame {
     fn apply_swap(&self, slice: &mut [f32], player: usize, reverse: bool) {
         let turn_swap = self
             .turn_swap
-            .map(|suit| &self.turn_isomorphism_swap[suit as usize][player]);
+            .map(|suit| &self.isomorphism_swap_turn[suit as usize][player]);
 
         let river_swap = self.river_swap.map(|(turn_suit, suit)| {
-            &self.river_isomorphism_swap[turn_suit as usize][suit as usize][player]
+            &self.isomorphism_swap_river[turn_suit as usize][suit as usize][player]
         });
 
         let swaps = if !reverse {
@@ -893,7 +893,7 @@ impl PostFlopGame {
 
     /// Internal method for calculating the equity.
     fn equity_internal(&self, result: &mut [f64], player: usize, turn: u8, river: u8, amount: f64) {
-        let pair_index = card_pair_index(turn, river);
+        let pair_index = card_pair_to_index(turn, river);
         let hand_strength = &self.hand_strength[pair_index];
         let player_strength = &hand_strength[player];
         let opponent_strength = &hand_strength[player ^ 1];

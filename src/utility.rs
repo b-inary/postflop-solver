@@ -28,6 +28,16 @@ pub(crate) fn for_each_child<T: GameNode, OP: Fn(usize) + Sync + Send>(node: &T,
     node.action_indices().for_each(op);
 }
 
+#[cfg(feature = "rayon")]
+pub(crate) fn par_iter(range: std::ops::Range<usize>) -> rayon::range::Iter<usize> {
+    range.into_par_iter()
+}
+
+#[cfg(not(feature = "rayon"))]
+pub(crate) fn par_iter(range: std::ops::Range<usize>) -> std::ops::Range<usize> {
+    range
+}
+
 #[inline]
 pub(crate) fn max(x: f32, y: f32) -> f32 {
     if x > y {
@@ -113,14 +123,14 @@ fn slice_absolute_max(slice: &[f32]) -> f32 {
 /// Obtains the maximum absolute value of the given slice.
 #[cfg(not(all(target_arch = "wasm32", target_feature = "simd128")))]
 fn slice_absolute_max(slice: &[f32]) -> f32 {
-    if slice.len() < 32 {
+    if slice.len() < 16 {
         slice.iter().fold(0.0, |a, x| max(a, x.abs()))
     } else {
-        let mut tmp: [f32; 16] = slice[..16].try_into().unwrap();
+        let mut tmp: [f32; 8] = slice[..8].try_into().unwrap();
         tmp.iter_mut().for_each(|x| *x = x.abs());
-        let mut iter = slice[16..].chunks_exact(16);
+        let mut iter = slice[8..].chunks_exact(8);
         for chunk in iter.by_ref() {
-            for i in 0..16 {
+            for i in 0..8 {
                 tmp[i] = max(tmp[i], chunk[i].abs());
             }
         }
@@ -177,13 +187,13 @@ fn slice_nonnegative_max(slice: &[f32]) -> f32 {
 /// Obtains the maximum value of the given non-negative slice.
 #[cfg(not(all(target_arch = "wasm32", target_feature = "simd128")))]
 fn slice_nonnegative_max(slice: &[f32]) -> f32 {
-    if slice.len() < 32 {
+    if slice.len() < 16 {
         slice.iter().fold(0.0, |a, &x| max(a, x))
     } else {
-        let mut tmp: [f32; 16] = slice[..16].try_into().unwrap();
-        let mut iter = slice[16..].chunks_exact(16);
+        let mut tmp: [f32; 8] = slice[..8].try_into().unwrap();
+        let mut iter = slice[8..].chunks_exact(8);
         for chunk in iter.by_ref() {
-            for i in 0..16 {
+            for i in 0..8 {
                 tmp[i] = max(tmp[i], chunk[i]);
             }
         }

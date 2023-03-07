@@ -1,4 +1,4 @@
-use crate::card::card_pair_index;
+use crate::card::*;
 use once_cell::sync::Lazy;
 use regex::Regex;
 use std::fmt::Write;
@@ -58,7 +58,7 @@ fn pair_indices(rank: u8) -> Vec<usize> {
     let mut result = Vec::with_capacity(6);
     for i in 0..4 {
         for j in i + 1..4 {
-            result.push(card_pair_index(4 * rank + i, 4 * rank + j));
+            result.push(card_pair_to_index(4 * rank + i, 4 * rank + j));
         }
     }
     result
@@ -69,7 +69,7 @@ fn nonpair_indices(rank1: u8, rank2: u8) -> Vec<usize> {
     let mut result = Vec::with_capacity(16);
     for i in 0..4 {
         for j in 0..4 {
-            result.push(card_pair_index(4 * rank1 + i, 4 * rank2 + j));
+            result.push(card_pair_to_index(4 * rank1 + i, 4 * rank2 + j));
         }
     }
     result
@@ -79,7 +79,7 @@ fn nonpair_indices(rank1: u8, rank2: u8) -> Vec<usize> {
 fn suited_indices(rank1: u8, rank2: u8) -> Vec<usize> {
     let mut result = Vec::with_capacity(4);
     for i in 0..4 {
-        result.push(card_pair_index(4 * rank1 + i, 4 * rank2 + i));
+        result.push(card_pair_to_index(4 * rank1 + i, 4 * rank2 + i));
     }
     result
 }
@@ -90,7 +90,7 @@ fn offsuit_indices(rank1: u8, rank2: u8) -> Vec<usize> {
     for i in 0..4 {
         for j in 0..4 {
             if i != j {
-                result.push(card_pair_index(4 * rank1 + i, 4 * rank2 + j));
+                result.push(card_pair_to_index(4 * rank1 + i, 4 * rank2 + j));
             }
         }
     }
@@ -103,7 +103,7 @@ fn indices_with_suitedness(rank1: u8, rank2: u8, suitedness: Suitedness) -> Vec<
         match suitedness {
             Suitedness::All => pair_indices(rank1),
             Suitedness::Specific(suit1, suit2) => {
-                vec![card_pair_index(4 * rank1 + suit1, 4 * rank1 + suit2)]
+                vec![card_pair_to_index(4 * rank1 + suit1, 4 * rank1 + suit2)]
             }
             _ => panic!("invalid suitedness with a pair"),
         }
@@ -113,7 +113,7 @@ fn indices_with_suitedness(rank1: u8, rank2: u8, suitedness: Suitedness) -> Vec<
             Suitedness::Offsuit => offsuit_indices(rank1, rank2),
             Suitedness::All => nonpair_indices(rank1, rank2),
             Suitedness::Specific(suit1, suit2) => {
-                vec![card_pair_index(4 * rank1 + suit1, 4 * rank2 + suit2)]
+                vec![card_pair_to_index(4 * rank1 + suit1, 4 * rank2 + suit2)]
             }
         }
     }
@@ -537,7 +537,7 @@ impl Range {
     /// Card ID: `"2c"` => `0`, `"2d"` => `1`, `"2h"` => `2`, ..., `"As"` => `51`.
     #[inline]
     pub fn get_weight_by_cards(&self, card1: u8, card2: u8) -> f32 {
-        self.data[card_pair_index(card1, card2)]
+        self.data[card_pair_to_index(card1, card2)]
     }
 
     /// Obtains the average weight of specified pair hands.
@@ -578,7 +578,7 @@ impl Range {
     /// Card ID: `"2c"` => `0`, `"2d"` => `1`, `"2h"` => `2`, ..., `"As"` => `51`.
     #[inline]
     pub fn set_weight_by_cards(&mut self, card1: u8, card2: u8, weight: f32) {
-        self.data[card_pair_index(card1, card2)] = weight;
+        self.data[card_pair_to_index(card1, card2)] = weight;
     }
 
     /// Sets the weights of specified pair hands.
