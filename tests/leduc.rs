@@ -118,6 +118,11 @@ impl Game for LeducGame {
     }
 
     #[inline]
+    fn chance_factor(&self, _node: &Self::Node) -> usize {
+        4
+    }
+
+    #[inline]
     fn isomorphic_chances(&self, _node: &Self::Node) -> &[u8] {
         &self.isomorphism
     }
@@ -327,11 +332,6 @@ impl GameNode for LeducNode {
     #[inline]
     fn num_actions(&self) -> usize {
         self.children.len()
-    }
-
-    #[inline]
-    fn chance_factor(&self) -> f32 {
-        1.0 / 4.0
     }
 
     #[inline]

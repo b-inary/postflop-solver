@@ -35,14 +35,6 @@ impl GameNode for PostFlopNode {
     }
 
     #[inline]
-    fn chance_factor(&self) -> f32 {
-        match self.turn {
-            NOT_DEALT => 1.0 / 45.0,
-            _ => 1.0 / 44.0,
-        }
-    }
-
-    #[inline]
     fn play(&self, action: usize) -> MutexGuardLike<Self> {
         self.children()[action].lock()
     }

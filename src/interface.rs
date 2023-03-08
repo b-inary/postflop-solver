@@ -30,6 +30,10 @@ pub trait Game: Send + Sync {
         cfreach: &[f32],
     );
 
+    /// Returns the effective number of chances.
+    #[doc(hidden)]
+    fn chance_factor(&self, node: &Self::Node) -> usize;
+
     /// Returns whether the instance is solved.
     #[doc(hidden)]
     fn is_solved(&self) -> bool;
@@ -92,10 +96,6 @@ pub trait GameNode: Send + Sync {
     /// Returns the number of actions.
     #[doc(hidden)]
     fn num_actions(&self) -> usize;
-
-    /// Returns the effective coefficient of chance.
-    #[doc(hidden)]
-    fn chance_factor(&self) -> f32;
 
     /// Returns the node after taking the given action.
     #[doc(hidden)]

@@ -43,7 +43,20 @@ impl Game for PostFlopGame {
         player: usize,
         cfreach: &[f32],
     ) {
-        self.evaluate_internal(result, node, player, cfreach);
+        if self.bunching_num_dead_cards == 0 {
+            self.evaluate_internal(result, node, player, cfreach);
+        } else {
+            self.evaluate_internal_bunching(result, node, player, cfreach);
+        }
+    }
+
+    #[inline]
+    fn chance_factor(&self, node: &Self::Node) -> usize {
+        if node.turn == NOT_DEALT {
+            45 - self.bunching_num_dead_cards
+        } else {
+            44 - self.bunching_num_dead_cards
+        }
     }
 
     #[inline]
@@ -812,8 +825,11 @@ impl PostFlopGame {
                     }
                 }
 
-                if player == 0 && arena.iter().all(|&x| x == 0.0) {
-                    return Err("Valid combination not found".to_string());
+                if player == 0 {
+                    self.bunching_num_combinations = arena.iter().fold(0.0, |a, &x| a + x as f64);
+                    if self.bunching_num_combinations == 0.0 {
+                        return Err("Valid combination not found".to_string());
+                    }
                 }
 
                 self.bunching_num_flop[player] = indices;
@@ -867,6 +883,13 @@ impl PostFlopGame {
                     .collect::<Vec<_>>();
 
                 self.bunching_num_turn[player] = Self::push_vec_to_arena_f32(&mut arena, buf);
+
+                if self.card_config.turn != NOT_DEALT && player == 0 {
+                    self.bunching_num_combinations = arena.iter().fold(0.0, |a, &x| a + x as f64);
+                    if self.bunching_num_combinations == 0.0 {
+                        return Err("Valid combination not found".to_string());
+                    }
+                }
             }
         }
 
@@ -923,6 +946,13 @@ impl PostFlopGame {
                 .collect::<Vec<_>>();
 
             self.bunching_num_river[player] = Self::push_vec_to_arena_f32(&mut arena, buf);
+
+            if self.card_config.river != NOT_DEALT && player == 0 {
+                self.bunching_num_combinations = arena.iter().fold(0.0, |a, &x| a + x as f64);
+                if self.bunching_num_combinations == 0.0 {
+                    return Err("Valid combination not found".to_string());
+                }
+            }
         }
 
         if self.card_config.river != NOT_DEALT {

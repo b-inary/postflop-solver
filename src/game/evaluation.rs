@@ -1,4 +1,5 @@
 use super::*;
+use crate::sliceop::*;
 use std::mem::MaybeUninit;
 
 #[inline]
@@ -248,6 +249,76 @@ impl PostFlopGame {
                     *result.get_unchecked_mut(index as usize) = cfvalue as f32;
                 }
             }
+        }
+    }
+
+    pub(super) fn evaluate_internal_bunching(
+        &self,
+        result: &mut [MaybeUninit<f32>],
+        node: &PostFlopNode,
+        player: usize,
+        cfreach: &[f32],
+    ) {
+        let pot = (self.tree_config.starting_pot + 2 * node.amount) as f64;
+        let half_pot = 0.5 * pot;
+        let rake = min(pot * self.tree_config.rake_rate, self.tree_config.rake_cap);
+        let amount_win = ((half_pot - rake) / self.bunching_num_combinations) as f32;
+        let amount_lose = (-half_pot / self.bunching_num_combinations) as f32;
+        let amount_tie = (-0.5 * rake / self.bunching_num_combinations) as f32;
+        let opponent_len = self.private_cards[player ^ 1].len();
+
+        // someone folded
+        if node.player & PLAYER_FOLD_FLAG == PLAYER_FOLD_FLAG {
+            let folded_player = node.player & PLAYER_MASK;
+            let payoff = if folded_player as usize != player {
+                amount_win
+            } else {
+                amount_lose
+            };
+
+            let indices = if node.river != NOT_DEALT {
+                &self.bunching_num_river[player][card_pair_to_index(node.turn, node.river)]
+            } else if node.turn != NOT_DEALT {
+                &self.bunching_num_turn[player][node.turn as usize]
+            } else {
+                &self.bunching_num_flop[player]
+            };
+
+            result.iter_mut().zip(indices).for_each(|(r, &index)| {
+                if index != 0 {
+                    let slice = &self.bunching_arena[index..index + opponent_len];
+                    r.write(payoff * inner_product(cfreach, slice));
+                } else {
+                    r.write(0.0);
+                }
+            });
+        }
+        // showdown
+        else {
+            let pair_index = card_pair_to_index(node.turn, node.river);
+            let indices = &self.bunching_num_river[player][pair_index];
+            let player_strength = &self.bunching_strength[pair_index][player];
+            let opponent_strength = &self.bunching_strength[pair_index][player ^ 1];
+
+            result
+                .iter_mut()
+                .zip(indices)
+                .zip(player_strength)
+                .for_each(|((r, &index), &strength)| {
+                    if index != 0 {
+                        r.write(inner_product_cond(
+                            cfreach,
+                            &self.bunching_arena[index..index + opponent_len],
+                            opponent_strength,
+                            strength,
+                            amount_win,
+                            amount_lose,
+                            amount_tie,
+                        ));
+                    } else {
+                        r.write(0.0);
+                    }
+                });
         }
     }
 }

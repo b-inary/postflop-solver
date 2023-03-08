@@ -60,6 +60,7 @@ pub struct PostFlopGame {
 
     // bunching effect
     bunching_num_dead_cards: usize,
+    bunching_num_combinations: f64,
     bunching_arena: Vec<f32>,
     bunching_strength: Vec<[Vec<u16>; 2]>,
     bunching_num_flop: [Vec<usize>; 2],

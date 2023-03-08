@@ -148,6 +148,95 @@ pub(crate) fn max_fma_slices_uninit<'a>(
 }
 
 #[inline]
+pub(crate) fn inner_product(src1: &[f32], src2: &[f32]) -> f32 {
+    const CHUNK_SIZE: usize = 8;
+
+    let len = src1.len();
+    let len_chunk = len / CHUNK_SIZE * CHUNK_SIZE;
+    let mut acc = [0.0; CHUNK_SIZE];
+
+    for i in (0..len_chunk).step_by(CHUNK_SIZE) {
+        for j in 0..CHUNK_SIZE {
+            unsafe {
+                let x = *src1.get_unchecked(i + j);
+                let y = *src2.get_unchecked(i + j);
+                *acc.get_unchecked_mut(j) += (x * y) as f64;
+            }
+        }
+    }
+
+    for i in len_chunk..len {
+        unsafe {
+            let x = *src1.get_unchecked(i);
+            let y = *src2.get_unchecked(i);
+            *acc.get_unchecked_mut(0) += (x * y) as f64;
+        }
+    }
+
+    acc.iter().sum::<f64>() as f32
+}
+
+#[inline]
+pub(crate) fn inner_product_cond(
+    src1: &[f32],
+    src2: &[f32],
+    cond: &[u16],
+    threshold: u16,
+    less: f32,
+    greater: f32,
+    equal: f32,
+) -> f32 {
+    const CHUNK_SIZE: usize = 8;
+
+    let len = src1.len();
+    let len_chunk = len / CHUNK_SIZE * CHUNK_SIZE;
+    let mut acc = [0.0; CHUNK_SIZE];
+
+    for i in (0..len_chunk).step_by(CHUNK_SIZE) {
+        for j in 0..CHUNK_SIZE {
+            unsafe {
+                let x = *src1.get_unchecked(i + j);
+                let y = *src2.get_unchecked(i + j);
+                let c = *cond.get_unchecked(i + j);
+
+                // `match` prevents vectorization
+                #[allow(clippy::comparison_chain)]
+                let z = if c < threshold {
+                    less
+                } else if c > threshold {
+                    greater
+                } else {
+                    equal
+                };
+
+                *acc.get_unchecked_mut(j) += (x * y * z) as f64;
+            }
+        }
+    }
+
+    for i in len_chunk..len {
+        unsafe {
+            let x = *src1.get_unchecked(i);
+            let y = *src2.get_unchecked(i);
+            let c = *cond.get_unchecked(i);
+
+            #[allow(clippy::comparison_chain)]
+            let z = if c < threshold {
+                less
+            } else if c > threshold {
+                greater
+            } else {
+                equal
+            };
+
+            *acc.get_unchecked_mut(0) += (x * y * z) as f64;
+        }
+    }
+
+    acc.iter().sum::<f64>() as f32
+}
+
+#[inline]
 pub(crate) fn row<T>(slice: &[T], index: usize, row_size: usize) -> &[T] {
     &slice[index * row_size..(index + 1) * row_size]
 }

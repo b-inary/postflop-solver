@@ -96,6 +96,11 @@ impl Game for KuhnGame {
     }
 
     #[inline]
+    fn chance_factor(&self, _node: &Self::Node) -> usize {
+        unreachable!()
+    }
+
+    #[inline]
     fn is_solved(&self) -> bool {
         self.is_solved
     }
@@ -198,11 +203,6 @@ impl GameNode for KuhnNode {
     #[inline]
     fn num_actions(&self) -> usize {
         self.children.len()
-    }
-
-    #[inline]
-    fn chance_factor(&self) -> f32 {
-        unreachable!()
     }
 
     #[inline]

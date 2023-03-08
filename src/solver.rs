@@ -173,7 +173,7 @@ fn solve_recursive<T: Game>(
         mul_slice_scalar_uninit(
             cfreach_updated.spare_capacity_mut(),
             cfreach,
-            node.chance_factor(),
+            1.0 / game.chance_factor(node) as f32,
         );
         unsafe { cfreach_updated.set_len(cfreach.len()) };
 
