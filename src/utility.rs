@@ -29,12 +29,12 @@ pub(crate) fn for_each_child<T: GameNode, OP: Fn(usize) + Sync + Send>(node: &T,
 }
 
 #[cfg(feature = "rayon")]
-pub(crate) fn par_iter(range: std::ops::Range<usize>) -> rayon::range::Iter<usize> {
+pub(crate) fn into_par_iter(range: std::ops::Range<usize>) -> rayon::range::Iter<usize> {
     range.into_par_iter()
 }
 
 #[cfg(not(feature = "rayon"))]
-pub(crate) fn par_iter(range: std::ops::Range<usize>) -> std::ops::Range<usize> {
+pub(crate) fn into_par_iter(range: std::ops::Range<usize>) -> std::ops::Range<usize> {
     range
 }
 
@@ -227,6 +227,19 @@ pub(crate) fn encode_unsigned_slice(dst: &mut [u16], slice: &[f32]) -> f32 {
     scale
 }
 
+/// Applies the given swap to the given slice.
+#[inline]
+pub(crate) fn apply_swap<T>(slice: &mut [T], swap_list: &[(u16, u16)]) {
+    for &(i, j) in swap_list {
+        unsafe {
+            ptr::swap(
+                slice.get_unchecked_mut(i as usize),
+                slice.get_unchecked_mut(j as usize),
+            );
+        }
+    }
+}
+
 /// Finalizes the solving process.
 #[inline]
 pub fn finalize<T: Game>(game: &mut T) {
@@ -412,27 +425,13 @@ fn compute_cfvalue_recursive<T: Game>(
             let swap_list = &game.isomorphic_swap(node, i)[player];
             let tmp = row_mut(&mut cfv_actions, isomorphic_index as usize, num_hands);
 
-            for &(i, j) in swap_list {
-                unsafe {
-                    ptr::swap(
-                        tmp.get_unchecked_mut(i as usize),
-                        tmp.get_unchecked_mut(j as usize),
-                    );
-                }
-            }
+            apply_swap(tmp, swap_list);
 
             result_f64.iter_mut().zip(&*tmp).for_each(|(r, &v)| {
                 *r += v as f64;
             });
 
-            for &(i, j) in swap_list {
-                unsafe {
-                    ptr::swap(
-                        tmp.get_unchecked_mut(i as usize),
-                        tmp.get_unchecked_mut(j as usize),
-                    );
-                }
-            }
+            apply_swap(tmp, swap_list);
         }
 
         result.iter_mut().zip(&result_f64).for_each(|(r, &v)| {
@@ -638,27 +637,13 @@ fn compute_best_cfv_recursive<T: Game>(
             let swap_list = &game.isomorphic_swap(node, i)[player];
             let tmp = row_mut(&mut cfv_actions, isomorphic_index as usize, num_hands);
 
-            for &(i, j) in swap_list {
-                unsafe {
-                    ptr::swap(
-                        tmp.get_unchecked_mut(i as usize),
-                        tmp.get_unchecked_mut(j as usize),
-                    );
-                }
-            }
+            apply_swap(tmp, swap_list);
 
             result_f64.iter_mut().zip(&*tmp).for_each(|(r, &v)| {
                 *r += v as f64;
             });
 
-            for &(i, j) in swap_list {
-                unsafe {
-                    ptr::swap(
-                        tmp.get_unchecked_mut(i as usize),
-                        tmp.get_unchecked_mut(j as usize),
-                    );
-                }
-            }
+            apply_swap(tmp, swap_list);
         }
 
         result.iter_mut().zip(&result_f64).for_each(|(r, &v)| {

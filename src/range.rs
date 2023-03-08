@@ -613,6 +613,27 @@ impl Range {
         self.set_weight(&offsuit_indices(rank1, rank2), weight);
     }
 
+    /// Returns whether the all suits are symmetric.
+    pub(crate) fn is_suit_symmetric(&self) -> bool {
+        for rank1 in 0..13 {
+            if !self.is_same_weight(&pair_indices(rank1)) {
+                return false;
+            }
+
+            for rank2 in rank1 + 1..13 {
+                if !self.is_same_weight(&suited_indices(rank1, rank2)) {
+                    return false;
+                }
+
+                if !self.is_same_weight(&offsuit_indices(rank1, rank2)) {
+                    return false;
+                }
+            }
+        }
+
+        true
+    }
+
     /// Returns whether the two suits are isomorphic.
     pub(crate) fn is_suit_isomorphic(&self, suit1: u8, suit2: u8) -> bool {
         let replace_suit = |suit| {
@@ -643,9 +664,7 @@ impl Range {
     #[inline]
     fn is_same_weight(&self, indices: &[usize]) -> bool {
         let weight = self.data[indices[0]];
-        indices
-            .iter()
-            .all(|&i| (self.data[i] - weight).abs() < 1e-4)
+        indices.iter().all(|&i| self.data[i] == weight)
     }
 
     #[inline]

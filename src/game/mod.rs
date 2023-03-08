@@ -63,8 +63,10 @@ pub struct PostFlopGame {
     bunching_arena: Vec<f32>,
     bunching_strength: Vec<[Vec<u16>; 2]>,
     bunching_num_flop: [Vec<usize>; 2],
-    bunching_num_turn: [Vec<Vec<Option<usize>>>; 2],
-    bunching_num_river: [Vec<Vec<Option<usize>>>; 2],
+    bunching_num_turn: [Vec<Vec<usize>>; 2],
+    bunching_num_river: [Vec<Vec<usize>>; 2],
+    bunching_coef_flop: [Vec<usize>; 2],
+    bunching_coef_turn: [Vec<Vec<usize>>; 2],
 
     // store options
     storage_mode: BoardState,

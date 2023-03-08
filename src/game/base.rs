@@ -150,23 +150,23 @@ impl PostFlopGame {
     ///
     /// **Warning**: Enabling bunching effect will dramatically slow down the solving process.
     #[inline]
-    pub fn set_bunching_effect(&mut self, bunching_config: BunchingConfig) -> Result<(), String> {
+    pub fn set_bunching_effect(&mut self, bunching_data: &BunchingData) -> Result<(), String> {
         if self.state <= State::Uninitialized {
             return Err("Game is not successfully initialized".to_string());
         }
 
-        if !bunching_config.is_ready() {
+        if !bunching_data.is_ready() {
             return Err("Bunching configuration is not ready".to_string());
         }
 
         let mut flop_sorted = self.card_config.flop;
         flop_sorted.sort_unstable();
-        if flop_sorted != bunching_config.flop() {
+        if flop_sorted != bunching_data.flop() {
             return Err("Flop cards do not match".to_string());
         }
 
         self.reset_bunching_effect();
-        self.set_bunching_effect_internal(bunching_config)?;
+        self.set_bunching_effect_internal(bunching_data)?;
 
         Ok(())
     }
@@ -180,6 +180,8 @@ impl PostFlopGame {
         self.bunching_num_flop = Default::default();
         self.bunching_num_turn = Default::default();
         self.bunching_num_river = Default::default();
+        self.bunching_coef_flop = Default::default();
+        self.bunching_coef_turn = Default::default();
     }
 
     /// Obtains the card configuration.
@@ -759,12 +761,9 @@ impl PostFlopGame {
     }
 
     /// Sets the bunching effect.
-    fn set_bunching_effect_internal(
-        &mut self,
-        bunching_config: BunchingConfig,
-    ) -> Result<(), String> {
-        self.bunching_num_dead_cards = bunching_config.fold_ranges().len() * 2;
-        let mut arena = Vec::new();
+    fn set_bunching_effect_internal(&mut self, bunching_data: &BunchingData) -> Result<(), String> {
+        self.bunching_num_dead_cards = bunching_data.fold_ranges().len() * 2;
+        let mut arena = vec![0.0]; // store dummy element
 
         // hand strength
         self.bunching_strength = self
@@ -781,7 +780,8 @@ impl PostFlopGame {
                 ];
 
                 for player in 0..2 {
-                    for &item in &strength[player] {
+                    let len = strength[player].len();
+                    for &item in &strength[player][1..len - 1] {
                         ret[player][item.index as usize] = item.strength;
                     }
                 }
@@ -791,126 +791,115 @@ impl PostFlopGame {
             .collect();
 
         // flop num combinations
-        for player in 0..2 {
-            let player_cards = &self.private_cards[player];
-            let opponent_cards = &self.private_cards[player ^ 1];
-            let mut indices = Vec::with_capacity(player_cards.len());
+        if self.card_config.turn == NOT_DEALT {
+            for player in 0..2 {
+                let player_cards = &self.private_cards[player];
+                let opponent_cards = &self.private_cards[player ^ 1];
+                let mut indices = Vec::with_capacity(player_cards.len());
 
-            for &(c1, c2) in player_cards {
-                indices.push(arena.len());
-                let player_mask = (1 << c1) | (1 << c2);
+                for &(c1, c2) in player_cards {
+                    indices.push(arena.len());
+                    let player_mask = (1 << c1) | (1 << c2);
 
-                for &(c3, c4) in opponent_cards {
-                    let opponent_mask = (1 << c3) | (1 << c4);
-                    if player_mask & opponent_mask != 0 {
-                        arena.push(0.0);
-                    } else {
-                        let mask = player_mask | opponent_mask;
-                        arena.push(bunching_config.result_4cards(mask));
+                    for &(c3, c4) in opponent_cards {
+                        let opponent_mask = (1 << c3) | (1 << c4);
+                        if player_mask & opponent_mask != 0 {
+                            arena.push(0.0);
+                        } else {
+                            let mask = player_mask | opponent_mask;
+                            arena.push(bunching_data.result_4cards(mask));
+                        }
                     }
                 }
-            }
 
-            if player == 0 && arena.iter().all(|&x| x == 0.0) {
-                return Err("Valid combination not found".to_string());
-            }
+                if player == 0 && arena.iter().all(|&x| x == 0.0) {
+                    return Err("Valid combination not found".to_string());
+                }
 
-            self.bunching_num_flop[player] = indices;
+                self.bunching_num_flop[player] = indices;
+            }
         }
 
         let flop_mask: u64 = self.card_config.flop.iter().map(|&c| 1 << c).sum();
         let skip_turn_mask: u64 = self.isomorphism_card_turn.iter().map(|&c| 1 << c).sum();
 
         // turn num combinations
-        for player in 0..2 {
-            let player_cards = &self.private_cards[player];
-            let opponent_cards = &self.private_cards[player ^ 1];
+        if self.card_config.river == NOT_DEALT {
+            for player in 0..2 {
+                let player_cards = &self.private_cards[player];
+                let opponent_cards = &self.private_cards[player ^ 1];
 
-            let buf = par_iter(0..52)
-                .map(|turn| {
-                    let turn_bit = 1 << turn;
-                    if turn_bit & (flop_mask | skip_turn_mask) != 0 {
-                        return Vec::new();
-                    }
-
-                    let mut outer = Vec::with_capacity(player_cards.len());
-
-                    for &(c1, c2) in player_cards {
-                        let player_mask = (1 << c1) | (1 << c2);
-                        if player_mask & turn_bit != 0 {
-                            outer.push(Vec::new());
-                            continue;
+                let buf = into_par_iter(0..52)
+                    .map(|turn| {
+                        let bit_turn = 1 << turn;
+                        if bit_turn & (flop_mask | skip_turn_mask) != 0
+                            || (self.card_config.turn != NOT_DEALT
+                                && self.card_config.turn != turn as u8)
+                        {
+                            return Vec::new();
                         }
 
-                        let mut inner = Vec::with_capacity(opponent_cards.len());
-                        for &(c3, c4) in opponent_cards {
-                            let opponent_mask = (1 << c3) | (1 << c4);
-                            if (player_mask | turn_bit) & opponent_mask != 0 {
-                                inner.push(0.0);
-                            } else {
-                                let mask = player_mask | opponent_mask | turn_bit;
-                                inner.push(bunching_config.result_5cards(mask));
+                        let mut outer = Vec::with_capacity(player_cards.len());
+
+                        for &(c1, c2) in player_cards {
+                            let player_mask = (1 << c1) | (1 << c2);
+                            if player_mask & bit_turn != 0 {
+                                outer.push(Vec::new());
+                                continue;
                             }
+
+                            let mut inner = Vec::with_capacity(opponent_cards.len());
+                            for &(c3, c4) in opponent_cards {
+                                let opponent_mask = (1 << c3) | (1 << c4);
+                                if (player_mask | bit_turn) & opponent_mask != 0 {
+                                    inner.push(0.0);
+                                } else {
+                                    let mask = player_mask | opponent_mask | bit_turn;
+                                    inner.push(bunching_data.result_5cards(mask));
+                                }
+                            }
+
+                            outer.push(inner);
                         }
 
-                        outer.push(inner);
-                    }
+                        outer
+                    })
+                    .collect::<Vec<_>>();
 
-                    outer
-                })
-                .collect::<Vec<_>>();
-
-            let mut num_turn = Vec::with_capacity(52);
-            for outer in buf.into_iter() {
-                if outer.is_empty() {
-                    num_turn.push(Vec::new());
-                    continue;
-                }
-
-                let mut indices = Vec::with_capacity(player_cards.len());
-                for inner in outer.into_iter() {
-                    if inner.is_empty() {
-                        indices.push(None);
-                    } else {
-                        indices.push(Some(arena.len()));
-                        arena.extend(inner);
-                    }
-                }
-
-                num_turn.push(indices);
+                self.bunching_num_turn[player] = Self::push_vec_to_arena_f32(&mut arena, buf);
             }
-
-            self.bunching_num_turn[player] = num_turn;
         }
 
-        // river coefficients
+        let is_board_possible = |turn: u8, river: u8| {
+            let bit_turn = 1 << turn;
+            let bit_river = 1 << river;
+            let iso_card = &self.isomorphism_card_river[turn as usize & 3];
+
+            bit_turn & (flop_mask | skip_turn_mask) == 0
+                && bit_river & flop_mask == 0
+                && !iso_card.contains(&river)
+                && (self.card_config.turn == NOT_DEALT || self.card_config.turn == turn)
+                && (self.card_config.river == NOT_DEALT || self.card_config.river == river)
+        };
+
+        // river num combinations
         for player in 0..2 {
             let player_cards = &self.private_cards[player];
             let opponent_cards = &self.private_cards[player ^ 1];
 
-            let buf = par_iter(0..52 * 51 / 2)
+            let buf = into_par_iter(0..52 * 51 / 2)
                 .map(|index| {
-                    let (turn, river) = index_to_card_pair(index);
-                    let turn_bit = 1 << turn;
-                    let river_bit = 1 << river;
-
-                    if turn_bit & (flop_mask | skip_turn_mask) != 0 {
+                    let (board1, board2) = index_to_card_pair(index);
+                    if !is_board_possible(board1, board2) && !is_board_possible(board2, board1) {
                         return Vec::new();
                     }
 
-                    let iso_cards = &self.isomorphism_card_river[turn as usize & 3];
-                    let skip_river_mask: u64 = iso_cards.iter().map(|&c| 1 << c).sum();
-
-                    if river_bit & (flop_mask | skip_river_mask) != 0 {
-                        return Vec::new();
-                    }
-
-                    let turn_river_mask = turn_bit | river_bit;
+                    let board_mask = (1 << board1) | (1 << board2);
                     let mut outer = Vec::with_capacity(player_cards.len());
 
                     for &(c1, c2) in player_cards {
                         let player_mask = (1 << c1) | (1 << c2);
-                        if player_mask & turn_river_mask != 0 {
+                        if player_mask & board_mask != 0 {
                             outer.push(Vec::new());
                             continue;
                         }
@@ -918,11 +907,11 @@ impl PostFlopGame {
                         let mut inner = Vec::with_capacity(opponent_cards.len());
                         for &(c3, c4) in opponent_cards {
                             let opponent_mask = (1 << c3) | (1 << c4);
-                            if (player_mask | turn_river_mask) & opponent_mask != 0 {
+                            if (player_mask | board_mask) & opponent_mask != 0 {
                                 inner.push(0.0);
                             } else {
-                                let mask = player_mask | opponent_mask | turn_river_mask;
-                                inner.push(bunching_config.result_6cards(mask));
+                                let mask = player_mask | opponent_mask | board_mask;
+                                inner.push(bunching_data.result_6cards(mask));
                             }
                         }
 
@@ -933,32 +922,247 @@ impl PostFlopGame {
                 })
                 .collect::<Vec<_>>();
 
-            let mut num_river = Vec::with_capacity(52 * 51 / 2);
-            for outer in buf.into_iter() {
-                if outer.is_empty() {
-                    num_river.push(Vec::new());
+            self.bunching_num_river[player] = Self::push_vec_to_arena_f32(&mut arena, buf);
+        }
+
+        if self.card_config.river != NOT_DEALT {
+            self.bunching_arena = arena;
+            return Ok(());
+        }
+
+        // turn equity coefficients
+        for player in 0..2 {
+            let player_cards = &self.private_cards[player];
+            let opponent_cards = &self.private_cards[player ^ 1];
+            let player_len = player_cards.len();
+            let opponent_len = opponent_cards.len();
+
+            let buf = into_par_iter(0..52)
+                .map(|turn| {
+                    let bit_turn = 1 << turn;
+                    if bit_turn & (flop_mask | skip_turn_mask) != 0
+                        || (self.card_config.turn != NOT_DEALT
+                            && self.card_config.turn != turn as u8)
+                    {
+                        return Vec::new();
+                    }
+
+                    let mut outer = Vec::with_capacity(player_len);
+
+                    for &(c1, c2) in player_cards {
+                        let player_mask = (1 << c1) | (1 << c2);
+                        if player_mask & bit_turn != 0 {
+                            outer.push(Vec::new());
+                        } else {
+                            outer.push(vec![0.0; opponent_len]);
+                        }
+                    }
+
+                    let mut children = Vec::with_capacity(48);
+                    let iso_ref = &self.isomorphism_ref_river[turn];
+                    let iso_card = &self.isomorphism_card_river[turn & 3];
+                    let iso_swap = &self.isomorphism_swap_river[turn & 3];
+
+                    for river in 0..52 {
+                        let bit_river = 1 << river;
+                        if bit_river & (flop_mask | bit_turn) != 0 {
+                            continue;
+                        }
+
+                        let pos = iso_card.iter().position(|&c| c == river);
+                        let (river_ref, swap_option) = if let Some(pos) = pos {
+                            let child_index = iso_ref[pos] as usize;
+                            let swap = &iso_swap[river as usize & 3];
+                            (children[child_index], Some(swap))
+                        } else {
+                            children.push(river);
+                            (river, None)
+                        };
+
+                        let player_swap = swap_option.map(|swap| {
+                            let mut tmp = (0..player_len).collect::<Vec<_>>();
+                            apply_swap(&mut tmp, &swap[player]);
+                            tmp
+                        });
+
+                        let pair_index = card_pair_to_index(turn as u8, river_ref);
+                        let arena_indices = &self.bunching_num_river[player][pair_index];
+                        let player_strength = &self.bunching_strength[pair_index][player];
+                        let opponent_strength = &self.bunching_strength[pair_index][player ^ 1];
+
+                        for (i, inner) in outer.iter_mut().enumerate() {
+                            let player_index = player_swap.as_ref().map_or(i, |map| map[i]);
+                            let index = arena_indices[player_index];
+                            let threshold = player_strength[player_index];
+
+                            if index == 0 {
+                                continue;
+                            }
+
+                            let mut tmp = (Vec::new(), Vec::new());
+                            let slices = if let Some(swap) = swap_option {
+                                tmp.0.extend_from_slice(&arena[index..index + opponent_len]);
+                                tmp.1.extend_from_slice(opponent_strength);
+                                apply_swap(&mut tmp.0, &swap[player ^ 1]);
+                                apply_swap(&mut tmp.1, &swap[player ^ 1]);
+                                (tmp.0.as_slice(), &tmp.1)
+                            } else {
+                                (&arena[index..index + opponent_len], opponent_strength)
+                            };
+
+                            inner.iter_mut().zip(slices.0).zip(slices.1).for_each(
+                                |((dst, num), &strength)| {
+                                    #[allow(clippy::comparison_chain)]
+                                    if strength < threshold {
+                                        *dst += *num as f64;
+                                    } else if strength > threshold {
+                                        *dst += -*num as f64;
+                                    } else {
+                                        *dst += 0.0;
+                                    }
+                                },
+                            );
+                        }
+                    }
+
+                    let num_possible_river = (44 - self.bunching_num_dead_cards) as f64;
+                    outer.iter_mut().for_each(|inner| {
+                        inner.iter_mut().for_each(|c| {
+                            *c /= num_possible_river;
+                        });
+                    });
+
+                    outer
+                })
+                .collect::<Vec<_>>();
+
+            self.bunching_coef_turn[player] = Self::push_vec_to_arena_f64(&mut arena, buf);
+        }
+
+        if self.card_config.turn != NOT_DEALT {
+            self.bunching_arena = arena;
+            return Ok(());
+        }
+
+        // flop equity coefficients
+        for player in 0..2 {
+            let player_cards = &self.private_cards[player];
+            let opponent_cards = &self.private_cards[player ^ 1];
+            let player_len = player_cards.len();
+            let opponent_len = opponent_cards.len();
+
+            let mut outer = vec![vec![0.0; opponent_len]; player_len];
+            let mut children = Vec::with_capacity(49);
+
+            for turn in 0..52 {
+                let bit_turn = 1 << turn;
+                if bit_turn & flop_mask != 0 {
                     continue;
                 }
 
-                let mut indices = Vec::with_capacity(player_cards.len());
-                for inner in outer.into_iter() {
-                    if inner.is_empty() {
-                        indices.push(None);
-                    } else {
-                        indices.push(Some(arena.len()));
-                        arena.extend(inner);
-                    }
-                }
+                let iso_card = &self.isomorphism_card_turn;
+                let pos = iso_card.iter().position(|&c| c == turn as u8);
 
-                num_river.push(indices);
+                let (turn_ref, swap_option) = if let Some(pos) = pos {
+                    let child_index = self.isomorphism_ref_turn[pos] as usize;
+                    let swap = &self.isomorphism_swap_turn[turn & 3];
+                    (children[child_index], Some(swap))
+                } else {
+                    children.push(turn);
+                    (turn, None)
+                };
+
+                let player_swap = swap_option.map(|swap| {
+                    let mut tmp = (0..player_len).collect::<Vec<_>>();
+                    apply_swap(&mut tmp, &swap[player]);
+                    tmp
+                });
+
+                let arena_indices = &self.bunching_coef_turn[player][turn_ref];
+
+                for (i, inner) in outer.iter_mut().enumerate() {
+                    let player_index = player_swap.as_ref().map_or(i, |map| map[i]);
+                    let index = arena_indices[player_index];
+                    if index == 0 {
+                        continue;
+                    }
+
+                    let mut tmp = Vec::new();
+                    let slice = &arena[index..index + opponent_len];
+                    let slice = if let Some(swap) = swap_option {
+                        tmp.extend_from_slice(slice);
+                        apply_swap(&mut tmp, &swap[player ^ 1]);
+                        &tmp
+                    } else {
+                        slice
+                    };
+
+                    inner.iter_mut().zip(slice).for_each(|(dst, &num)| {
+                        *dst += num as f64;
+                    });
+                }
             }
 
-            self.bunching_num_river[player] = num_river;
+            let num_possible_turn = (45 - self.bunching_num_dead_cards) as f64;
+            outer.iter_mut().for_each(|inner| {
+                inner.iter_mut().for_each(|c| {
+                    *c /= num_possible_turn;
+                });
+            });
+
+            Self::push_vec_to_arena_f64(&mut arena, vec![outer])
+                .into_iter()
+                .for_each(|v| {
+                    self.bunching_coef_flop[player] = v;
+                });
         }
 
         self.bunching_arena = arena;
-
         Ok(())
+    }
+
+    /// Pushes a nested `Vec` to an arena and returns the indices of the pushed elements.
+    fn push_vec_to_arena_f32(arena: &mut Vec<f32>, vec: Vec<Vec<Vec<f32>>>) -> Vec<Vec<usize>> {
+        let mut ret = Vec::with_capacity(vec.len());
+
+        for outer in vec.into_iter() {
+            let mut indices = Vec::with_capacity(outer.len());
+
+            for inner in outer.into_iter() {
+                if inner.is_empty() {
+                    indices.push(0);
+                } else {
+                    indices.push(arena.len());
+                    arena.extend(inner);
+                }
+            }
+
+            ret.push(indices);
+        }
+
+        ret
+    }
+
+    /// Pushes a nested `Vec` to an arena and returns the indices of the pushed elements.
+    fn push_vec_to_arena_f64(arena: &mut Vec<f32>, vec: Vec<Vec<Vec<f64>>>) -> Vec<Vec<usize>> {
+        let mut ret = Vec::with_capacity(vec.len());
+
+        for outer in vec.into_iter() {
+            let mut indices = Vec::with_capacity(outer.len());
+
+            for inner in outer.into_iter() {
+                if inner.is_empty() {
+                    indices.push(0);
+                } else {
+                    indices.push(arena.len());
+                    arena.extend(inner.into_iter().map(|v| v as f32));
+                }
+            }
+
+            ret.push(indices);
+        }
+
+        ret
     }
 
     /// Calculates the number of storage elements that will be removed.

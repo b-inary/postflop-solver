@@ -64,7 +64,7 @@ const COMB_TABLE: [[usize; 49]; 8] = [
 ];
 
 /// A configuration for computing the bunching effect.
-pub struct BunchingConfig {
+pub struct BunchingData {
     // input
     fold_ranges: Vec<Range>,
     flop: [u8; 3],
@@ -127,35 +127,38 @@ fn compress_mask(mut mask: u64, flop: [u8; 3]) -> u64 {
     mask
 }
 
-impl BunchingConfig {
+impl BunchingData {
     /// Creates a new `BunchingConfig` instance.
     ///
     /// `fold_ranges` can contain at most 4 ranges (6-max).
     #[inline]
-    pub fn new(fold_ranges: &[Range], mut flop: [u8; 3]) -> Self {
+    pub fn new(fold_ranges: &[Range], mut flop: [u8; 3]) -> Result<Self, String> {
         let mut fold_ranges_vec = Vec::new();
 
         for range in fold_ranges {
             if !range.is_empty() {
+                if !range.is_suit_symmetric() {
+                    return Err("Fold ranges must be suit-symmetric".to_string());
+                }
                 fold_ranges_vec.push(*range);
             }
         }
 
         if fold_ranges_vec.is_empty() {
-            panic!("Fold ranges is empty");
+            return Err("Fold ranges is empty".to_string());
         }
 
         if fold_ranges_vec.len() > 4 {
-            panic!("The number of folded players must be at most 4");
+            return Err("The number of folded players must be at most 4".to_string());
         }
 
         flop.sort_unstable();
 
         if flop[0] == flop[1] || flop[1] == flop[2] || flop[2] >= 52 {
-            panic!("Invalid flop");
+            return Err("Invalid flop".to_string());
         }
 
-        Self {
+        Ok(Self {
             fold_ranges: fold_ranges_vec,
             flop,
             phase: 0,
@@ -167,7 +170,7 @@ impl BunchingConfig {
             result4: Vec::new(),
             result5: Vec::new(),
             result6: Vec::new(),
-        }
+        })
     }
 
     /// Returns a reference to the fold ranges.
@@ -588,7 +591,7 @@ impl BunchingConfig {
         let start_index = (src_len1 as f64 * self.progress_percent as f64 / 100.0) as usize;
         let end_index = (src_len1 as f64 * (self.progress_percent + 1) as f64 / 100.0) as usize;
 
-        par_iter(start_index..end_index).for_each(|src_index1| {
+        into_par_iter(start_index..end_index).for_each(|src_index1| {
             let freq1 = self.temp_table1[src_index1];
             if freq1 == 0.0 {
                 return;
@@ -629,7 +632,7 @@ impl BunchingConfig {
             .map(|x| x.count_ones() as u8)
             .collect::<Vec<_>>();
 
-        par_iter(start_index..end_index)
+        into_par_iter(start_index..end_index)
             .step_by(100)
             .for_each(|chunk_start_index| {
                 let chunk_end_index = usize::min(chunk_start_index + 100, end_index);
@@ -686,7 +689,7 @@ impl BunchingConfig {
         indices.retain(|&(_, num_ones)| num_ones <= 2 * self.fold_ranges.len() as u8);
         indices.sort_by_key(|&(_, num_ones)| std::cmp::Reverse(num_ones));
 
-        par_iter(start_index..end_index)
+        into_par_iter(start_index..end_index)
             .step_by(100)
             .for_each(|dst_start_index| {
                 let dst_end_index = usize::min(dst_start_index + 100, end_index);
@@ -723,7 +726,7 @@ impl BunchingConfig {
 
                     dst_table[dst_index].store(f32::max(ret as f32, 0.0));
                 }
-            })
+            });
     }
 }
 
@@ -796,7 +799,7 @@ mod tests {
     fn test_bunching_independent_1() {
         let range1 = "33+,A3+,K3+,Q3+,J3+,T3+,93+,83+,73+,63+,53+,43+,33";
         let flop = flop_from_str("2s2h2d").unwrap();
-        let mut bunching = BunchingConfig::new(&[range1.parse().unwrap()], flop);
+        let mut bunching = BunchingData::new(&[range1.parse().unwrap()], flop).unwrap();
 
         bunching.phase1(false);
         bunching.phase2(false);
@@ -814,12 +817,38 @@ mod tests {
 
         bunching.phase3(false);
 
-        assert_eq!(bunching.result4[0].load(), 45.0 * 44.0 / 2.0);
-        assert_eq!(bunching.result4[4].load(), 44.0 * 43.0 / 2.0);
-        assert_eq!(bunching.result5[0].load(), 44.0 * 43.0 / 2.0);
-        assert_eq!(bunching.result5[5].load(), 43.0 * 42.0 / 2.0);
-        assert_eq!(bunching.result6[0].load(), 43.0 * 42.0 / 2.0);
-        assert_eq!(bunching.result6[6].load(), 42.0 * 41.0 / 2.0);
+        let mut mask4 = 0b1111;
+        for i in 0..COMB_49_4 {
+            let ans = if mask4 & 1 == 0 {
+                44.0 * 43.0 / 2.0
+            } else {
+                45.0 * 44.0 / 2.0
+            };
+            assert_eq!(bunching.result4[i].load(), ans);
+            mask4 = next_combination(mask4);
+        }
+
+        let mut mask5 = 0b11111;
+        for i in 0..COMB_49_5 {
+            let ans = if mask5 & 1 == 0 {
+                43.0 * 42.0 / 2.0
+            } else {
+                44.0 * 43.0 / 2.0
+            };
+            assert_eq!(bunching.result5[i].load(), ans);
+            mask5 = next_combination(mask5);
+        }
+
+        let mut mask6 = 0b111111;
+        for i in 0..COMB_49_6 {
+            let ans = if mask6 & 1 == 0 {
+                42.0 * 41.0 / 2.0
+            } else {
+                43.0 * 42.0 / 2.0
+            };
+            assert_eq!(bunching.result6[i].load(), ans);
+            mask6 = next_combination(mask6);
+        }
     }
 
     #[test]
@@ -827,10 +856,11 @@ mod tests {
         let range1 = "77,76,75,74,73,72,66,65,64,63,62,55,54,53,52,44,43,42,33,32,22";
         let range2 = "AA,AK,AQ,AJ,AT,A9,KK,KQ,KJ,KT,K9,QQ,QJ,QT,Q9,JJ,JT,J9,TT,T9,99";
 
-        let mut bunching = BunchingConfig::new(
+        let mut bunching = BunchingData::new(
             &[range1.parse().unwrap(), range2.parse().unwrap()],
             flop_from_str("8s8h8d").unwrap(),
-        );
+        )
+        .unwrap();
 
         bunching.phase1(false);
         bunching.phase2(false);
@@ -867,14 +897,15 @@ mod tests {
         let range2 = "99,98,97,96,88,87,86,77,76,66";
         let range3 = "KK,KQ,KJ,KT,QQ,QJ,QT,JJ,JT,TT";
 
-        let mut bunching = BunchingConfig::new(
+        let mut bunching = BunchingData::new(
             &[
                 range1.parse().unwrap(),
                 range2.parse().unwrap(),
                 range3.parse().unwrap(),
             ],
             flop_from_str("AsAhAd").unwrap(),
-        );
+        )
+        .unwrap();
 
         bunching.phase1(false);
         bunching.phase2(false);
@@ -913,7 +944,7 @@ mod tests {
         let range3 = "JJ,JT,J9,TT,T9,99";
         let range4 = "AA,AK,AQ,KK,KQ,QQ";
 
-        let mut bunching = BunchingConfig::new(
+        let mut bunching = BunchingData::new(
             &[
                 range1.parse().unwrap(),
                 range2.parse().unwrap(),
@@ -921,7 +952,8 @@ mod tests {
                 range4.parse().unwrap(),
             ],
             flop_from_str("8s8h8d").unwrap(),
-        );
+        )
+        .unwrap();
 
         bunching.phase1(true);
         bunching.phase2(true);
@@ -962,7 +994,7 @@ mod tests {
         let sb_range = "66:0.46,55:0.821,44:0.92,33:0.93,22:0.925,A6s:0.73,A3s:0.47,A2s,ATo:0.105,A9o-A2o,K8s:0.795,K7s,K6s:0.85,K5s:0.965,K4s-K2s,KJo:0.085,KTo:0.645,K9o-K2o,Q8s-Q2s,QJo:0.765,QTo-Q2o,J8s-J2s,J2o+,T8s:0.69,T7s-T2s,T2o+,98s:0.905,97s-92s,92o+,87s:0.78,86s-82s,82o+,76s:0.77,75s-72s,72o+,65s:0.845,64s-62s,62o+,54s:0.735,53s-52s,52o+,42+,32";
 
         let flop = flop_from_str("QsJh2h").unwrap();
-        let mut bunching = BunchingConfig::new(
+        let mut bunching = BunchingData::new(
             &[
                 utg_range.parse().unwrap(),
                 mp_range.parse().unwrap(),
@@ -970,7 +1002,8 @@ mod tests {
                 sb_range.parse().unwrap(),
             ],
             flop,
-        );
+        )
+        .unwrap();
 
         bunching.process(true);
 
