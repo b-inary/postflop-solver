@@ -252,7 +252,7 @@ impl PostFlopGame {
         }
     }
 
-    pub(super) fn evaluate_internal_bunching(
+    pub(super) fn evaluate_bunching_internal(
         &self,
         result: &mut [MaybeUninit<f32>],
         node: &PostFlopNode,

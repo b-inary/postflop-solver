@@ -86,10 +86,8 @@ thread_local! {
 
 impl Encode for PostFlopGame {
     fn encode<E: bincode::enc::Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
-        if self.state == State::ConfigError {
-            return Err(EncodeError::Other(
-                "Cannot serialize a game with a config error",
-            ));
+        if self.state <= State::Uninitialized {
+            return Err(EncodeError::Other("Game is not successfully initialized"));
         }
 
         let num_storage = self.num_target_storage();

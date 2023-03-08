@@ -130,6 +130,9 @@ impl PostFlopGame {
     /// The `i`-th bit is set to 1 if the card of ID `i` may be dealt.
     /// If the current node is not a chance node, returns `0`.
     ///
+    /// Note: If the bunching effect is enabled, this method may incorrectly include some dead
+    /// cards.
+    ///
     /// Card ID: `"2c"` => `0`, `"2d"` => `1`, `"2h"` => `2`, ..., `"As"` => `51`.
     pub fn possible_cards(&self) -> u64 {
         if self.state <= State::Uninitialized {
@@ -373,6 +376,12 @@ impl PostFlopGame {
     /// After mutating the current node, this method must be called once before calling
     /// [`normalized_weights`], [`equity`], [`expected_values`], or [`expected_values_detail`].
     ///
+    /// **Time complexity:**
+    /// - (no bunching) linear in the sum of the number of combos with non-zero initial weight of
+    ///   both players.
+    /// - (bunching) proportional to the product of the number of combos with non-zero initial
+    ///   weight of both players.
+    ///
     /// [`normalized_weights`]: #method.normalized_weights
     /// [`equity`]: #method.equity
     /// [`expected_values`]: #method.expected_values
@@ -386,63 +395,106 @@ impl PostFlopGame {
             return;
         }
 
-        let mut board_mask: u64 = 0;
-        if self.turn != NOT_DEALT {
-            board_mask |= 1 << self.turn;
-        }
-        if self.river != NOT_DEALT {
-            board_mask |= 1 << self.river;
-        }
+        // no bunching
+        if self.bunching_num_dead_cards == 0 {
+            let mut board_mask: u64 = 0;
+            if self.turn != NOT_DEALT {
+                board_mask |= 1 << self.turn;
+            }
+            if self.river != NOT_DEALT {
+                board_mask |= 1 << self.river;
+            }
 
-        let mut weight_sum = [0.0; 2];
-        let mut weight_sum_minus = [[0.0; 52]; 2];
+            let mut weight_sum = [0.0; 2];
+            let mut weight_sum_minus = [[0.0; 52]; 2];
 
-        for player in 0..2 {
-            let weight_sum_player = &mut weight_sum[player];
-            let weight_sum_minus_player = &mut weight_sum_minus[player];
-            self.private_cards[player]
-                .iter()
-                .zip(self.weights[player].iter())
-                .for_each(|(&(c1, c2), &w)| {
-                    let mask: u64 = (1 << c1) | (1 << c2);
-                    if mask & board_mask == 0 {
-                        let w = w as f64;
-                        *weight_sum_player += w;
-                        weight_sum_minus_player[c1 as usize] += w;
-                        weight_sum_minus_player[c2 as usize] += w;
-                    }
-                });
-        }
+            for player in 0..2 {
+                let weight_sum_player = &mut weight_sum[player];
+                let weight_sum_minus_player = &mut weight_sum_minus[player];
+                self.private_cards[player]
+                    .iter()
+                    .zip(self.weights[player].iter())
+                    .for_each(|(&(c1, c2), &w)| {
+                        let mask: u64 = (1 << c1) | (1 << c2);
+                        if mask & board_mask == 0 {
+                            let w = w as f64;
+                            *weight_sum_player += w;
+                            weight_sum_minus_player[c1 as usize] += w;
+                            weight_sum_minus_player[c2 as usize] += w;
+                        }
+                    });
+            }
 
-        for player in 0..2 {
-            let player_cards = &self.private_cards[player];
-            let same_hand_index = &self.same_hand_index[player];
-            let player_weights = &self.weights[player];
-            let opponent_weights = &self.weights[player ^ 1];
-            let opponent_weight_sum = weight_sum[player ^ 1];
-            let opponent_weight_sum_minus = &weight_sum_minus[player ^ 1];
+            for player in 0..2 {
+                let player_cards = &self.private_cards[player];
+                let same_hand_index = &self.same_hand_index[player];
+                let player_weights = &self.weights[player];
+                let opponent_weights = &self.weights[player ^ 1];
+                let opponent_weight_sum = weight_sum[player ^ 1];
+                let opponent_weight_sum_minus = &weight_sum_minus[player ^ 1];
 
-            self.normalized_weights[player]
-                .iter_mut()
-                .enumerate()
-                .for_each(|(i, w)| {
-                    let (c1, c2) = player_cards[i];
-                    let mask: u64 = (1 << c1) | (1 << c2);
-                    if mask & board_mask == 0 {
-                        let same_i = same_hand_index[i];
-                        let opponent_weight_same = if same_i == u16::MAX {
-                            0.0
+                self.normalized_weights[player]
+                    .iter_mut()
+                    .enumerate()
+                    .for_each(|(i, w)| {
+                        let (c1, c2) = player_cards[i];
+                        let mask: u64 = (1 << c1) | (1 << c2);
+                        if mask & board_mask == 0 {
+                            let same_i = same_hand_index[i];
+                            let opponent_weight_same = if same_i == u16::MAX {
+                                0.0
+                            } else {
+                                opponent_weights[same_i as usize] as f64
+                            };
+                            let opponent_weight = opponent_weight_sum + opponent_weight_same
+                                - opponent_weight_sum_minus[c1 as usize]
+                                - opponent_weight_sum_minus[c2 as usize];
+                            *w = player_weights[i] * opponent_weight as f32;
                         } else {
-                            opponent_weights[same_i as usize] as f64
-                        };
-                        let opponent_weight = opponent_weight_sum + opponent_weight_same
-                            - opponent_weight_sum_minus[c1 as usize]
-                            - opponent_weight_sum_minus[c2 as usize];
-                        *w = player_weights[i] * opponent_weight as f32;
-                    } else {
-                        *w = 0.0;
-                    }
-                });
+                            *w = 0.0;
+                        }
+                    });
+            }
+        }
+        // bunching
+        else {
+            let mut weights_buf = [Vec::new(), Vec::new()];
+            let weights = if self.turn_swap.is_none() && self.river_swap.is_none() {
+                &self.weights
+            } else {
+                weights_buf[0].extend_from_slice(&self.weights[0]);
+                weights_buf[1].extend_from_slice(&self.weights[1]);
+                self.apply_swap(&mut weights_buf[0], 0, true);
+                self.apply_swap(&mut weights_buf[1], 1, true);
+                &weights_buf
+            };
+
+            for player in 0..2 {
+                let node = self.node();
+                let indices = if node.river != NOT_DEALT {
+                    &self.bunching_num_river[player][card_pair_to_index(node.turn, node.river)]
+                } else if node.turn != NOT_DEALT {
+                    &self.bunching_num_turn[player][node.turn as usize]
+                } else {
+                    &self.bunching_num_flop[player]
+                };
+
+                let opponent_len = self.private_cards[player ^ 1].len();
+                let mut normalized_weights = indices
+                    .iter()
+                    .map(|&index| {
+                        if index != 0 {
+                            let slice = &self.bunching_arena[index..index + opponent_len];
+                            inner_product(&weights[player ^ 1], slice)
+                        } else {
+                            0.0
+                        }
+                    })
+                    .collect::<Vec<_>>();
+
+                self.apply_swap(&mut normalized_weights, player, false);
+                self.normalized_weights[player] = normalized_weights;
+            }
         }
 
         self.is_normalized_weight_cached = true;
@@ -487,6 +539,11 @@ impl PostFlopGame {
     /// After mutating the current node, you must call the [`cache_normalized_weights`] method
     /// before calling this method.
     ///
+    /// **Time complexity:**
+    /// - (no bunching) (# of possible 5-card boards) * (# of combos with non-zero initial weight).
+    /// - (bunching) proportional to the product of the number of combos with non-zero initial
+    ///   weight of both players.
+    ///
     /// [`cache_normalized_weights`]: #method.cache_normalized_weights
     pub fn equity(&self, player: usize) -> Vec<f32> {
         if self.state <= State::Uninitialized {
@@ -498,30 +555,35 @@ impl PostFlopGame {
         }
 
         let num_hands = self.num_private_hands(player);
-        let mut tmp = vec![0.0; num_hands];
 
-        if self.river != NOT_DEALT {
-            self.equity_internal(&mut tmp, player, self.turn, self.river, 0.5);
-        } else if self.turn != NOT_DEALT {
-            for river in 0..52 {
-                if self.turn != river {
-                    self.equity_internal(&mut tmp, player, self.turn, river, 0.5 / 44.0);
+        let tmp = if self.bunching_num_dead_cards == 0 {
+            let mut tmp = vec![0.0; num_hands];
+            if self.river != NOT_DEALT {
+                self.equity_internal(&mut tmp, player, self.turn, self.river, 0.5);
+            } else if self.turn != NOT_DEALT {
+                for river in 0..52 {
+                    if self.turn != river {
+                        self.equity_internal(&mut tmp, player, self.turn, river, 0.5 / 44.0);
+                    }
+                }
+            } else {
+                for turn in 0..52 {
+                    for river in turn + 1..52 {
+                        self.equity_internal(&mut tmp, player, turn, river, 1.0 / (45.0 * 44.0));
+                    }
                 }
             }
+            tmp.into_iter().map(|v| v as f32).collect()
         } else {
-            for turn in 0..52 {
-                for river in turn + 1..52 {
-                    self.equity_internal(&mut tmp, player, turn, river, 1.0 / (45.0 * 44.0));
-                }
-            }
-        }
+            self.equity_bunching_internal(player)
+        };
 
         tmp.iter()
             .zip(self.weights[player].iter())
             .zip(self.normalized_weights[player].iter())
             .map(|((&v, &w_raw), &w_normalized)| {
                 if w_normalized > 0.0 {
-                    v as f32 * (w_raw / w_normalized) + 0.5
+                    v * (w_raw / w_normalized) + 0.5
                 } else {
                     0.0
                 }
@@ -597,19 +659,24 @@ impl PostFlopGame {
         let node = self.node();
         let num_hands = self.num_private_hands(player);
 
-        let mut chance_factor = 1.0;
+        let mut chance_factor = 1;
         if self.card_config.turn == NOT_DEALT && self.turn != NOT_DEALT {
-            chance_factor *= 45.0;
+            chance_factor *= 45 - self.bunching_num_dead_cards;
         }
         if self.card_config.river == NOT_DEALT && self.river != NOT_DEALT {
-            chance_factor *= 44.0;
+            chance_factor *= 44 - self.bunching_num_dead_cards;
         }
 
+        let num_combinations = match self.bunching_num_dead_cards {
+            0 => self.num_combinations,
+            _ => self.bunching_num_combinations,
+        };
+
         let mut have_actions = false;
-        let mut normalizer = (self.num_combinations * chance_factor) as f32;
+        let mut normalizer = (num_combinations * chance_factor as f64) as f32;
 
         let mut ret = if node.is_terminal() {
-            normalizer = self.num_combinations as f32;
+            normalizer = num_combinations as f32;
             let mut ret = Vec::with_capacity(num_hands);
             let mut cfreach = self.weights[player ^ 1].clone();
             self.apply_swap(&mut cfreach, player ^ 1, true);
@@ -955,6 +1022,60 @@ impl PostFlopGame {
                     - weight_minus.get_unchecked(c2 as usize);
                 *result.get_unchecked_mut(index as usize) -= amount * opponent_weight;
             }
+        }
+    }
+
+    /// Internal method for calculating the equity.
+    fn equity_bunching_internal(&self, player: usize) -> Vec<f32> {
+        let node = self.node();
+        let opponent_weights = &self.weights[player ^ 1];
+        let opponent_len = self.private_cards[player ^ 1].len();
+
+        if node.river == NOT_DEALT {
+            let indices = if node.turn != NOT_DEALT {
+                &self.bunching_coef_turn[player][node.turn as usize]
+            } else {
+                &self.bunching_coef_flop[player]
+            };
+
+            indices
+                .iter()
+                .map(|&index| {
+                    if index != 0 {
+                        let slice = &self.bunching_arena[index..index + opponent_len];
+                        0.5 * inner_product(opponent_weights, slice)
+                    } else {
+                        0.0
+                    }
+                })
+                .collect()
+        }
+        // showdown
+        else {
+            let pair_index = card_pair_to_index(node.turn, node.river);
+            let indices = &self.bunching_num_river[player][pair_index];
+            let player_strength = &self.bunching_strength[pair_index][player];
+            let opponent_strength = &self.bunching_strength[pair_index][player ^ 1];
+
+            indices
+                .iter()
+                .zip(player_strength)
+                .map(|(&index, &strength)| {
+                    if index != 0 {
+                        inner_product_cond(
+                            opponent_weights,
+                            &self.bunching_arena[index..index + opponent_len],
+                            opponent_strength,
+                            strength,
+                            0.5,
+                            -0.5,
+                            0.0,
+                        )
+                    } else {
+                        0.0
+                    }
+                })
+                .collect()
         }
     }
 }

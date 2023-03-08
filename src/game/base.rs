@@ -46,7 +46,7 @@ impl Game for PostFlopGame {
         if self.bunching_num_dead_cards == 0 {
             self.evaluate_internal(result, node, player, cfreach);
         } else {
-            self.evaluate_internal_bunching(result, node, player, cfreach);
+            self.evaluate_bunching_internal(result, node, player, cfreach);
         }
     }
 
@@ -243,6 +243,16 @@ impl PostFlopGame {
         let compressed = 2 * num_elements + self.misc_memory_usage;
 
         (uncompressed, compressed)
+    }
+
+    /// Returns the estimated additional memory usage in bytes when the bunching effect is enabled.
+    #[inline]
+    pub fn memory_usage_bunching(&self) -> u64 {
+        if self.state <= State::Uninitialized {
+            panic!("Game is not successfully initialized");
+        }
+
+        self.memory_usage_bunching_internal()
     }
 
     /// Remove lines after building the `PostFlopGame` but before allocating memory.
@@ -1149,6 +1159,104 @@ impl PostFlopGame {
 
         self.bunching_arena = arena;
         Ok(())
+    }
+
+    /// Sets the bunching effect.
+    fn memory_usage_bunching_internal(&self) -> u64 {
+        let mut ret = 4;
+
+        // hand strength
+        self.hand_strength.iter().for_each(|strength| {
+            ret += mem::size_of::<[Vec<u16>; 2]>() as u64;
+            if !strength[0].is_empty() {
+                ret += 2 * self.private_cards[0].len() as u64;
+                ret += 2 * self.private_cards[1].len() as u64;
+            }
+        });
+
+        let oop_len = self.private_cards[0].len();
+        let ip_len = self.private_cards[1].len();
+
+        // flop num combinations / equity coefficients
+        if self.card_config.turn == NOT_DEALT {
+            ret += 2 * (oop_len * ip_len * mem::size_of::<usize>()) as u64;
+            ret += 2 * 2 * 4 * (oop_len * ip_len) as u64;
+        }
+
+        let flop_mask: u64 = self.card_config.flop.iter().map(|&c| 1 << c).sum();
+        let skip_turn_mask: u64 = self.isomorphism_card_turn.iter().map(|&c| 1 << c).sum();
+
+        // turn num combinations / equity coefficients
+        if self.card_config.river == NOT_DEALT {
+            for player in 0..2 {
+                let player_cards = &self.private_cards[player];
+                let opponent_cards = &self.private_cards[player ^ 1];
+                let player_len = player_cards.len();
+                let opponent_len = opponent_cards.len();
+
+                ret += 2 * 52 * mem::size_of::<Vec<usize>>() as u64;
+
+                for turn in 0..52 {
+                    let bit_turn = 1 << turn;
+                    if bit_turn & (flop_mask | skip_turn_mask) != 0
+                        || (self.card_config.turn != NOT_DEALT
+                            && self.card_config.turn != turn as u8)
+                    {
+                        continue;
+                    }
+
+                    ret += 2 * (player_len * mem::size_of::<usize>()) as u64;
+
+                    for &(c1, c2) in player_cards {
+                        let player_mask = (1 << c1) | (1 << c2);
+                        if player_mask & bit_turn == 0 {
+                            ret += 2 * 4 * opponent_len as u64;
+                        }
+                    }
+                }
+            }
+        }
+
+        let is_board_possible = |turn: u8, river: u8| {
+            let bit_turn = 1 << turn;
+            let bit_river = 1 << river;
+            let iso_card = &self.isomorphism_card_river[turn as usize & 3];
+
+            bit_turn & (flop_mask | skip_turn_mask) == 0
+                && bit_river & flop_mask == 0
+                && !iso_card.contains(&river)
+                && (self.card_config.turn == NOT_DEALT || self.card_config.turn == turn)
+                && (self.card_config.river == NOT_DEALT || self.card_config.river == river)
+        };
+
+        // river num combinations
+        for player in 0..2 {
+            let player_cards = &self.private_cards[player];
+            let opponent_cards = &self.private_cards[player ^ 1];
+            let player_len = player_cards.len();
+            let opponent_len = opponent_cards.len();
+
+            ret += 52 * 51 / 2 * mem::size_of::<Vec<usize>>() as u64;
+
+            for index in 0..52 * 51 / 2 {
+                let (board1, board2) = index_to_card_pair(index);
+                if !is_board_possible(board1, board2) && !is_board_possible(board2, board1) {
+                    continue;
+                }
+
+                let board_mask = (1 << board1) | (1 << board2);
+                ret += (player_len * mem::size_of::<usize>()) as u64;
+
+                for &(c1, c2) in player_cards {
+                    let player_mask = (1 << c1) | (1 << c2);
+                    if player_mask & board_mask == 0 {
+                        ret += 4 * opponent_len as u64;
+                    }
+                }
+            }
+        }
+
+        ret
     }
 
     /// Pushes a nested `Vec` to an arena and returns the indices of the pushed elements.
