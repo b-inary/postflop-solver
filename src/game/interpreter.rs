@@ -482,10 +482,11 @@ impl PostFlopGame {
                 let opponent_len = self.private_cards[player ^ 1].len();
                 let mut normalized_weights = indices
                     .iter()
-                    .map(|&index| {
+                    .zip(weights[player].iter())
+                    .map(|(&index, &w)| {
                         if index != 0 {
                             let slice = &self.bunching_arena[index..index + opponent_len];
-                            inner_product(&weights[player ^ 1], slice)
+                            w * inner_product(&weights[player ^ 1], slice)
                         } else {
                             0.0
                         }
