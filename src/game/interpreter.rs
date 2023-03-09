@@ -212,8 +212,7 @@ impl PostFlopGame {
     ///
     /// Panics if the memory is not yet allocated or the current node is a terminal node.
     ///
-    /// **Time complexity:** linear in the sum of the number of combos with non-zero initial weight
-    /// of both players.
+    /// **Time complexity:** *O*(#(OOP private hands) + #(IP private hands))
     ///
     /// [`available_actions`]: #method.available_actions
     pub fn play(&mut self, action: usize) {
@@ -380,10 +379,8 @@ impl PostFlopGame {
     /// [`normalized_weights`], [`equity`], [`expected_values`], or [`expected_values_detail`].
     ///
     /// **Time complexity:**
-    /// - (no bunching) linear in the sum of the number of combos with non-zero initial weight of
-    ///   both players.
-    /// - (bunching) proportional to the product of the number of combos with non-zero initial
-    ///   weight of both players.
+    /// - (no bunching) *O*(#(OOP private hands) + #(IP private hands))
+    /// - (bunching) *O*(#(OOP private hands) * #(IP private hands))
     ///
     /// [`normalized_weights`]: #method.normalized_weights
     /// [`equity`]: #method.equity
@@ -507,7 +504,7 @@ impl PostFlopGame {
     ///
     /// If a hand overlaps with the board, returns 0.0.
     ///
-    /// **Time complexity:** constant.
+    /// **Time complexity:** *O*(1).
     #[inline]
     pub fn weights(&self, player: usize) -> &[f32] {
         if self.state <= State::Uninitialized {
@@ -525,7 +522,7 @@ impl PostFlopGame {
     /// After mutating the current node, you must call the [`cache_normalized_weights`] method
     /// before calling this method.
     ///
-    /// **Time complexity:** constant.
+    /// **Time complexity:** *O*(1).
     ///
     /// [`cache_normalized_weights`]: #method.cache_normalized_weights
     #[inline]
@@ -547,9 +544,8 @@ impl PostFlopGame {
     /// before calling this method.
     ///
     /// **Time complexity:**
-    /// - (no bunching) #(possible 5-card boards) * #(combos with non-zero initial weight).
-    /// - (bunching) proportional to the product of the number of combos with non-zero initial
-    ///   weight of both players.
+    /// - (no bunching) *O*(#(possible 5-card boards) * (#(OOP private hands) + #(IP private hands))).
+    /// - (bunching) *O*(#(OOP private hands) * #(IP private hands)).
     ///
     /// [`cache_normalized_weights`]: #method.cache_normalized_weights
     pub fn equity(&self, player: usize) -> Vec<f32> {
@@ -656,9 +652,8 @@ impl PostFlopGame {
     /// before calling this method.
     ///
     /// **Time complexity:**
-    /// - (with bunching and the current node is terminal) proportional to the product of the number
-    ///   of combos with non-zero initial weight of both players.
-    /// - (otherwise) #(actions) * #(combos with non-zero initial weight of the given player).
+    /// - (with bunching and the current node is terminal) *O*(#(OOP private hands) * #(IP private hands)).
+    /// - (otherwise) *O*(#(actions) * #(private hands)).
     ///
     /// [`expected_values`]: #method.expected_value
     /// [`cache_normalized_weights`]: #method.cache_normalized_weights
@@ -763,7 +758,7 @@ impl PostFlopGame {
     /// Panics if the current node is a terminal node or a chance node. Also, panics if the memory
     /// is not yet allocated.
     ///
-    /// **Time complexity:** #(actions) * #(combos with non-zero initial weight of the given player).
+    /// **Time complexity:** *O*(#(actions) * #(private hands)).
     pub fn strategy(&self) -> Vec<f32> {
         if self.state < State::MemoryAllocated {
             panic!("Memory is not allocated");

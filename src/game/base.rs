@@ -188,6 +188,7 @@ impl PostFlopGame {
     #[inline]
     pub fn reset_bunching_effect(&mut self) {
         self.bunching_num_dead_cards = 0;
+        self.bunching_num_combinations = 0.0;
         self.bunching_arena = Vec::new();
         self.bunching_strength = Vec::new();
         self.bunching_num_flop = Default::default();

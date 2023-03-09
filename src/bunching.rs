@@ -91,6 +91,18 @@ const COMB_TABLE: [[usize; 49]; 8] = [
 ///
 /// assert!(data.is_ready());
 /// ```
+///
+/// # Memory Usage
+/// The `BunchingData` struct requires 62MB of memory to store the final result.
+///
+/// The additional memory usage required for the computation is as follows:
+///
+/// | #(fold players) | Aditional memory usage |
+/// |:---:|:---:|
+/// | 1 | 18.4KB |
+/// | 2 | 1.77MB |
+/// | 3 | 123MB |
+/// | 4 | 3.42GB |
 pub struct BunchingData {
     // input
     fold_ranges: Vec<Range>,
