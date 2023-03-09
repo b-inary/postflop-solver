@@ -528,6 +528,12 @@ impl Range {
         self.data.iter().all(|el| *el == 0.0)
     }
 
+    /// Inverts the range.
+    #[inline]
+    pub fn invert(&mut self) {
+        self.data.iter_mut().for_each(|el| *el = 1.0 - *el);
+    }
+
     /// Obtains the weight of a specified hand.
     ///
     /// Undefined behavior if:
