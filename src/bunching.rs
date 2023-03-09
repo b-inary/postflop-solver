@@ -64,6 +64,33 @@ const COMB_TABLE: [[usize; 49]; 8] = [
 ];
 
 /// A configuration for computing the bunching effect.
+///
+/// # Examples
+/// ```ignore
+/// use postflop_solver::*;
+///
+/// let utg_range_str = "...";
+/// let mp_range_str = "...";
+/// let co_range_str = "...";
+/// let sb_range_str = "...";
+///
+/// let mut data = BunchingData::new(
+///     // support up to 4 fold players
+///     &[
+///         utg_range_str.parse().unwrap(),
+///         mp_range_str.parse().unwrap(),
+///         co_range_str.parse().unwrap(),
+///         sb_range_str.parse().unwrap(),
+///     ],
+///     flop_from_str("QsJh2h").unwrap()
+/// )
+/// .unwrap();
+///
+/// // precompute the combination table
+/// data.process(true);
+///
+/// assert!(data.is_ready());
+/// ```
 pub struct BunchingData {
     // input
     fold_ranges: Vec<Range>,
@@ -1006,82 +1033,5 @@ mod tests {
         .unwrap();
 
         bunching.process(true);
-
-        let card_9s = card_from_str("9s").unwrap();
-        let card_8s = card_from_str("8s").unwrap();
-        let mask_9s8s = (1 << card_9s) | (1 << card_8s);
-
-        for i in 48..52 {
-            for j in i + 1..52 {
-                let card1_str = card_to_string(i).unwrap();
-                let card2_str = card_to_string(j).unwrap();
-                let mask = mask_9s8s | (1 << i) | (1 << j);
-                let index = mask_to_index(compress_mask(mask, flop), 4);
-                println!(
-                    "{}{}: {}",
-                    card2_str,
-                    card1_str,
-                    bunching.result4[index].load()
-                );
-            }
-        }
-
-        for i in 0..4 {
-            for j in i + 1..4 {
-                if i == 2 || j == 2 {
-                    continue;
-                }
-                let card1_str = card_to_string(i).unwrap();
-                let card2_str = card_to_string(j).unwrap();
-                let mask = mask_9s8s | (1 << i) | (1 << j);
-                let index = mask_to_index(compress_mask(mask, flop), 4);
-                println!(
-                    "{}{}: {}",
-                    card2_str,
-                    card1_str,
-                    bunching.result4[index].load()
-                );
-            }
-        }
-
-        let card_as = card_from_str("As").unwrap();
-        let card_ah = card_from_str("Ah").unwrap();
-        let mask = mask_9s8s | (1 << card_as) | (1 << card_ah);
-
-        let index = mask_to_index(compress_mask(mask, flop), 4);
-        println!("AsAh9s8s: {}", bunching.result4[index].load());
-
-        let mut sum = 0.0;
-        for turn in 0..52 {
-            let bit = 1 << turn;
-            if mask & bit != 0 || flop.contains(&turn) {
-                continue;
-            }
-            let index = mask_to_index(compress_mask(mask | bit, flop), 5);
-            sum += bunching.result5[index].load();
-        }
-
-        // should be 37x of AsAh9s8s
-        // (# of possible turn) = 52 - 3(flop) - 2(hero) - 2(villain) - 8(fold) = 37
-        println!("AsAh9s8s+X: {}", sum);
-
-        let mut sum = 0.0;
-        for turn in 0..52 {
-            let bit_turn = 1 << turn;
-            if mask & bit_turn != 0 || flop.contains(&turn) {
-                continue;
-            }
-            for river in turn + 1..52 {
-                let bit_river = 1 << river;
-                if mask & bit_river != 0 || flop.contains(&river) {
-                    continue;
-                }
-                let index = mask_to_index(compress_mask(mask | bit_turn | bit_river, flop), 6);
-                sum += bunching.result6[index].load();
-            }
-        }
-
-        // should be 666x of AsAh9s8s (37 * 36 / 2 = 666)
-        println!("AsAh9s8s+X+Y: {}", sum);
     }
 }

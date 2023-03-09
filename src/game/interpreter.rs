@@ -212,6 +212,9 @@ impl PostFlopGame {
     ///
     /// Panics if the memory is not yet allocated or the current node is a terminal node.
     ///
+    /// **Time complexity:** linear in the sum of the number of combos with non-zero initial weight
+    /// of both players.
+    ///
     /// [`available_actions`]: #method.available_actions
     pub fn play(&mut self, action: usize) {
         if self.state < State::MemoryAllocated {
@@ -503,6 +506,8 @@ impl PostFlopGame {
     /// Returns the weights of each private hand of the given player.
     ///
     /// If a hand overlaps with the board, returns 0.0.
+    ///
+    /// **Time complexity:** constant.
     #[inline]
     pub fn weights(&self, player: usize) -> &[f32] {
         if self.state <= State::Uninitialized {
@@ -519,6 +524,8 @@ impl PostFlopGame {
     ///
     /// After mutating the current node, you must call the [`cache_normalized_weights`] method
     /// before calling this method.
+    ///
+    /// **Time complexity:** constant.
     ///
     /// [`cache_normalized_weights`]: #method.cache_normalized_weights
     #[inline]
@@ -540,7 +547,7 @@ impl PostFlopGame {
     /// before calling this method.
     ///
     /// **Time complexity:**
-    /// - (no bunching) (# of possible 5-card boards) * (# of combos with non-zero initial weight).
+    /// - (no bunching) #(possible 5-card boards) * #(combos with non-zero initial weight).
     /// - (bunching) proportional to the product of the number of combos with non-zero initial
     ///   weight of both players.
     ///
@@ -598,7 +605,10 @@ impl PostFlopGame {
     /// After mutating the current node, you must call the [`cache_normalized_weights`] method
     /// before calling this method.
     ///
+    /// **Time complexity:** see [`expected_values_detail`].
+    ///
     /// [`cache_normalized_weights`]: #method.cache_normalized_weights
+    /// [`expected_values_detail`]: #method.expected_values_detail
     pub fn expected_values(&self, player: usize) -> Vec<f32> {
         if self.state != State::Solved {
             panic!("Game is not solved");
@@ -644,6 +654,11 @@ impl PostFlopGame {
     ///
     /// After mutating the current node, you must call the [`cache_normalized_weights`] method
     /// before calling this method.
+    ///
+    /// **Time complexity:**
+    /// - (with bunching and the current node is terminal) proportional to the product of the number
+    ///   of combos with non-zero initial weight of both players.
+    /// - (otherwise) #(actions) * #(combos with non-zero initial weight of the given player).
     ///
     /// [`expected_values`]: #method.expected_value
     /// [`cache_normalized_weights`]: #method.cache_normalized_weights
@@ -747,6 +762,8 @@ impl PostFlopGame {
     ///
     /// Panics if the current node is a terminal node or a chance node. Also, panics if the memory
     /// is not yet allocated.
+    ///
+    /// **Time complexity:** #(actions) * #(combos with non-zero initial weight of the given player).
     pub fn strategy(&self) -> Vec<f32> {
         if self.state < State::MemoryAllocated {
             panic!("Memory is not allocated");
