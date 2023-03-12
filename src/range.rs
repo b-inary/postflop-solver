@@ -531,7 +531,10 @@ impl Range {
     /// Inverts the range.
     #[inline]
     pub fn invert(&mut self) {
-        self.data.iter_mut().for_each(|el| *el = 1.0 - *el);
+        // we want to obtain 0.1 when the previous value was 0.9, not 0.100000024
+        self.data
+            .iter_mut()
+            .for_each(|el| *el = (1.0 - el.to_string().parse::<f64>().unwrap()) as f32);
     }
 
     /// Obtains the weight of a specified hand.
