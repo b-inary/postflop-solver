@@ -130,9 +130,6 @@ impl PostFlopGame {
     /// The `i`-th bit is set to 1 if the card of ID `i` may be dealt.
     /// If the current node is not a chance node, returns `0`.
     ///
-    /// Note: If the bunching effect is enabled, this method may incorrectly include some dead
-    /// cards.
-    ///
     /// Card ID: `"2c"` => `0`, `"2d"` => `1`, `"2h"` => `2`, ..., `"As"` => `51`.
     pub fn possible_cards(&self) -> u64 {
         if self.state <= State::Uninitialized {
@@ -149,24 +146,62 @@ impl PostFlopGame {
             board_mask |= 1 << self.turn;
         }
 
-        let mut mask: u64 = (1 << 52) - 1;
+        let mut dead_mask: u64 = 0;
 
-        for &(c1, c2) in &self.private_cards[0] {
-            let oop_mask: u64 = (1 << c1) | (1 << c2);
-            if board_mask & oop_mask == 0 {
-                for &(c3, c4) in &self.private_cards[1] {
-                    let ip_mask: u64 = (1 << c3) | (1 << c4);
-                    if (board_mask | oop_mask) & ip_mask == 0 {
-                        mask &= oop_mask | ip_mask;
+        for card in 0..52 {
+            let bit_card = 1 << card;
+            let new_board_mask = board_mask | bit_card;
+
+            if new_board_mask == board_mask {
+                dead_mask |= bit_card;
+                continue;
+            }
+
+            let mut is_dead = true;
+
+            // no bunching
+            if self.bunching_num_dead_cards == 0 {
+                'outer: for &(c1, c2) in &self.private_cards[0] {
+                    let oop_mask = 1 << c1 | 1 << c2;
+                    if oop_mask & new_board_mask != 0 {
+                        continue;
+                    }
+                    let combined_mask = oop_mask | new_board_mask;
+                    for &(c3, c4) in &self.private_cards[1] {
+                        let ip_mask = 1 << c3 | 1 << c4;
+                        if ip_mask & combined_mask == 0 {
+                            is_dead = false;
+                            break 'outer;
+                        }
                     }
                 }
-                if mask == 0 {
-                    break;
+            }
+            // bunching
+            else {
+                let ip_len = self.private_cards[1].len();
+                let indices = if self.turn == NOT_DEALT {
+                    &self.bunching_num_turn[0][card as usize]
+                } else {
+                    &self.bunching_num_river[0][card_pair_to_index(self.turn, card)]
+                };
+                'outer: for &index in indices {
+                    if index == 0 {
+                        continue;
+                    }
+                    let slice = &self.bunching_arena[index..index + ip_len];
+                    if slice.iter().any(|&n| n > 0.0) {
+                        is_dead = false;
+                        break 'outer;
+                    }
                 }
+            }
+
+            if is_dead {
+                dead_mask |= bit_card;
             }
         }
 
-        ((1 << 52) - 1) ^ (board_mask | mask)
+        ((1 << 52) - 1) ^ dead_mask
     }
 
     /// Returns the current player (0 = OOP, 1 = IP).
