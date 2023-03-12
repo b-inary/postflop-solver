@@ -799,8 +799,8 @@ impl PostFlopGame {
                 }
 
                 let mut ret = [
-                    vec![0; self.private_cards[0].len()],
-                    vec![0; self.private_cards[1].len()],
+                    vec![0; self.num_private_hands(0)],
+                    vec![0; self.num_private_hands(1)],
                 ];
 
                 for player in 0..2 {
@@ -1166,17 +1166,16 @@ impl PostFlopGame {
     fn memory_usage_bunching_internal(&self) -> u64 {
         let mut ret = 4;
 
+        let oop_len = self.num_private_hands(0);
+        let ip_len = self.num_private_hands(1);
+
         // hand strength
         self.hand_strength.iter().for_each(|strength| {
             ret += mem::size_of::<[Vec<u16>; 2]>() as u64;
             if !strength[0].is_empty() {
-                ret += 2 * self.private_cards[0].len() as u64;
-                ret += 2 * self.private_cards[1].len() as u64;
+                ret += 2 * (oop_len + ip_len) as u64;
             }
         });
-
-        let oop_len = self.private_cards[0].len();
-        let ip_len = self.private_cards[1].len();
 
         // flop num combinations / equity coefficients
         if self.card_config.turn == NOT_DEALT {
