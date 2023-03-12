@@ -46,7 +46,7 @@ impl Game for PostFlopGame {
         if self.bunching_num_dead_cards == 0 {
             self.evaluate_internal(result, node, player, cfreach);
         } else {
-            self.evaluate_bunching_internal(result, node, player, cfreach);
+            self.evaluate_internal_bunching(result, node, player, cfreach);
         }
     }
 

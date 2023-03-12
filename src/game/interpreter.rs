@@ -579,7 +579,7 @@ impl PostFlopGame {
             }
             tmp.into_iter().map(|v| v as f32).collect()
         } else {
-            let mut tmp = self.equity_bunching_internal(player);
+            let mut tmp = self.equity_internal_bunching(player);
             self.apply_swap(&mut tmp, player, false);
             tmp
         };
@@ -1041,7 +1041,7 @@ impl PostFlopGame {
     }
 
     /// Internal method for calculating the equity.
-    fn equity_bunching_internal(&self, player: usize) -> Vec<f32> {
+    fn equity_internal_bunching(&self, player: usize) -> Vec<f32> {
         let mut weights_buf = Vec::new();
         let opponent_weights = if self.turn_swap.is_none() && self.river_swap.is_none() {
             &self.weights[player ^ 1]

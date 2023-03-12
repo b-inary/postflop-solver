@@ -745,7 +745,7 @@ impl BunchingData {
                         mask_bit[i] = lsb;
                     }
 
-                    let mut ret = 0.0;
+                    let mut result = 0.0;
 
                     for &(i, k) in &indices {
                         let mut src_mask = 0;
@@ -757,13 +757,13 @@ impl BunchingData {
 
                         let src_index = mask_to_index(src_mask, k as usize);
                         if k & 1 == 0 {
-                            ret += self.sum[k as usize][src_index].load();
+                            result += self.sum[k as usize][src_index].load();
                         } else {
-                            ret -= self.sum[k as usize][src_index].load();
+                            result -= self.sum[k as usize][src_index].load();
                         }
                     }
 
-                    dst_table[dst_index].store(f32::max(ret as f32, 0.0));
+                    dst_table[dst_index].store(f32::max(result as f32, 0.0));
                 }
             });
     }
