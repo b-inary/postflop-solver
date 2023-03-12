@@ -38,6 +38,26 @@ impl PostFlopGame {
 
         self.weights[0].copy_from_slice(&self.initial_weights[0]);
         self.weights[1].copy_from_slice(&self.initial_weights[1]);
+
+        if self.bunching_num_dead_cards > 0 {
+            for player in 0..2 {
+                let opponent_len = self.num_private_hands(player ^ 1);
+                let indices = if self.turn == NOT_DEALT {
+                    &self.bunching_num_flop[player]
+                } else if self.river == NOT_DEALT {
+                    &self.bunching_num_turn[player][self.turn as usize]
+                } else {
+                    &self.bunching_num_river[player][card_pair_to_index(self.turn, self.river)]
+                };
+
+                for (w, &index) in self.weights[player].iter_mut().zip(indices) {
+                    let slice = &self.bunching_arena[index..index + opponent_len];
+                    if slice.iter().all(|&n| n == 0.0) {
+                        *w = 0.0;
+                    }
+                }
+            }
+        }
     }
 
     /// Returns the history of the current node.
