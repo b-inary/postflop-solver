@@ -142,62 +142,92 @@ impl PostFlopGame {
 
         let flop = self.card_config.flop;
         let mut board_mask: u64 = (1 << flop[0]) | (1 << flop[1]) | (1 << flop[2]);
-        if self.turn != NOT_DEALT {
-            board_mask |= 1 << self.turn;
-        }
-
         let mut dead_mask: u64 = 0;
 
-        for card in 0..52 {
-            let bit_card = 1 << card;
-            let new_board_mask = board_mask | bit_card;
-
-            if new_board_mask == board_mask {
-                dead_mask |= bit_card;
-                continue;
+        // no bunching
+        if self.bunching_num_dead_cards == 0 {
+            if self.turn != NOT_DEALT {
+                board_mask |= 1 << self.turn;
             }
 
-            let mut is_dead = true;
+            'outer: for card in 0..52 {
+                let bit_card = 1 << card;
+                let new_board_mask = board_mask | bit_card;
 
-            // no bunching
-            if self.bunching_num_dead_cards == 0 {
-                'outer: for &(c1, c2) in &self.private_cards[0] {
-                    let oop_mask = 1 << c1 | 1 << c2;
-                    if oop_mask & new_board_mask != 0 {
-                        continue;
-                    }
-                    let combined_mask = oop_mask | new_board_mask;
-                    for &(c3, c4) in &self.private_cards[1] {
-                        let ip_mask = 1 << c3 | 1 << c4;
-                        if ip_mask & combined_mask == 0 {
-                            is_dead = false;
-                            break 'outer;
+                if new_board_mask != board_mask {
+                    for &(c1, c2) in &self.private_cards[0] {
+                        let oop_mask = (1 << c1) | (1 << c2);
+                        if oop_mask & new_board_mask != 0 {
+                            continue;
+                        }
+                        let combined_mask = oop_mask | new_board_mask;
+                        for &(c3, c4) in &self.private_cards[1] {
+                            let ip_mask = (1 << c3) | (1 << c4);
+                            if ip_mask & combined_mask == 0 {
+                                continue 'outer;
+                            }
                         }
                     }
                 }
+
+                dead_mask |= bit_card;
             }
-            // bunching
-            else {
-                let ip_len = self.private_cards[1].len();
-                let indices = if self.turn == NOT_DEALT {
-                    &self.bunching_num_turn[0][card as usize]
-                } else {
-                    &self.bunching_num_river[0][card_pair_to_index(self.turn, card)]
-                };
-                'outer: for &index in indices {
-                    if index == 0 {
-                        continue;
-                    }
-                    let slice = &self.bunching_arena[index..index + ip_len];
-                    if slice.iter().any(|&n| n > 0.0) {
-                        is_dead = false;
-                        break 'outer;
-                    }
-                }
+        }
+        // bunching
+        else {
+            let node_turn = self.node().turn;
+            if node_turn != NOT_DEALT {
+                board_mask |= 1 << node_turn;
             }
 
-            if is_dead {
+            let ip_len = self.private_cards[1].len();
+            let mut children = Vec::new();
+            let (iso_ref, iso_card) = if node_turn == NOT_DEALT {
+                (&self.isomorphism_ref_turn, &self.isomorphism_card_turn)
+            } else {
+                (
+                    &self.isomorphism_ref_river[node_turn as usize],
+                    &self.isomorphism_card_river[node_turn as usize & 3],
+                )
+            };
+
+            'outer: for card in 0..52 {
+                let bit_card = 1 << card;
+                let new_board_mask = board_mask | bit_card;
+
+                if let Some(pos) = iso_card.iter().position(|&c| c == card) {
+                    let ref_card = children[iso_ref[pos] as usize];
+                    dead_mask |= ((dead_mask >> ref_card) & 1) << card;
+                    continue;
+                }
+
+                if new_board_mask != board_mask {
+                    children.push(card);
+                    let indices = if node_turn == NOT_DEALT {
+                        &self.bunching_num_turn[0][card as usize]
+                    } else {
+                        &self.bunching_num_river[0][card_pair_to_index(node_turn, card)]
+                    };
+                    for &index in indices {
+                        if index == 0 {
+                            continue;
+                        }
+                        let slice = &self.bunching_arena[index..index + ip_len];
+                        if slice.iter().any(|&n| n > 0.0) {
+                            continue 'outer;
+                        }
+                    }
+                }
+
                 dead_mask |= bit_card;
+            }
+
+            if let Some((suit1, suit2)) = self.turn_swapped_suit {
+                let suit_mask = 0x1_1111_1111_1111;
+                let mod_mask = (suit_mask << suit1) | (suit_mask << suit2);
+                let swapped1 = ((dead_mask >> suit1) & suit_mask) << suit2;
+                let swapped2 = ((dead_mask >> suit2) & suit_mask) << suit1;
+                dead_mask = (dead_mask & !mod_mask) | swapped1 | swapped2;
             }
         }
 
