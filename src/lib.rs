@@ -139,17 +139,27 @@
 //! ```
 //!
 //! # Implementation details
-//! - **Algorithm**: The solver uses [Discounted CFR] algorithm.
-//!   Currently, the value of γ is set to 3.0, rather than the 2.0 recommended by the original paper.
-//!   Also, the solver reset the cumulative strategy when the number of iterations is a power of 4.
-//! - **Precision**: 32-bit floating-point numbers are used in most places.
-//!   When calculating summations, temporal values use 64-bit floating-point numbers.
-//!   If the compression feature is enabled, each game node stores the values by 16-bit integers
-//!   with a single 32-bit floating-point scaling factor.
-//! - **Handling isomorphism**: The solver does not perform any abstraction.
+//! - **Algorithm**: The solver uses the state-of-the-art [Discounted CFR] algorithm.
+//!   Currently, the value of γ is set to 3.0 instead of the 2.0 recommended in the original paper.
+//!   Also, the solver resets the cumulative strategy when the number of iterations is a power of 4.
+//! - **Performance**: The solver engine is highly optimized for performance with maintainable code.
+//!   The engine supports multithreading by default, and it takes full advantage of unsafe Rust in hot spots.
+//!   The developer reviews the assembly output from the compiler and ensures that SIMD instructions are used as much as possible.
+//!   Combined with the algorithm described above, the performance surpasses paid solvers such as PioSOLVER and GTO+.
+//! - **Isomorphism**: The solver does not perform any abstraction.
 //!   However, isomorphic chances (turn and river deals) are combined into one.
 //!   For example, if the flop is monotone, the three non-dealt suits are isomorphic,
 //!   allowing us to skip the calculation for two of the three suits.
+//! - **Precision**: 32-bit floating-point numbers are used in most places.
+//!   When calculating summations, temporary values use 64-bit floating-point numbers.
+//!   There is also a compression option where each game node stores the values
+//!   by 16-bit integers with a single 32-bit floating-point scaling factor.
+//! - **Bunching effect**: At the time of writing, this is the only implementation that can handle the bunching effect.
+//!   It supports up to four folded players (6-max game).
+//!   The implementation correctly counts the number of card combinations and does not rely on heuristics
+//!   such as manipulating the probability distribution of the deck.
+//!   However, please note that enabling the bunching effect increases the time complexity
+//!   of the evaluation at the terminal nodes and slows down the computation significantly.
 //!
 //! [Discounted CFR]: https://arxiv.org/abs/1809.04040
 //!
