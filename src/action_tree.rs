@@ -155,6 +155,7 @@ pub(crate) struct ActionTreeNode {
 
 struct BuildTreeInfo {
     prev_action: Action,
+    num_bets: i32,
     allin_flag: bool,
     oop_call_flag: bool,
     stack: [i32; 2],
@@ -565,7 +566,7 @@ impl ActionTree {
                         actions.push(Action::Bet(amount));
                     }
                     BetSize::PrevBetRelative(_) => panic!("Unexpected `PrevBetRelative`"),
-                    BetSize::Additive(adder) => actions.push(Action::Bet(adder)),
+                    BetSize::Additive(adder, _) => actions.push(Action::Bet(adder)),
                     BetSize::Geometric(num_streets, max_ratio) => {
                         let num_streets = match num_streets {
                             0 => num_remaining_streets,
@@ -597,7 +598,7 @@ impl ActionTree {
                         actions.push(Action::Bet(amount));
                     }
                     BetSize::PrevBetRelative(_) => panic!("Unexpected `PrevBetRelative`"),
-                    BetSize::Additive(adder) => actions.push(Action::Bet(adder)),
+                    BetSize::Additive(adder, _) => actions.push(Action::Bet(adder)),
                     BetSize::Geometric(num_streets, max_ratio) => {
                         let num_streets = match num_streets {
                             0 => num_remaining_streets,
@@ -633,13 +634,15 @@ impl ActionTree {
                             let amount = (prev_amount as f64 * ratio).round() as i32;
                             actions.push(Action::Raise(amount));
                         }
-                        BetSize::Additive(adder) => {
-                            actions.push(Action::Raise(prev_amount + adder));
+                        BetSize::Additive(adder, raise_cap) => {
+                            if info.num_bets <= raise_cap {
+                                actions.push(Action::Raise(prev_amount + adder));
+                            }
                         }
                         BetSize::Geometric(num_streets, max_ratio) => {
                             let num_streets = match num_streets {
-                                0 => num_remaining_streets,
-                                _ => num_streets,
+                                0 => i32::max(num_remaining_streets - info.num_bets + 1, 1),
+                                _ => i32::max(num_streets - info.num_bets + 1, 1),
                             };
                             let amount = compute_geometric(num_streets, max_ratio);
                             actions.push(Action::Raise(prev_amount + amount));
@@ -986,6 +989,7 @@ impl BuildTreeInfo {
     fn new(stack: i32) -> Self {
         Self {
             prev_action: Action::None,
+            num_bets: 0,
             allin_flag: false,
             oop_call_flag: false,
             stack: [stack, stack],
@@ -995,6 +999,7 @@ impl BuildTreeInfo {
 
     #[inline]
     fn create_next(&self, player: u8, action: Action) -> Self {
+        let mut num_bets = self.num_bets;
         let mut allin_flag = self.allin_flag;
         let mut oop_call_flag = self.oop_call_flag;
         let mut stack = self.stack;
@@ -1005,12 +1010,14 @@ impl BuildTreeInfo {
                 oop_call_flag = false;
             }
             Action::Call => {
+                num_bets = 0;
                 oop_call_flag = player == PLAYER_OOP;
                 stack[player as usize] = stack[player as usize ^ 1];
                 prev_amount = 0;
             }
             Action::Bet(amount) | Action::Raise(amount) | Action::AllIn(amount) => {
                 let to_call = stack[player as usize] - stack[player as usize ^ 1];
+                num_bets += 1;
                 allin_flag = matches!(action, Action::AllIn(_));
                 stack[player as usize] -= amount - prev_amount + to_call;
                 prev_amount = amount;
@@ -1020,6 +1027,7 @@ impl BuildTreeInfo {
 
         BuildTreeInfo {
             prev_action: action,
+            num_bets,
             allin_flag,
             oop_call_flag,
             stack,

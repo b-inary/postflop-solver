@@ -4,15 +4,18 @@ use bincode::{Decode, Encode};
 /// Bet size candidates for the first bets and raises.
 ///
 /// In the `try_from()` method, multiple bet sizes can be specified using a comma-separated string.
-/// Each element must be a string ending in one of the following characters: %, x, c, e, a.
+/// Each element must be a string ending in one of the following characters: %, x, c, r, e, a.
 ///
 /// - %: Percentage of the pot. Example: "70%"
 /// - x: Multiple of the previous bet. Valid for only raises. Example: "2.5x"
 /// - c: Constant value. Must be an integer. Example: "100c"
+/// - c + r: Constant value with raise cap (for FLHE). Both values must be integers.
+///          Valid only for raises. Example: "20c3r"
 /// - e: Geometric size.
 ///   - e: Same as "3e" for the flop, "2e" for the turn, and "1e" (equivalent to "a") for the river.
 ///   - Xe: The geometric size with X streets remaining. X must be a positive integer. Example: "2e"
 ///   - XeY%: Same as Xe, but the maximum size is Y% of the pot. Example: "3e200%".
+///   - If specified for raises, the number of previous raises is subtracted from X.
 /// - a: All-in. Example: "a"
 ///
 /// # Examples
@@ -26,7 +29,7 @@ use bincode::{Decode, Encode};
 ///     bet_size.bet,
 ///     vec![
 ///         PotRelative(0.5),
-///         Additive(100),
+///         Additive(100, 0),
 ///         Geometric(2, f64::INFINITY),
 ///         AllIn
 ///    ]
@@ -63,8 +66,10 @@ pub enum BetSize {
     /// Bet size relative to the previous bet size (only valid for raise actions).
     PrevBetRelative(f64),
 
-    /// Bet size specifying constant addition.
-    Additive(i32),
+    /// Constant bet size of the first element with a raise cap of the second element.
+    ///
+    /// If the second element is `0`, there is no raise cap.
+    Additive(i32, i32),
 
     /// Geometric bet size for `i32` streets with maximum pot-relative size of `f64`.
     ///
@@ -144,13 +149,13 @@ fn parse_float(s: &str) -> Option<f64> {
     }
 }
 
-fn bet_size_from_str(s: &str, allow_prev_bet_rel: bool) -> Result<BetSize, String> {
+fn bet_size_from_str(s: &str, is_raise: bool) -> Result<BetSize, String> {
     let s_lower = s.to_lowercase();
     let err_msg = format!("Invalid bet size: {s}");
 
     if let Some(prev_bet_rel) = s_lower.strip_suffix('x') {
         // Previous bet relative
-        if !allow_prev_bet_rel {
+        if !is_raise {
             let err_msg = format!("Relative size to the previous bet is not allowed: {s}");
             Err(err_msg)
         } else {
@@ -162,15 +167,43 @@ fn bet_size_from_str(s: &str, allow_prev_bet_rel: bool) -> Result<BetSize, Strin
                 Ok(BetSize::PrevBetRelative(float))
             }
         }
-    } else if let Some(add) = s_lower.strip_suffix('c') {
+    } else if s_lower.contains('c') {
         // Additive
-        let float = parse_float(add).ok_or(&err_msg)?;
-        if float.trunc() != float {
-            Err(format!("Additional size must be an integer: {s}"))
-        } else if float > i32::MAX as f64 {
-            Err(format!("Additional size must be less than 2^31: {s}"))
+        let mut split = s_lower.split('c');
+        let add_str = split.next().ok_or(&err_msg)?;
+        let cap_str = split.next().ok_or(&err_msg)?;
+
+        let add = parse_float(add_str).ok_or(&err_msg)?;
+        if add.trunc() != add {
+            return Err(format!("Additional size must be an integer: {s}"));
+        }
+        if add > i32::MAX as f64 {
+            return Err(format!("Additional size must be less than 2^31: {s}"));
+        }
+
+        let cap = if cap_str.is_empty() {
+            0
         } else {
-            Ok(BetSize::Additive(float as i32))
+            if !is_raise {
+                let err_msg = format!("Raise cap is not allowed: {s}");
+                return Err(err_msg);
+            }
+            let float_str = cap_str.strip_suffix('r').ok_or(&err_msg)?;
+            let float = parse_float(float_str).ok_or(&err_msg)?;
+            if float.trunc() != float || float == 0.0 {
+                let err_msg = format!("Raise cap must be a positive integer: {s}");
+                return Err(err_msg);
+            } else if float > 100.0 {
+                let err_msg = format!("Raise cap must be less than or equal to 100: {s}");
+                return Err(err_msg);
+            }
+            float as i32
+        };
+
+        if split.next().is_some() {
+            Err(err_msg)
+        } else {
+            Ok(BetSize::Additive(add as i32, cap))
         }
     } else if s_lower.contains('e') {
         // Geometric
@@ -188,9 +221,8 @@ fn bet_size_from_str(s: &str, allow_prev_bet_rel: bool) -> Result<BetSize, Strin
             } else if float > 100.0 {
                 let err_msg = format!("Number of streets must be less than or equal to 100: {s}");
                 return Err(err_msg);
-            } else {
-                float as i32
             }
+            float as i32
         };
 
         let max_pot_rel = if max_pot_rel_str.is_empty() {
@@ -231,8 +263,10 @@ mod tests {
             ("112.5%", PotRelative(1.125)),
             ("1.001x", PrevBetRelative(1.001)),
             ("3.5X", PrevBetRelative(3.5)),
-            ("0c", Additive(0)),
-            ("123C", Additive(123)),
+            ("0c", Additive(0, 0)),
+            ("123C", Additive(123, 0)),
+            ("0c1r", Additive(0, 1)),
+            ("100C100R", Additive(100, 100)),
             ("e", Geometric(0, f64::INFINITY)),
             ("E", Geometric(0, f64::INFINITY)),
             ("2e", Geometric(2, f64::INFINITY)),
@@ -247,8 +281,9 @@ mod tests {
         }
 
         let error_tests = [
-            "", "0", "1.23", "%", "+42%", "-30%", "x", "0x", "1x", "c", "12.3c", "0e", "2.7e",
-            "101e", "3e7", "E%", "1e2e3", "bet", "1a", "a1",
+            "", "0", "1.23", "%", "+42%", "-30%", "x", "0x", "1x", "c", "12.3c", "10c10", "42cr",
+            "c3r", "0c0r", "123c101r", "1c2r3", "12c3.4r", "0e", "2.7e", "101e", "3e7", "E%",
+            "1e2e3", "bet", "1a", "a1",
         ];
 
         for s in error_tests {
@@ -271,7 +306,7 @@ mod tests {
                 "50c, e, a,",
                 "25%, 2.5x, e200%",
                 BetSizeCandidates {
-                    bet: vec![Additive(50), Geometric(0, f64::INFINITY), AllIn],
+                    bet: vec![Additive(50, 0), Geometric(0, f64::INFINITY), AllIn],
                     raise: vec![PotRelative(0.25), PrevBetRelative(2.5), Geometric(0, 2.0)],
                 },
             ),
@@ -300,7 +335,7 @@ mod tests {
             (
                 "50c, e, a,",
                 DonkSizeCandidates {
-                    donk: vec![Additive(50), Geometric(0, f64::INFINITY), AllIn],
+                    donk: vec![Additive(50, 0), Geometric(0, f64::INFINITY), AllIn],
                 },
             ),
         ];

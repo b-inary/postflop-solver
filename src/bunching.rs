@@ -668,7 +668,7 @@ impl BunchingData {
         let end_index = (src_len as f64 * (self.progress_percent + 1) as f64 / 100.0) as usize;
 
         let num_ones = (0u32..(1 << K) - 1)
-            .map(|x| x.count_ones() as u8)
+            .map(|i| i.count_ones() as u8)
             .collect::<Vec<_>>();
 
         into_par_iter(start_index..end_index)
