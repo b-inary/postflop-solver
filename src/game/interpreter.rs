@@ -38,26 +38,7 @@ impl PostFlopGame {
 
         self.weights[0].copy_from_slice(&self.initial_weights[0]);
         self.weights[1].copy_from_slice(&self.initial_weights[1]);
-
-        if self.bunching_num_dead_cards > 0 {
-            for player in 0..2 {
-                let opponent_len = self.num_private_hands(player ^ 1);
-                let indices = if self.turn == NOT_DEALT {
-                    &self.bunching_num_flop[player]
-                } else if self.river == NOT_DEALT {
-                    &self.bunching_num_turn[player][self.turn as usize]
-                } else {
-                    &self.bunching_num_river[player][card_pair_to_index(self.turn, self.river)]
-                };
-
-                for (w, &index) in self.weights[player].iter_mut().zip(indices) {
-                    let slice = &self.bunching_arena[index..index + opponent_len];
-                    if slice.iter().all(|&n| n == 0.0) {
-                        *w = 0.0;
-                    }
-                }
-            }
-        }
+        self.assign_zero_weights();
     }
 
     /// Returns the history of the current node.
@@ -352,7 +333,11 @@ impl PostFlopGame {
             if action_index == usize::MAX {
                 let node = self.node();
                 let isomorphism = self.isomorphic_chances(&node);
-                let isomorphic_cards = self.isomorphic_cards(&node);
+                let isomorphic_cards = if node.turn == NOT_DEALT {
+                    &self.isomorphism_card_turn
+                } else {
+                    &self.isomorphism_card_river[node.turn as usize & 3]
+                };
                 for (i, &repr_index) in isomorphism.iter().enumerate() {
                     if action_card == isomorphic_cards[i] {
                         action_index = repr_index as usize;
@@ -391,53 +376,7 @@ impl PostFlopGame {
             }
 
             // update the weights
-            if self.bunching_num_dead_cards == 0 {
-                for player in 0..2 {
-                    self.weights[player]
-                        .iter_mut()
-                        .zip(self.private_cards[player].iter())
-                        .for_each(|(w, &(c1, c2))| {
-                            if c1 == actual_card || c2 == actual_card {
-                                *w = 0.0;
-                            }
-                        });
-                }
-            } else {
-                for player in 0..2 {
-                    let node = self.node();
-                    let opponent_len = self.num_private_hands(player ^ 1);
-                    let indices = if node.river == NOT_DEALT {
-                        &self.bunching_num_turn[player][node.turn as usize]
-                    } else {
-                        &self.bunching_num_river[player][card_pair_to_index(node.turn, node.river)]
-                    };
-
-                    let mut weights_buf = Vec::new();
-                    let weights = if self.turn_swap.is_none() && self.river_swap.is_none() {
-                        &mut self.weights[player]
-                    } else {
-                        weights_buf.extend_from_slice(&self.weights[player]);
-                        self.apply_swap(&mut weights_buf, player, true);
-                        &mut weights_buf
-                    };
-
-                    for (w, &index) in weights.iter_mut().zip(indices.iter()) {
-                        if index == 0 {
-                            *w = 0.0;
-                        } else {
-                            let slice = &self.bunching_arena[index..index + opponent_len];
-                            if slice.iter().all(|&n| n == 0.0) {
-                                *w = 0.0;
-                            }
-                        }
-                    }
-
-                    if self.turn_swap.is_some() || self.river_swap.is_some() {
-                        self.apply_swap(&mut weights_buf, player, false);
-                        self.weights[player].copy_from_slice(&weights_buf);
-                    }
-                }
-            }
+            self.assign_zero_weights();
         }
         // player node
         else {
@@ -1061,13 +1000,79 @@ impl PostFlopGame {
         unsafe { node_ptr.offset_from(self.node_arena.as_ptr()) as usize }
     }
 
-    /// Returns a card list of isomorphic chances.
-    #[inline]
-    fn isomorphic_cards(&self, node: &PostFlopNode) -> &[u8] {
-        if node.turn == NOT_DEALT {
-            &self.isomorphism_card_turn
+    /// Assigns zero weights to the hands that are not possible.
+    fn assign_zero_weights(&mut self) {
+        if self.bunching_num_dead_cards == 0 {
+            let mut board_mask: u64 = 0;
+            if self.turn != NOT_DEALT {
+                board_mask |= 1 << self.turn;
+            }
+            if self.river != NOT_DEALT {
+                board_mask |= 1 << self.river;
+            }
+
+            for player in 0..2 {
+                let mut dead_mask: u64 = (1 << 52) - 1;
+
+                for &(c1, c2) in &self.private_cards[player ^ 1] {
+                    let mask = (1 << c1) | (1 << c2);
+                    if mask & board_mask == 0 {
+                        dead_mask &= mask;
+                    }
+                    if dead_mask == 0 {
+                        break;
+                    }
+                }
+
+                dead_mask |= board_mask;
+
+                self.private_cards[player]
+                    .iter()
+                    .zip(self.weights[player].iter_mut())
+                    .for_each(|(&(c1, c2), w)| {
+                        let mask = (1 << c1) | (1 << c2);
+                        if mask & dead_mask != 0 {
+                            *w = 0.0;
+                        }
+                    });
+            }
         } else {
-            &self.isomorphism_card_river[node.turn as usize & 3]
+            for player in 0..2 {
+                let node = self.node();
+                let opponent_len = self.num_private_hands(player ^ 1);
+                let indices = if node.turn == NOT_DEALT {
+                    &self.bunching_num_flop[player]
+                } else if node.river == NOT_DEALT {
+                    &self.bunching_num_turn[player][node.turn as usize]
+                } else {
+                    &self.bunching_num_river[player][card_pair_to_index(node.turn, node.river)]
+                };
+
+                let mut weights_buf = Vec::new();
+                let weights = if self.turn_swap.is_none() && self.river_swap.is_none() {
+                    &mut self.weights[player]
+                } else {
+                    weights_buf.extend_from_slice(&self.weights[player]);
+                    self.apply_swap(&mut weights_buf, player, true);
+                    &mut weights_buf
+                };
+
+                for (w, &index) in weights.iter_mut().zip(indices.iter()) {
+                    if index == 0 {
+                        *w = 0.0;
+                    } else {
+                        let slice = &self.bunching_arena[index..index + opponent_len];
+                        if slice.iter().all(|&n| n == 0.0) {
+                            *w = 0.0;
+                        }
+                    }
+                }
+
+                if self.turn_swap.is_some() || self.river_swap.is_some() {
+                    self.apply_swap(&mut weights_buf, player, false);
+                    self.weights[player].copy_from_slice(&weights_buf);
+                }
+            }
         }
     }
 
