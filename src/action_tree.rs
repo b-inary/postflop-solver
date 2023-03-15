@@ -635,7 +635,7 @@ impl ActionTree {
                             actions.push(Action::Raise(amount));
                         }
                         BetSize::Additive(adder, raise_cap) => {
-                            if info.num_bets <= raise_cap {
+                            if raise_cap == 0 || info.num_bets <= raise_cap {
                                 actions.push(Action::Raise(prev_amount + adder));
                             }
                         }
