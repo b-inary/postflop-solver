@@ -152,18 +152,18 @@ impl PostFlopGame {
             }
 
             'outer: for card in 0..52 {
-                let bit_card = 1 << card;
+                let bit_card: u64 = 1 << card;
                 let new_board_mask = board_mask | bit_card;
 
                 if new_board_mask != board_mask {
                     for &(c1, c2) in &self.private_cards[0] {
-                        let oop_mask = (1 << c1) | (1 << c2);
+                        let oop_mask: u64 = (1 << c1) | (1 << c2);
                         if oop_mask & new_board_mask != 0 {
                             continue;
                         }
                         let combined_mask = oop_mask | new_board_mask;
                         for &(c3, c4) in &self.private_cards[1] {
-                            let ip_mask = (1 << c3) | (1 << c4);
+                            let ip_mask: u64 = (1 << c3) | (1 << c4);
                             if ip_mask & combined_mask == 0 {
                                 continue 'outer;
                             }
@@ -193,7 +193,7 @@ impl PostFlopGame {
             };
 
             'outer: for card in 0..52 {
-                let bit_card = 1 << card;
+                let bit_card: u64 = 1 << card;
                 let new_board_mask = board_mask | bit_card;
 
                 if let Some(pos) = iso_card.iter().position(|&c| c == card) {
@@ -224,7 +224,7 @@ impl PostFlopGame {
             }
 
             if let Some((suit1, suit2)) = self.turn_swapped_suit {
-                let suit_mask = 0x1_1111_1111_1111;
+                let suit_mask: u64 = 0x1_1111_1111_1111;
                 let mod_mask = (suit_mask << suit1) | (suit_mask << suit2);
                 let swapped1 = ((dead_mask >> suit1) & suit_mask) << suit2;
                 let swapped2 = ((dead_mask >> suit2) & suit_mask) << suit1;
@@ -1015,7 +1015,7 @@ impl PostFlopGame {
                 let mut dead_mask: u64 = (1 << 52) - 1;
 
                 for &(c1, c2) in &self.private_cards[player ^ 1] {
-                    let mask = (1 << c1) | (1 << c2);
+                    let mask: u64 = (1 << c1) | (1 << c2);
                     if mask & board_mask == 0 {
                         dead_mask &= mask;
                     }
@@ -1030,7 +1030,7 @@ impl PostFlopGame {
                     .iter()
                     .zip(self.weights[player].iter_mut())
                     .for_each(|(&(c1, c2), w)| {
-                        let mask = (1 << c1) | (1 << c2);
+                        let mask: u64 = (1 << c1) | (1 << c2);
                         if mask & dead_mask != 0 {
                             *w = 0.0;
                         }

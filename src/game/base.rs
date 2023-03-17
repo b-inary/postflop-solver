@@ -823,10 +823,10 @@ impl PostFlopGame {
 
                 for &(c1, c2) in player_cards {
                     indices.push(arena.len());
-                    let player_mask = (1 << c1) | (1 << c2);
+                    let player_mask: u64 = (1 << c1) | (1 << c2);
 
                     for &(c3, c4) in opponent_cards {
-                        let opponent_mask = (1 << c3) | (1 << c4);
+                        let opponent_mask: u64 = (1 << c3) | (1 << c4);
                         if player_mask & opponent_mask != 0 {
                             arena.push(0.0);
                         } else {
@@ -858,7 +858,7 @@ impl PostFlopGame {
 
                 let buf = into_par_iter(0..52)
                     .map(|turn| {
-                        let bit_turn = 1 << turn;
+                        let bit_turn: u64 = 1 << turn;
                         if bit_turn & (flop_mask | skip_turn_mask) != 0
                             || (self.card_config.turn != NOT_DEALT
                                 && self.card_config.turn != turn as u8)
@@ -869,7 +869,7 @@ impl PostFlopGame {
                         let mut outer = Vec::with_capacity(player_cards.len());
 
                         for &(c1, c2) in player_cards {
-                            let player_mask = (1 << c1) | (1 << c2);
+                            let player_mask: u64 = (1 << c1) | (1 << c2);
                             if player_mask & bit_turn != 0 {
                                 outer.push(Vec::new());
                                 continue;
@@ -877,7 +877,7 @@ impl PostFlopGame {
 
                             let mut inner = Vec::with_capacity(opponent_cards.len());
                             for &(c3, c4) in opponent_cards {
-                                let opponent_mask = (1 << c3) | (1 << c4);
+                                let opponent_mask: u64 = (1 << c3) | (1 << c4);
                                 if (player_mask | bit_turn) & opponent_mask != 0 {
                                     inner.push(0.0);
                                 } else {
@@ -905,8 +905,8 @@ impl PostFlopGame {
         }
 
         let is_board_possible = |turn: u8, river: u8| {
-            let bit_turn = 1 << turn;
-            let bit_river = 1 << river;
+            let bit_turn: u64 = 1 << turn;
+            let bit_river: u64 = 1 << river;
             let iso_card = &self.isomorphism_card_river[turn as usize & 3];
 
             bit_turn & (flop_mask | skip_turn_mask) == 0
@@ -928,11 +928,11 @@ impl PostFlopGame {
                         return Vec::new();
                     }
 
-                    let board_mask = (1 << board1) | (1 << board2);
+                    let board_mask: u64 = (1 << board1) | (1 << board2);
                     let mut outer = Vec::with_capacity(player_cards.len());
 
                     for &(c1, c2) in player_cards {
-                        let player_mask = (1 << c1) | (1 << c2);
+                        let player_mask: u64 = (1 << c1) | (1 << c2);
                         if player_mask & board_mask != 0 {
                             outer.push(Vec::new());
                             continue;
@@ -940,7 +940,7 @@ impl PostFlopGame {
 
                         let mut inner = Vec::with_capacity(opponent_cards.len());
                         for &(c3, c4) in opponent_cards {
-                            let opponent_mask = (1 << c3) | (1 << c4);
+                            let opponent_mask: u64 = (1 << c3) | (1 << c4);
                             if (player_mask | board_mask) & opponent_mask != 0 {
                                 inner.push(0.0);
                             } else {
@@ -980,7 +980,7 @@ impl PostFlopGame {
 
             let buf = into_par_iter(0..52)
                 .map(|turn| {
-                    let bit_turn = 1 << turn;
+                    let bit_turn: u64 = 1 << turn;
                     if bit_turn & (flop_mask | skip_turn_mask) != 0
                         || (self.card_config.turn != NOT_DEALT
                             && self.card_config.turn != turn as u8)
@@ -991,7 +991,7 @@ impl PostFlopGame {
                     let mut outer = Vec::with_capacity(player_len);
 
                     for &(c1, c2) in player_cards {
-                        let player_mask = (1 << c1) | (1 << c2);
+                        let player_mask: u64 = (1 << c1) | (1 << c2);
                         if player_mask & bit_turn != 0 {
                             outer.push(Vec::new());
                         } else {
@@ -1005,7 +1005,7 @@ impl PostFlopGame {
                     let iso_swap = &self.isomorphism_swap_river[turn & 3];
 
                     for river in 0..52 {
-                        let bit_river = 1 << river;
+                        let bit_river: u64 = 1 << river;
                         if bit_river & (flop_mask | bit_turn) != 0 {
                             continue;
                         }
@@ -1096,7 +1096,7 @@ impl PostFlopGame {
             let mut children = Vec::with_capacity(49);
 
             for turn in 0..52 {
-                let bit_turn = 1 << turn;
+                let bit_turn: u64 = 1 << turn;
                 if bit_turn & flop_mask != 0 {
                     continue;
                 }
@@ -1197,7 +1197,7 @@ impl PostFlopGame {
                 ret += 2 * 52 * mem::size_of::<Vec<usize>>() as u64;
 
                 for turn in 0..52 {
-                    let bit_turn = 1 << turn;
+                    let bit_turn: u64 = 1 << turn;
                     if bit_turn & (flop_mask | skip_turn_mask) != 0
                         || (self.card_config.turn != NOT_DEALT
                             && self.card_config.turn != turn as u8)
@@ -1208,7 +1208,7 @@ impl PostFlopGame {
                     ret += 2 * (player_len * mem::size_of::<usize>()) as u64;
 
                     for &(c1, c2) in player_cards {
-                        let player_mask = (1 << c1) | (1 << c2);
+                        let player_mask: u64 = (1 << c1) | (1 << c2);
                         if player_mask & bit_turn == 0 {
                             ret += 2 * 4 * opponent_len as u64;
                         }
@@ -1218,8 +1218,8 @@ impl PostFlopGame {
         }
 
         let is_board_possible = |turn: u8, river: u8| {
-            let bit_turn = 1 << turn;
-            let bit_river = 1 << river;
+            let bit_turn: u64 = 1 << turn;
+            let bit_river: u64 = 1 << river;
             let iso_card = &self.isomorphism_card_river[turn as usize & 3];
 
             bit_turn & (flop_mask | skip_turn_mask) == 0
@@ -1244,11 +1244,11 @@ impl PostFlopGame {
                     continue;
                 }
 
-                let board_mask = (1 << board1) | (1 << board2);
+                let board_mask: u64 = (1 << board1) | (1 << board2);
                 ret += (player_len * mem::size_of::<usize>()) as u64;
 
                 for &(c1, c2) in player_cards {
-                    let player_mask = (1 << c1) | (1 << c2);
+                    let player_mask: u64 = (1 << c1) | (1 << c2);
                     if player_mask & board_mask == 0 {
                         ret += 4 * opponent_len as u64;
                     }
