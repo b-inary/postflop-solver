@@ -2,7 +2,7 @@ use crate::bet_size::*;
 use crate::mutex_like::*;
 
 #[cfg(feature = "bincode")]
-use bincode::{error::DecodeError, Decode, Encode};
+use bincode::{Decode, Encode};
 
 pub(crate) const PLAYER_OOP: u8 = 0;
 pub(crate) const PLAYER_IP: u8 = 1;
@@ -142,9 +142,8 @@ pub struct ActionTree {
     history: Vec<Action>,
 }
 
-// automatic derive of `Decode` does not work (2.0.0-rc.2)
 #[derive(Default)]
-#[cfg_attr(feature = "bincode", derive(Encode))]
+#[cfg_attr(feature = "bincode", derive(Decode, Encode))]
 pub(crate) struct ActionTreeNode {
     pub(crate) player: u8,
     pub(crate) board_state: BoardState,
@@ -1033,20 +1032,6 @@ impl BuildTreeInfo {
             stack,
             prev_amount,
         }
-    }
-}
-
-#[cfg(feature = "bincode")]
-impl Decode for ActionTreeNode {
-    #[inline]
-    fn decode<D: bincode::de::Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
-        Ok(ActionTreeNode {
-            player: Decode::decode(decoder)?,
-            board_state: Decode::decode(decoder)?,
-            amount: Decode::decode(decoder)?,
-            actions: Decode::decode(decoder)?,
-            children: Decode::decode(decoder)?,
-        })
     }
 }
 

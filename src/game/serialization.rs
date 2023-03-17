@@ -2,9 +2,14 @@ use super::*;
 
 use crate::interface::*;
 use crate::utility::*;
-use bincode::error::{DecodeError, EncodeError};
 use std::cell::Cell;
 use std::ptr;
+
+use bincode::{
+    de::Decoder,
+    enc::Encoder,
+    error::{DecodeError, EncodeError},
+};
 
 impl PostFlopGame {
     /// Returns the storage mode of this instance.
@@ -75,7 +80,7 @@ impl PostFlopGame {
     }
 }
 
-static VERSION_STR: &str = "2023-03-04";
+static VERSION_STR: &str = "2023-03-18";
 
 thread_local! {
     static PTR_BASE: Cell<[*const u8; 2]> = Cell::new([ptr::null(); 2]);
@@ -85,7 +90,7 @@ thread_local! {
 }
 
 impl Encode for PostFlopGame {
-    fn encode<E: bincode::enc::Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
+    fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
         if self.state <= State::Uninitialized {
             return Err(EncodeError::Other("Game is not successfully initialized"));
         }
@@ -95,14 +100,13 @@ impl Encode for PostFlopGame {
         // version
         VERSION_STR.to_string().encode(encoder)?;
 
-        // action tree
-        self.tree_config.encode(encoder)?;
-        self.added_lines.encode(encoder)?;
-        self.removed_lines.encode(encoder)?;
-
         // contents
         self.state.encode(encoder)?;
         self.card_config.encode(encoder)?;
+        self.tree_config.encode(encoder)?;
+        self.added_lines.encode(encoder)?;
+        self.removed_lines.encode(encoder)?;
+        self.action_root.encode(encoder)?;
         self.num_combinations.encode(encoder)?;
         self.target_storage_mode.encode(encoder)?;
         self.num_nodes.encode(encoder)?;
@@ -142,16 +146,12 @@ impl Encode for PostFlopGame {
         };
         self.node_arena[0..num_nodes].encode(encoder)?;
 
-        // interpreter
-        self.action_history.encode(encoder)?;
-        self.is_normalized_weight_cached.encode(encoder)?;
-
         Ok(())
     }
 }
 
 impl Decode for PostFlopGame {
-    fn decode<D: bincode::de::Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
+    fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
         // version check
         let version = String::decode(decoder)?;
         if version != VERSION_STR {
@@ -160,28 +160,14 @@ impl Decode for PostFlopGame {
             )));
         }
 
-        let tree_config = TreeConfig::decode(decoder)?;
-        let added_lines = Vec::<Vec<Action>>::decode(decoder)?;
-        let removed_lines = Vec::<Vec<Action>>::decode(decoder)?;
-
-        let mut action_tree = ActionTree::new(tree_config).unwrap();
-        for line in &added_lines {
-            action_tree.add_line(line).unwrap();
-        }
-        for line in &removed_lines {
-            action_tree.remove_line(line).unwrap();
-        }
-
-        let (tree_config, _, _, action_root) = action_tree.eject();
-
         // game instance
         let mut game = Self {
             state: Decode::decode(decoder)?,
             card_config: Decode::decode(decoder)?,
-            tree_config,
-            added_lines,
-            removed_lines,
-            action_root,
+            tree_config: Decode::decode(decoder)?,
+            added_lines: Decode::decode(decoder)?,
+            removed_lines: Decode::decode(decoder)?,
+            action_root: Decode::decode(decoder)?,
             num_combinations: Decode::decode(decoder)?,
             storage_mode: Decode::decode(decoder)?,
             num_nodes: Decode::decode(decoder)?,
@@ -230,10 +216,6 @@ impl Decode for PostFlopGame {
         // game tree
         game.node_arena = Decode::decode(decoder)?;
 
-        // interpreter
-        let action_history = Vec::<usize>::decode(decoder)?;
-        let is_normalized_weight_cached = bool::decode(decoder)?;
-
         // initialization
         if game.state >= State::TreeBuilt {
             game.init_hands();
@@ -245,11 +227,6 @@ impl Decode for PostFlopGame {
                 game.state = State::MemoryAllocated;
                 finalize(&mut game);
             }
-
-            game.apply_history(&action_history);
-            if is_normalized_weight_cached {
-                game.cache_normalized_weights();
-            }
         }
 
         Ok(game)
@@ -257,7 +234,7 @@ impl Decode for PostFlopGame {
 }
 
 impl Encode for PostFlopNode {
-    fn encode<E: bincode::enc::Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
+    fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
         // contents
         self.prev_action.encode(encoder)?;
         self.player.encode(encoder)?;
@@ -294,7 +271,7 @@ impl Encode for PostFlopNode {
 }
 
 impl Decode for PostFlopNode {
-    fn decode<D: bincode::de::Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
+    fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
         // node instance
         let mut node = Self {
             prev_action: Decode::decode(decoder)?,
