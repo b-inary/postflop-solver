@@ -138,6 +138,8 @@ impl PostFlopGame {
         card_config: CardConfig,
         action_tree: ActionTree,
     ) -> Result<(), String> {
+        self.state = State::ConfigError;
+
         if !action_tree.invalid_terminals().is_empty() {
             return Err("Invalid terminal is found in action tree".to_string());
         }
@@ -150,10 +152,13 @@ impl PostFlopGame {
             self.action_root,
         ) = action_tree.eject();
 
-        self.state = State::ConfigError;
-
         self.check_card_config()?;
-        self.init()?;
+        self.init_card_fields();
+        self.init_root()?;
+
+        self.state = State::TreeBuilt;
+
+        self.init_interpreter();
         self.reset_bunching_effect();
 
         Ok(())
@@ -184,7 +189,7 @@ impl PostFlopGame {
         Ok(())
     }
 
-    /// Resets the bunching effect configuration.
+    /// Resets the bunching effect configuration. The current node will also be reset to the root.
     #[inline]
     pub fn reset_bunching_effect(&mut self) {
         self.bunching_num_dead_cards = 0;
@@ -196,6 +201,7 @@ impl PostFlopGame {
         self.bunching_num_river = Default::default();
         self.bunching_coef_flop = Default::default();
         self.bunching_coef_turn = Default::default();
+        self.back_to_root();
     }
 
     /// Obtains the card configuration.
@@ -332,7 +338,7 @@ impl PostFlopGame {
     }
 
     /// Checks the card configuration.
-    fn check_card_config(&mut self) -> Result<(), String> {
+    pub(crate) fn check_card_config(&mut self) -> Result<(), String> {
         let config = &self.card_config;
         let (flop, turn, river) = (config.flop, config.turn, config.river);
         let range = &config.range;
@@ -406,6 +412,14 @@ impl PostFlopGame {
             return Err("IP range is empty".to_string());
         }
 
+        if !range[0].is_valid() {
+            return Err("OOP range is invalid (loaded broken data?)".to_string());
+        }
+
+        if !range[1].is_valid() {
+            return Err("IP range is invalid (loaded broken data?)".to_string());
+        }
+
         self.init_hands();
         self.num_combinations = 0.0;
 
@@ -434,7 +448,7 @@ impl PostFlopGame {
 
     /// Initializes fields `initial_weights` and `private_cards`.
     #[inline]
-    pub(super) fn init_hands(&mut self) {
+    fn init_hands(&mut self) {
         let config = &self.card_config;
         let (flop, turn, river) = (config.flop, config.turn, config.river);
         let range = &config.range;
@@ -452,15 +466,6 @@ impl PostFlopGame {
             self.initial_weights[player] = weights;
             self.private_cards[player] = hands;
         }
-    }
-
-    /// Initializes the game.
-    #[inline]
-    fn init(&mut self) -> Result<(), String> {
-        self.init_card_fields();
-        self.init_root()?;
-        self.init_interpreter();
-        Ok(())
     }
 
     /// Initializes fields related to cards.
@@ -538,8 +543,6 @@ impl PostFlopGame {
         self.num_storage_chance = info.num_storage_chance;
         self.misc_memory_usage = self.memory_usage_internal();
 
-        self.state = State::TreeBuilt;
-
         Ok(())
     }
 
@@ -554,8 +557,6 @@ impl PostFlopGame {
         self.weights = vecs.clone();
         self.normalized_weights = vecs.clone();
         self.cfvalues_cache = vecs;
-
-        self.back_to_root();
     }
 
     /// Clears the storage.
@@ -839,6 +840,7 @@ impl PostFlopGame {
                 if player == 0 {
                     self.bunching_num_combinations = arena.iter().fold(0.0, |a, &x| a + x as f64);
                     if self.bunching_num_combinations == 0.0 {
+                        self.reset_bunching_effect();
                         return Err("Valid combination not found".to_string());
                     }
                 }
@@ -898,6 +900,7 @@ impl PostFlopGame {
                 if self.card_config.turn != NOT_DEALT && player == 0 {
                     self.bunching_num_combinations = arena.iter().fold(0.0, |a, &x| a + x as f64);
                     if self.bunching_num_combinations == 0.0 {
+                        self.reset_bunching_effect();
                         return Err("Valid combination not found".to_string());
                     }
                 }
@@ -961,6 +964,7 @@ impl PostFlopGame {
             if self.card_config.river != NOT_DEALT && player == 0 {
                 self.bunching_num_combinations = arena.iter().fold(0.0, |a, &x| a + x as f64);
                 if self.bunching_num_combinations == 0.0 {
+                    self.reset_bunching_effect();
                     return Err("Valid combination not found".to_string());
                 }
             }
@@ -968,6 +972,7 @@ impl PostFlopGame {
 
         if self.card_config.river != NOT_DEALT {
             self.bunching_arena = arena;
+            self.assign_zero_weights();
             return Ok(());
         }
 
@@ -1082,6 +1087,7 @@ impl PostFlopGame {
 
         if self.card_config.turn != NOT_DEALT {
             self.bunching_arena = arena;
+            self.assign_zero_weights();
             return Ok(());
         }
 
@@ -1159,6 +1165,7 @@ impl PostFlopGame {
         }
 
         self.bunching_arena = arena;
+        self.assign_zero_weights();
         Ok(())
     }
 

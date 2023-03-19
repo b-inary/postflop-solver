@@ -622,6 +622,12 @@ impl Range {
         self.set_weight(&offsuit_indices(rank1, rank2), weight);
     }
 
+    /// Returns whether the range is valid, i.e., all weights are in the range `[0.0, 1.0]`.
+    #[inline]
+    pub(crate) fn is_valid(&self) -> bool {
+        self.data.iter().all(|el| (0.0..=1.0).contains(el))
+    }
+
     /// Returns whether the all suits are symmetric.
     pub(crate) fn is_suit_symmetric(&self) -> bool {
         for rank1 in 0..13 {

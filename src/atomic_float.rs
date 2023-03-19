@@ -1,7 +1,13 @@
 use std::fmt::{self, Debug, Formatter};
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering::Relaxed};
 
+#[cfg(feature = "bincode")]
+use bincode::{Decode, Encode};
+
+#[cfg_attr(feature = "bincode", derive(Decode, Encode))]
 pub(crate) struct AtomicF32(AtomicU32);
+
+#[cfg_attr(feature = "bincode", derive(Decode, Encode))]
 pub(crate) struct AtomicF64(AtomicU64);
 
 impl AtomicF32 {

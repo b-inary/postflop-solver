@@ -1001,7 +1001,7 @@ impl PostFlopGame {
     }
 
     /// Assigns zero weights to the hands that are not possible.
-    fn assign_zero_weights(&mut self) {
+    pub(super) fn assign_zero_weights(&mut self) {
         if self.bunching_num_dead_cards == 0 {
             let mut board_mask: u64 = 0;
             if self.turn != NOT_DEALT {

@@ -26,16 +26,17 @@ impl PostFlopGame {
 
     /// Sets the target storage mode.
     #[inline]
-    pub fn set_target_storage_mode(&mut self, mode: BoardState) {
+    pub fn set_target_storage_mode(&mut self, mode: BoardState) -> Result<(), String> {
         if mode > self.storage_mode {
-            panic!("Cannot set target storage mode to a higher value than the current storage");
+            return Err("Cannot set target to a higher value than the current storage".to_string());
         }
 
         if mode < self.tree_config.initial_state {
-            panic!("Cannot set target storage mode to a lower value than the initial state");
+            return Err("Cannot set target to a lower value than the initial state".to_string());
         }
 
         self.target_storage_mode = mode;
+        Ok(())
     }
 
     /// Returns the number of storage elements required for the target storage mode.
@@ -80,7 +81,7 @@ impl PostFlopGame {
     }
 }
 
-static VERSION_STR: &str = "2023-03-18";
+static VERSION_STR: &str = "2023-03-19";
 
 thread_local! {
     static PTR_BASE: Cell<[*const u8; 2]> = Cell::new([ptr::null(); 2]);
@@ -107,7 +108,6 @@ impl Encode for PostFlopGame {
         self.added_lines.encode(encoder)?;
         self.removed_lines.encode(encoder)?;
         self.action_root.encode(encoder)?;
-        self.num_combinations.encode(encoder)?;
         self.target_storage_mode.encode(encoder)?;
         self.num_nodes.encode(encoder)?;
         self.is_compression_enabled.encode(encoder)?;
@@ -119,7 +119,17 @@ impl Encode for PostFlopGame {
         self.storage2[0..num_storage[1]].encode(encoder)?;
         self.storage_ip[0..num_storage[2]].encode(encoder)?;
         self.storage_chance[0..num_storage[3]].encode(encoder)?;
-        self.locking_strategy.encode(encoder)?;
+
+        let num_nodes = match self.target_storage_mode {
+            BoardState::Flop => self.num_nodes[0] as usize,
+            BoardState::Turn => (self.num_nodes[0] + self.num_nodes[1]) as usize,
+            BoardState::River => self.node_arena.len(),
+        };
+
+        // locking strategy (need to filter)
+        let mut locking_strategy = self.locking_strategy.clone();
+        locking_strategy.retain(|&i, _| i < num_nodes);
+        locking_strategy.encode(encoder)?;
 
         // store base pointers
         PTR_BASE.with(|c| {
@@ -139,11 +149,6 @@ impl Encode for PostFlopGame {
         });
 
         // game tree
-        let num_nodes = match self.target_storage_mode {
-            BoardState::Flop => self.num_nodes[0] as usize,
-            BoardState::Turn => (self.num_nodes[0] + self.num_nodes[1]) as usize,
-            BoardState::River => self.node_arena.len(),
-        };
         self.node_arena[0..num_nodes].encode(encoder)?;
 
         Ok(())
@@ -168,7 +173,6 @@ impl Decode for PostFlopGame {
             added_lines: Decode::decode(decoder)?,
             removed_lines: Decode::decode(decoder)?,
             action_root: Decode::decode(decoder)?,
-            num_combinations: Decode::decode(decoder)?,
             storage_mode: Decode::decode(decoder)?,
             num_nodes: Decode::decode(decoder)?,
             is_compression_enabled: Decode::decode(decoder)?,
@@ -217,16 +221,15 @@ impl Decode for PostFlopGame {
         game.node_arena = Decode::decode(decoder)?;
 
         // initialization
-        if game.state >= State::TreeBuilt {
-            game.init_hands();
-            game.init_card_fields();
-            game.init_interpreter();
+        game.check_card_config().map_err(DecodeError::OtherString)?;
+        game.init_card_fields();
+        game.init_interpreter();
+        game.back_to_root();
 
-            // restore the counterfactual values
-            if game.storage_mode == BoardState::River && game.state == State::Solved {
-                game.state = State::MemoryAllocated;
-                finalize(&mut game);
-            }
+        // restore the counterfactual values
+        if game.storage_mode == BoardState::River && game.state == State::Solved {
+            game.state = State::MemoryAllocated;
+            finalize(&mut game);
         }
 
         Ok(game)

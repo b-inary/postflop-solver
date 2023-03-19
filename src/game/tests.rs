@@ -1183,7 +1183,7 @@ fn serialize_and_deserialize() {
     let mut game: PostFlopGame = bincode::decode_from_std_read(&mut read_buf, config).unwrap();
 
     // save (turn)
-    game.set_target_storage_mode(BoardState::Turn);
+    game.set_target_storage_mode(BoardState::Turn).unwrap();
     let file = File::create("tmpfile.bin").unwrap();
     let mut write_buf = BufWriter::new(file);
     bincode::encode_into_std_write(&game, &mut write_buf, config).unwrap();
@@ -1195,7 +1195,7 @@ fn serialize_and_deserialize() {
     let mut game: PostFlopGame = bincode::decode_from_std_read(&mut read_buf, config).unwrap();
 
     // save (flop)
-    game.set_target_storage_mode(BoardState::Flop);
+    game.set_target_storage_mode(BoardState::Flop).unwrap();
     let file = File::create("tmpfile.bin").unwrap();
     let mut write_buf = BufWriter::new(file);
     bincode::encode_into_std_write(&game, &mut write_buf, config).unwrap();

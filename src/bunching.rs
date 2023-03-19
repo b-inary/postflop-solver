@@ -3,6 +3,9 @@ use crate::range::*;
 use crate::utility::*;
 use std::io::{self, Write};
 
+#[cfg(feature = "bincode")]
+use bincode::{Decode, Encode};
+
 #[cfg(feature = "rayon")]
 use rayon::prelude::*;
 
@@ -103,6 +106,7 @@ const COMB_TABLE: [[usize; 49]; 8] = [
 /// | 2 | 1.77MB |
 /// | 3 | 123MB |
 /// | 4 | 3.42GB |
+#[cfg_attr(feature = "bincode", derive(Decode, Encode))]
 pub struct BunchingData {
     // input
     fold_ranges: Vec<Range>,
