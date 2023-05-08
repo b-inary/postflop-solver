@@ -126,8 +126,5 @@ pub struct PostFlopNode {
     storage3: *mut u8, // IP cfvalues
 }
 
-unsafe impl Send for PostFlopGame {}
-unsafe impl Sync for PostFlopGame {}
-
 unsafe impl Send for PostFlopNode {}
 unsafe impl Sync for PostFlopNode {}

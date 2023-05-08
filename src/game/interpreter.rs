@@ -7,15 +7,7 @@ use crate::utility::*;
 #[inline]
 fn decode_signed_slice(slice: &[i16], scale: f32) -> Vec<f32> {
     let decoder = scale / i16::MAX as f32;
-    let mut result = Vec::<f32>::with_capacity(slice.len());
-    let ptr = result.as_mut_ptr();
-    unsafe {
-        for i in 0..slice.len() {
-            *ptr.add(i) = (*slice.get_unchecked(i)) as f32 * decoder;
-        }
-        result.set_len(slice.len());
-    }
-    result
+    slice.iter().map(|&x| x as f32 * decoder).collect()
 }
 
 impl PostFlopGame {
@@ -399,7 +391,6 @@ impl PostFlopGame {
             // cache the counterfactual values
             let node = self.node();
             let vec = if self.is_compression_enabled {
-                let node = node;
                 let slice = row(node.cfvalues_compressed(), action, num_hands);
                 let scale = node.cfvalue_scale();
                 decode_signed_slice(slice, scale)

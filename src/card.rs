@@ -10,6 +10,8 @@ pub const NOT_DEALT: u8 = 0xff;
 
 /// A struct containing the card configuration.
 ///
+/// Card ID (u8): `"2c"` => `0`, `"2d"` => `1`, `"2h"` => `2`, ..., `"As"` => `51`.
+///
 /// # Examples
 /// ```
 /// use postflop_solver::*;

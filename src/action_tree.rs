@@ -6,7 +6,7 @@ use bincode::{Decode, Encode};
 
 pub(crate) const PLAYER_OOP: u8 = 0;
 pub(crate) const PLAYER_IP: u8 = 1;
-pub(crate) const PLAYER_CHANCE: u8 = 2;
+pub(crate) const PLAYER_CHANCE: u8 = 2; // only used with `PLAYER_CHANCE_FLAG`
 pub(crate) const PLAYER_MASK: u8 = 3;
 pub(crate) const PLAYER_CHANCE_FLAG: u8 = 4; // chance_player = PLAYER_CHANCE_FLAG | prev_player
 pub(crate) const PLAYER_TERMINAL_FLAG: u8 = 8;
@@ -81,7 +81,7 @@ pub enum BoardState {
 #[derive(Debug, Clone, Default)]
 #[cfg_attr(feature = "bincode", derive(Decode, Encode))]
 pub struct TreeConfig {
-    /// Initial state of the game (flop, turn, or river).
+    /// Initial state of the game tree (flop, turn, or river).
     pub initial_state: BoardState,
 
     /// Starting pot size. Must be greater than `0`.
@@ -1035,6 +1035,7 @@ impl BuildTreeInfo {
     }
 }
 
+/// Returns the number of action nodes of [flop, turn, river].
 pub(crate) fn count_num_action_nodes(node: &ActionTreeNode) -> [u64; 3] {
     let mut ret = [0, 0, 0];
     count_num_action_nodes_recursive(node, 0, &mut ret);

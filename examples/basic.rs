@@ -25,7 +25,7 @@ fn main() {
         rake_cap: 0.0,
         flop_bet_sizes: [bet_sizes.clone(), bet_sizes.clone()], // [OOP, IP]
         turn_bet_sizes: [bet_sizes.clone(), bet_sizes.clone()],
-        river_bet_sizes: [bet_sizes.clone(), bet_sizes.clone()],
+        river_bet_sizes: [bet_sizes.clone(), bet_sizes],
         turn_donk_sizes: None, // use default bet sizes
         river_donk_sizes: Some(DonkSizeCandidates::try_from("50%").unwrap()),
         add_allin_threshold: 1.5, // add all-in if (maximum bet size) <= 1.5x pot
@@ -64,7 +64,7 @@ fn main() {
 
     // solve the game
     let max_num_iterations = 1000;
-    let target_exploitability = game.tree_config().starting_pot as f32 * 0.005;
+    let target_exploitability = game.tree_config().starting_pot as f32 * 0.005; // 0.5% of the pot
     let exploitability = solve(&mut game, max_num_iterations, target_exploitability, true);
     println!("Exploitability: {:.2}", exploitability);
 
@@ -114,9 +114,18 @@ fn main() {
     let strategy = game.strategy();
     assert_eq!(ip_cards.len(), 250);
     assert_eq!(strategy.len(), 750);
-    assert_eq!(hole_to_string(ip_cards[206]).unwrap(), "KsJs");
-    assert_eq!(strategy[206], 0.0);
-    assert!((strategy[206] + strategy[456] + strategy[706] - 1.0).abs() < 1e-6);
+
+    let ksjs = holes_to_strings(ip_cards)
+        .unwrap()
+        .iter()
+        .position(|s| s == "KsJs")
+        .unwrap();
+
+    // strategy[index] => Fold
+    // strategy[index + ip_cards.len()] => Call
+    // strategy[index + 2 * ip_cards.len()] => Raise(300)
+    assert_eq!(strategy[ksjs], 0.0);
+    assert!((strategy[ksjs] + strategy[ksjs + 250] + strategy[ksjs + 500] - 1.0).abs() < 1e-6);
 
     // play `Call`
     game.play(1);
@@ -124,7 +133,7 @@ fn main() {
     // confirm that the current node is a chance node (i.e., river node)
     assert!(game.is_chance_node());
 
-    // confirm that "7s" may be dealt
+    // confirm that "7s" can be dealt
     let card_7s = card_from_str("7s").unwrap();
     assert!(game.possible_cards() & (1 << card_7s) != 0);
 
