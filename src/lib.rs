@@ -164,8 +164,9 @@
 //! [Discounted CFR]: https://arxiv.org/abs/1809.04040
 //!
 //! # Crate features
-//! - `bincode`: Uses [bincode] crate (2.0.0-rc.2) to serialize and deserialize the `PostFlopGame` struct.
-//!   Disabled by default.
+//! - `bincode`: Uses [bincode] crate (2.0.0-rc.3) to serialize and deserialize the `PostFlopGame` struct.
+//!   This feature is required to save and load the game tree.
+//!   Enabled by default.
 //! - `custom-alloc`: Uses custom memory allocator in solving process (only available in nightly Rust).
 //!   It significantly reduces the number of calls of the default allocator,
 //!   so it is recommended to use this feature when the default allocator is not so efficient.
@@ -174,14 +175,21 @@
 //!   Disabled by default.
 //! - `rayon`: Uses [rayon] crate for parallelization.
 //!   Enabled by default.
+//! - `zstd`: Uses [zstd] crate to compress and decompress the game tree.
+//!   This feature is required to save and load the game tree with compression.
+//!   Disabled by default.
 //!
 //! [bincode]: https://github.com/bincode-org/bincode
 //! [rayon]: https://github.com/rayon-rs/rayon
+//! [zstd]: https://github.com/gyscos/zstd-rs
 
 #![cfg_attr(feature = "custom-alloc", feature(allocator_api))]
 
 #[cfg(feature = "custom-alloc")]
 mod alloc;
+
+#[cfg(feature = "bincode")]
+mod file;
 
 mod action_tree;
 mod atomic_float;
@@ -197,6 +205,9 @@ mod range;
 mod sliceop;
 mod solver;
 mod utility;
+
+#[cfg(feature = "bincode")]
+pub use file::*;
 
 pub use action_tree::*;
 pub use bet_size::*;

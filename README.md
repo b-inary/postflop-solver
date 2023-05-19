@@ -60,17 +60,22 @@ $ cargo run --release --example basic
 
 ## Crate features
 
-- `bincode`: Uses [bincode] crate (2.0.0-rc.2) to serialize and deserialize the `PostFlopGame` struct.
-  Disabled by default.
+- `bincode`: Uses [bincode] crate (2.0.0-rc.3) to serialize and deserialize the `PostFlopGame` struct.
+  This feature is required to save and load the game tree.
+  Enabled by default.
 - `custom-alloc`: Uses custom memory allocator in solving process (only available in nightly Rust).
   It significantly reduces the number of calls of the default allocator, so it is recommended to use this feature when the default allocator is not so efficient.
   Note that this feature assumes that, at most, only one instance of `PostFlopGame` is available when solving in a program.
   Disabled by default.
 - `rayon`: Uses [rayon] crate for parallelization.
   Enabled by default.
+- `zstd`: Uses [zstd] crate to compress and decompress the game tree.
+  This feature is required to save and load the game tree with compression.
+  Disabled by default.
 
 [bincode]: https://github.com/bincode-org/bincode
 [rayon]: https://github.com/rayon-rs/rayon
+[zstd]: https://github.com/gyscos/zstd-rs
 
 ## License
 

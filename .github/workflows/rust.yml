@@ -17,16 +17,16 @@ jobs:
         rustup +nightly component add clippy
     - name: Build
       run: |
-        cargo build --release --features bincode
-        cargo run --release --features bincode --example basic
+        cargo build --release --features zstd
         cargo +nightly build --release --features custom-alloc
+        cargo run --release --example basic
     - name: Run tests
       run: |
-        cargo test --release --features bincode
+        cargo test --release --features zstd
         cargo +nightly test --release --features custom-alloc -- --test-threads 1
     - name: Clippy
       run: |
-        cargo clippy --release --features bincode -- -A clippy::needless_range_loop
+        cargo clippy --release --features zstd -- -A clippy::needless_range_loop
         cargo +nightly clippy --release --features custom-alloc -- -A clippy::needless_range_loop
     - name: Check formatting
       run: cargo fmt --all --check

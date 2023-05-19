@@ -39,6 +39,21 @@ impl PostFlopGame {
         Ok(())
     }
 
+    /// Returns the memory usage when the target storage mode is used.
+    #[inline]
+    pub fn target_memory_usage(&self) -> u64 {
+        match self.target_storage_mode {
+            BoardState::River => match self.is_compression_enabled {
+                false => self.memory_usage().0,
+                true => self.memory_usage().1,
+            },
+            _ => {
+                let num_target_storage = self.num_target_storage();
+                num_target_storage.iter().map(|&x| x as u64).sum::<u64>() + self.misc_memory_usage
+            }
+        }
+    }
+
     /// Returns the number of storage elements required for the target storage mode.
     fn num_target_storage(&self) -> [usize; 4] {
         if self.state <= State::TreeBuilt {

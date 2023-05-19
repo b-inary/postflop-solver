@@ -4,12 +4,6 @@ use crate::solver::*;
 use crate::utility::*;
 use crate::BunchingData;
 
-#[cfg(feature = "bincode")]
-use std::{
-    fs::File,
-    io::{BufReader, BufWriter, Write},
-};
-
 #[test]
 fn all_check_all_range() {
     let card_config = CardConfig {
@@ -1144,83 +1138,6 @@ fn set_bunching_effect_always_win() {
     assert!((equity_ip - 0.0).abs() < 1e-5);
     assert!((ev_oop - 60.0).abs() < 1e-4);
     assert!((ev_ip - 0.0).abs() < 1e-4);
-}
-
-#[test]
-#[cfg(feature = "bincode")]
-fn serialize_and_deserialize() {
-    let card_config = CardConfig {
-        range: [Range::ones(); 2],
-        flop: flop_from_str("Td9d6h").unwrap(),
-        ..Default::default()
-    };
-
-    let tree_config = TreeConfig {
-        starting_pot: 60,
-        effective_stack: 970,
-        flop_bet_sizes: [("50%", "").try_into().unwrap(), Default::default()],
-        turn_bet_sizes: [("50%", "").try_into().unwrap(), Default::default()],
-        ..Default::default()
-    };
-
-    let action_tree = ActionTree::new(tree_config).unwrap();
-    let mut game = PostFlopGame::with_config(card_config, action_tree).unwrap();
-
-    game.allocate_memory(false);
-    finalize(&mut game);
-
-    let config = bincode::config::legacy();
-
-    // save
-    let file = File::create("tmpfile.bin").unwrap();
-    let mut write_buf = BufWriter::new(file);
-    bincode::encode_into_std_write(&game, &mut write_buf, config).unwrap();
-    write_buf.flush().unwrap();
-
-    // load
-    let file = File::open("tmpfile.bin").unwrap();
-    let mut read_buf = BufReader::new(file);
-    let mut game: PostFlopGame = bincode::decode_from_std_read(&mut read_buf, config).unwrap();
-
-    // save (turn)
-    game.set_target_storage_mode(BoardState::Turn).unwrap();
-    let file = File::create("tmpfile.bin").unwrap();
-    let mut write_buf = BufWriter::new(file);
-    bincode::encode_into_std_write(&game, &mut write_buf, config).unwrap();
-    write_buf.flush().unwrap();
-
-    // load (turn)
-    let file = File::open("tmpfile.bin").unwrap();
-    let mut read_buf = BufReader::new(file);
-    let mut game: PostFlopGame = bincode::decode_from_std_read(&mut read_buf, config).unwrap();
-
-    // save (flop)
-    game.set_target_storage_mode(BoardState::Flop).unwrap();
-    let file = File::create("tmpfile.bin").unwrap();
-    let mut write_buf = BufWriter::new(file);
-    bincode::encode_into_std_write(&game, &mut write_buf, config).unwrap();
-    write_buf.flush().unwrap();
-
-    // load (flop)
-    let file = File::open("tmpfile.bin").unwrap();
-    let mut read_buf = BufReader::new(file);
-    let mut game: PostFlopGame = bincode::decode_from_std_read(&mut read_buf, config).unwrap();
-
-    // remove tmpfile
-    std::fs::remove_file("tmpfile.bin").unwrap();
-
-    game.cache_normalized_weights();
-    let weights_oop = game.normalized_weights(0);
-    let weights_ip = game.normalized_weights(1);
-    let root_equity_oop = compute_average(&game.equity(0), weights_oop);
-    let root_equity_ip = compute_average(&game.equity(1), weights_ip);
-    let root_ev_oop = compute_average(&game.expected_values(0), weights_oop);
-    let root_ev_ip = compute_average(&game.expected_values(1), weights_ip);
-
-    assert!((root_equity_oop - 0.5).abs() < 1e-5);
-    assert!((root_equity_ip - 0.5).abs() < 1e-5);
-    assert!((root_ev_oop - 45.0).abs() < 1e-4);
-    assert!((root_ev_ip - 15.0).abs() < 1e-4);
 }
 
 #[test]

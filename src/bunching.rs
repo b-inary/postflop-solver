@@ -2,6 +2,7 @@ use crate::atomic_float::*;
 use crate::range::*;
 use crate::utility::*;
 use std::io::{self, Write};
+use std::mem;
 
 #[cfg(feature = "bincode")]
 use bincode::{Decode, Encode};
@@ -69,7 +70,7 @@ const COMB_TABLE: [[usize; 49]; 8] = [
 /// A configuration for computing the bunching effect.
 ///
 /// # Examples
-/// ```ignore
+/// ```no_run
 /// use postflop_solver::*;
 ///
 /// let utg_range_str = "...";
@@ -244,6 +245,29 @@ impl BunchingData {
     #[inline]
     pub fn progress_percent(&self) -> u8 {
         self.progress_percent
+    }
+
+    /// Returns the memory usage in bytes.
+    #[inline]
+    pub fn memory_usage(&self) -> u64 {
+        let mut sum = 0;
+
+        sum += mem::size_of::<Self>() as u64;
+
+        sum += vec_memory_usage(&self.fold_ranges);
+        sum += vec_memory_usage(&self.temp_table1);
+        sum += vec_memory_usage(&self.temp_table2);
+        sum += vec_memory_usage(&self.temp_table3);
+
+        for vec in &self.sum {
+            sum += vec_memory_usage(vec);
+        }
+
+        sum += vec_memory_usage(&self.result4);
+        sum += vec_memory_usage(&self.result5);
+        sum += vec_memory_usage(&self.result6);
+
+        sum
     }
 
     /// Processes all phases.
