@@ -1178,7 +1178,7 @@ fn solve_pio_preset_normal() {
     );
     game.allocate_memory(false);
 
-    solve(&mut game, 1000, 180.0 * 0.001, true);
+    solve(&mut game, 1000, 0.001, true);
 
     game.cache_normalized_weights();
     let weights_oop = game.normalized_weights(0);
@@ -1235,7 +1235,7 @@ fn solve_pio_preset_raked() {
     );
     game.allocate_memory(false);
 
-    solve(&mut game, 1000, 180.0 * 0.001, true);
+    solve(&mut game, 1000, 0.001, true);
 
     game.cache_normalized_weights();
     let weights_oop = game.normalized_weights(0);
