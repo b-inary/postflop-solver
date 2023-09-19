@@ -64,7 +64,7 @@ fn main() {
 
     // solve the game
     let max_num_iterations = 1000;
-    let target_exploitability = game.tree_config().starting_pot as f32 * 0.005; // 0.5% of the pot
+    let target_exploitability = 0.005; // 0.5% of the pot
     let exploitability = solve(&mut game, max_num_iterations, target_exploitability, true);
     println!("Exploitability: {:.2}", exploitability);
 
