@@ -5,7 +5,7 @@ use std::mem;
 #[cfg(feature = "bincode")]
 use bincode::{Decode, Encode};
 
-/// A type representing a card, defined as a `u8` number.
+/// A type representing a card, defined as an alias of `u8`.
 ///
 /// The correspondence between the card and its ID is defined as follows:
 /// - `card_id = 4 * rank + suit` (where `0 <= card_id < 52`)

@@ -30,7 +30,7 @@ fn normal_node_locking() {
     game.lock_current_strategy(&[0.25, 0.75]); // lock IP's strategy: 25% fold, 75% call
     game.back_to_root();
 
-    solve(&mut game, 1000, 0.01, false);
+    solve(&mut game, 1000, 0.001, false);
     game.cache_normalized_weights();
 
     // check OOP's strategy

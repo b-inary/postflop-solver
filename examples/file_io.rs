@@ -40,7 +40,7 @@ fn main() {
     solve(&mut game, max_num_iterations, target_exploitability, true);
 
     // save the solved game tree to a file
-    // 4th argument is the zstd compression level (1-22); requires the `zstd` feature
+    // 4th argument is zstd compression level (1-22); requires `zstd` feature to use
     save_data_to_file(&game, "memo string", "filename.bin", None).unwrap();
 
     // load the solved game tree from a file
