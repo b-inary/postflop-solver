@@ -16,7 +16,6 @@ use bincode::{Decode, Encode};
 use std::fs::File;
 use std::io::{BufReader, BufWriter, Read, Write};
 use std::path::Path;
-use std::thread::available_parallelism;
 
 const MAGIC: u32 = 0x09f15790;
 const VERSION: u8 = 1;
@@ -88,12 +87,11 @@ pub fn save_data_into_std_write<T: FileData, W: Write>(
     if let Some(compression_level) = compression_level {
         let mut zstd_encoder = zstd::stream::Encoder::new(writer, compression_level)
             .map_err(|e| format!("Failed to create zstd encoder: {}", e))?;
-        let workers = available_parallelism()
-            .map_err(|e| format!("Failed to get cpu cores: {}", e))?
-            .get() as u32;
+
+        #[cfg(feature = "rayon")]
         zstd_encoder
-            .multithread(workers)
-            .map_err(|e| format!("Failed to enable multithreaded compression: {}", e))?;
+            .multithread(rayon::current_num_threads() as u32)
+            .map_err(|e| format!("Failed to enable multithreaded zstd encoder: {}", e))?;
 
         encode_into_std_write(data, &mut zstd_encoder, "Failed to write data")?;
         zstd_encoder
