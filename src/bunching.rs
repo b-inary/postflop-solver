@@ -1,4 +1,5 @@
 use crate::atomic_float::*;
+use crate::card::*;
 use crate::range::*;
 use crate::utility::*;
 use std::io::{self, Write};
@@ -69,7 +70,16 @@ const COMB_TABLE: [[usize; 49]; 8] = [
 
 /// A configuration for computing the bunching effect.
 ///
+/// This struct calculates the number of possible hand combinations of folded players when some
+/// cards are known to be dead, fully utilizing the inclusion-exclusion principle.
+/// For example, if the hero's and opponent's hands are fixed, with specific turn and river cards,
+/// we want to know the "weight" of the possible hand combinations of the folded players to
+/// accurately account for the bunching effect.
+/// In this case, the query is defined by 6 cards (2 for the hero, 2 for the opponent, 2 for the
+/// board), and this struct can answer the query instantly after precomputation.
+///
 /// # Examples
+///
 /// ```no_run
 /// use postflop_solver::*;
 ///
@@ -97,6 +107,7 @@ const COMB_TABLE: [[usize; 49]; 8] = [
 /// ```
 ///
 /// # Memory Usage
+///
 /// The `BunchingData` struct requires 62MB of memory to store the final result.
 ///
 /// The additional memory usage required for the computation is as follows:
@@ -111,7 +122,7 @@ const COMB_TABLE: [[usize; 49]; 8] = [
 pub struct BunchingData {
     // input
     fold_ranges: Vec<Range>,
-    flop: [u8; 3],
+    flop: [Card; 3],
 
     // current status
     phase: u8,
@@ -162,7 +173,7 @@ fn next_combination(mask: u64) -> u64 {
 }
 
 #[inline]
-fn compress_mask(mut mask: u64, flop: [u8; 3]) -> u64 {
+fn compress_mask(mut mask: u64, flop: [Card; 3]) -> u64 {
     assert!(flop[0] < flop[1] && flop[1] < flop[2]);
     for i in 0..3 {
         let m = (1 << (flop[i] as usize - i)) - 1;
@@ -176,7 +187,7 @@ impl BunchingData {
     ///
     /// `fold_ranges` can contain at most 4 ranges (6-max).
     #[inline]
-    pub fn new(fold_ranges: &[Range], mut flop: [u8; 3]) -> Result<Self, String> {
+    pub fn new(fold_ranges: &[Range], mut flop: [Card; 3]) -> Result<Self, String> {
         let mut fold_ranges_vec = Vec::new();
 
         for range in fold_ranges {
@@ -225,7 +236,7 @@ impl BunchingData {
 
     /// Returns the flop.
     #[inline]
-    pub fn flop(&self) -> [u8; 3] {
+    pub fn flop(&self) -> [Card; 3] {
         self.flop
     }
 
@@ -552,7 +563,7 @@ impl BunchingData {
         self.temp_table3 = (0..COMB_49_8).map(|_| AtomicF64::new(0.0)).collect();
     }
 
-    fn phase1_compress(table: &mut [f64], range: &Range, flop: [u8; 3]) {
+    fn phase1_compress(table: &mut [f64], range: &Range, flop: [Card; 3]) {
         let range = range.raw_data();
         let flop_mask: u64 = flop.iter().map(|&c| 1 << c).sum();
 
@@ -580,7 +591,7 @@ impl BunchingData {
         }
     }
 
-    fn phase1_combine(table: &mut [f64], range1: &Range, range2: &Range, flop: [u8; 3]) {
+    fn phase1_combine(table: &mut [f64], range1: &Range, range2: &Range, flop: [Card; 3]) {
         let range1 = range1.raw_data();
         let range2 = range2.raw_data();
         let flop_mask: u64 = flop.iter().map(|&c| 1 << c).sum();

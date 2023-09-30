@@ -12,6 +12,13 @@ pub(crate) fn align_up(size: usize) -> usize {
     (size + mask) & !mask
 }
 
+/// A custom memory allocator that allocates memory in a stack-like manner.
+///
+/// This allocator can be used to reduce the number of calls of the default allocator.
+/// In particular, the default allocator is not efficient in a multi-threaded WASM environment, so
+/// using this allocator can significantly improve the performance in such an environment.
+/// Note that this allocator assumes that `allocate` and `deallocate` are called in a stack-like
+/// manner, and it panics if this assumption is not satisfied.
 #[derive(Clone)]
 pub(crate) struct StackAlloc;
 

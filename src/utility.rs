@@ -244,11 +244,11 @@ pub(crate) fn apply_swap<T>(slice: &mut [T], swap_list: &[(u16, u16)]) {
 #[inline]
 pub fn finalize<T: Game>(game: &mut T) {
     if game.is_solved() {
-        panic!("the game is already solved");
+        panic!("Game is already solved");
     }
 
     if !game.is_ready() {
-        panic!("the game is not ready");
+        panic!("Game is not ready");
     }
 
     // compute the expected values and save them
@@ -278,7 +278,7 @@ pub fn finalize<T: Game>(game: &mut T) {
 #[inline]
 pub fn compute_exploitability<T: Game>(game: &T) -> f32 {
     if !game.is_ready() && !game.is_solved() {
-        panic!("the game is not ready");
+        panic!("Game is not ready");
     }
 
     let mes_ev = compute_mes_ev(game);
@@ -297,7 +297,7 @@ pub fn compute_exploitability<T: Game>(game: &T) -> f32 {
 #[inline]
 pub fn compute_current_ev<T: Game>(game: &T) -> [f32; 2] {
     if !game.is_ready() && !game.is_solved() {
-        panic!("the game is not ready");
+        panic!("Game is not ready");
     }
 
     let mut cfvalues = [
@@ -330,7 +330,7 @@ pub fn compute_current_ev<T: Game>(game: &T) -> [f32; 2] {
 #[inline]
 pub fn compute_mes_ev<T: Game>(game: &T) -> [f32; 2] {
     if !game.is_ready() && !game.is_solved() {
-        panic!("the game is not ready");
+        panic!("Game is not ready");
     }
 
     let mut cfvalues = [

@@ -5,12 +5,18 @@ use std::mem;
 #[cfg(feature = "bincode")]
 use bincode::{Decode, Encode};
 
+/// A type representing a card, defined as a `u8` number.
+///
+/// The correspondence between the card and its ID is defined as follows:
+/// - `card_id = 4 * rank + suit` (where `0 <= card_id < 52`)
+///   - `rank`: 2 => `0`, 3 => `1`, 4 => `2`, ..., A => `12`
+///   - `suit`: club => `0`, diamond => `1`, heart => `2`, spade => `3`
+pub type Card = u8;
+
 /// Constant representing that the card is not yet dealt.
-pub const NOT_DEALT: u8 = 0xff;
+pub const NOT_DEALT: Card = Card::MAX;
 
 /// A struct containing the card configuration.
-///
-/// Card ID (u8): `"2c"` => `0`, `"2d"` => `1`, `"2h"` => `2`, ..., `"As"` => `51`.
 ///
 /// # Examples
 /// ```
@@ -32,14 +38,14 @@ pub struct CardConfig {
     /// Initial range of each player.
     pub range: [Range; 2],
 
-    /// Flop cards: each card must be unique and in range [`0`, `52`).
-    pub flop: [u8; 3],
+    /// Flop cards: each card must be unique.
+    pub flop: [Card; 3],
 
     /// Turn card: must be in range [`0`, `52`) or `NOT_DEALT`.
-    pub turn: u8,
+    pub turn: Card,
 
     /// River card: must be in range [`0`, `52`) or `NOT_DEALT`.
-    pub river: u8,
+    pub river: Card,
 }
 
 impl Default for CardConfig {
@@ -54,7 +60,7 @@ impl Default for CardConfig {
     }
 }
 
-type PrivateCards = [Vec<(u8, u8)>; 2];
+type PrivateCards = [Vec<(Card, Card)>; 2];
 
 type Indices = [Vec<u16>; 2];
 
@@ -68,18 +74,18 @@ pub(crate) type SwapList = [Vec<(u16, u16)>; 2];
 
 type IsomorphismData = (
     Vec<u8>,
-    Vec<u8>,
+    Vec<Card>,
     [SwapList; 4],
     Vec<Vec<u8>>,
-    [Vec<u8>; 4],
+    [Vec<Card>; 4],
     [[SwapList; 4]; 4],
 );
 
 /// Returns an index of the given card pair.
 ///
-/// `"2d2c"` => `0`, `"2h2c"` => `1`, `"2s2c"` => `2`, ..., `"AsAh"` => `1325`.
+/// Examples: 2d2c => `0`, 2h2c => `1`, 2s2c => `2`, ..., AsAh => `1325`
 #[inline]
-pub(crate) fn card_pair_to_index(mut card1: u8, mut card2: u8) -> usize {
+pub(crate) fn card_pair_to_index(mut card1: Card, mut card2: Card) -> usize {
     if card1 > card2 {
         mem::swap(&mut card1, &mut card2);
     }
@@ -88,12 +94,12 @@ pub(crate) fn card_pair_to_index(mut card1: u8, mut card2: u8) -> usize {
 
 /// Returns a card pair from the given index.
 ///
-/// `0` => `"2d2c"`, `1` => `"2h2c"` , `2` => `"2s2c"`, ..., `1325` => `"AsAh"`.
+/// Examples: `0` => 2d2c, `1` => 2h2c , `2` => 2s2c, ..., `1325` => AsAh
 #[inline]
-pub(crate) fn index_to_card_pair(index: usize) -> (u8, u8) {
+pub(crate) fn index_to_card_pair(index: usize) -> (Card, Card) {
     let card1 = (103 - (103.0 * 103.0 - 8.0 * index as f64).sqrt().ceil() as u16) / 2;
     let card2 = index as u16 - card1 * (101 - card1) / 2 + 1;
-    (card1 as u8, card2 as u8)
+    (card1 as Card, card2 as Card)
 }
 
 impl CardConfig {
@@ -102,7 +108,10 @@ impl CardConfig {
         private_cards: &PrivateCards,
     ) -> (Indices, Vec<Indices>, Vec<Indices>) {
         let ret_flop = if self.turn == NOT_DEALT {
-            Self::valid_indices_internal(private_cards, NOT_DEALT, NOT_DEALT)
+            [
+                (0..private_cards[0].len() as u16).collect(),
+                (0..private_cards[1].len() as u16).collect(),
+            ]
         } else {
             Indices::default()
         };
@@ -136,9 +145,9 @@ impl CardConfig {
     }
 
     fn valid_indices_internal(
-        private_cards: &[Vec<(u8, u8)>; 2],
-        board1: u8,
-        board2: u8,
+        private_cards: &[Vec<(Card, Card)>; 2],
+        board1: Card,
+        board2: Card,
     ) -> [Vec<u16>; 2] {
         let mut ret = [
             Vec::with_capacity(private_cards[0].len()),
@@ -235,7 +244,7 @@ impl CardConfig {
         ret
     }
 
-    pub(crate) fn isomorphism(&self, private_cards: &[Vec<(u8, u8)>; 2]) -> IsomorphismData {
+    pub(crate) fn isomorphism(&self, private_cards: &[Vec<(Card, Card)>; 2]) -> IsomorphismData {
         let mut suit_isomorphism = [0; 4];
         let mut next_index = 1;
         'outer: for suit2 in 1..4 {
@@ -296,7 +305,7 @@ impl CardConfig {
         }
 
         let mut isomorphism_ref_river = vec![Vec::new(); 52];
-        let mut isomorphism_card_river: [Vec<u8>; 4] = Default::default();
+        let mut isomorphism_card_river: [Vec<Card>; 4] = Default::default();
         let mut isomorphism_swap_river: [[SwapList; 4]; 4] = Default::default();
 
         // river isomorphism
@@ -359,7 +368,7 @@ impl CardConfig {
         private_cards: &PrivateCards,
     ) {
         let swap_list = &mut swap_list[suit1 as usize];
-        let replacer = |card: u8| {
+        let replacer = |card: Card| {
             if card & 3 == suit1 {
                 card - suit1 + suit2
             } else if card & 3 == suit2 {
@@ -394,7 +403,7 @@ impl CardConfig {
 
     fn isomorphism_internal(
         isomorphism_ref: &mut Vec<u8>,
-        isomorphism_card: &mut Vec<u8>,
+        isomorphism_card: &mut Vec<Card>,
         mask: u64,
         isomorphic_suit: &[Option<u8>; 4],
     ) {

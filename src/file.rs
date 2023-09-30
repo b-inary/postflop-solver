@@ -45,7 +45,19 @@ fn encode_into_std_write<E: Encode, W: Write>(
         .map_err(|e| format!("{}: {}", err_msg, e))
 }
 
-/// Save data into standard writer.
+/// Saves data into a standard writer.
+///
+/// This function serializes the `data` into the `writer`.
+/// This is useful if you want to save the data into a custom writer like `Vec<u8>`, but if you want
+/// to save the data into a file, use [`save_data_to_file`] instead.
+///
+/// # Arguments
+///
+/// - `data`: The data to be saved, which is either a [`PostFlopGame`] or a [`BunchingData`].
+/// - `memo`: A memo string to be saved with the data.
+/// - `writer`: The writer to write the data into.
+/// - `compression_level`: The zstd compression level to use. If `None`, no compression is used.
+///   `Some(level)` can only be specified if the `zstd` feature is enabled.
 pub fn save_data_into_std_write<T: FileData, W: Write>(
     data: &T,
     memo: &str,
@@ -104,7 +116,18 @@ pub fn save_data_into_std_write<T: FileData, W: Write>(
     Ok(())
 }
 
-/// Save data into file.
+/// Saves data into a file.
+///
+/// This function serializes the `data` into a file specified by `path`.
+/// If the file already exists, it will be overwritten.
+///
+/// # Arguments
+///
+/// - `data`: The data to be saved, which is either a [`PostFlopGame`] or a [`BunchingData`].
+/// - `memo`: A memo string to be saved with the data.
+/// - `path`: The path to the file to save.
+/// - `compression_level`: The zstd compression level to use. If `None`, no compression is used.
+///   `Some(level)` can only be specified if the `zstd` feature is enabled.
 pub fn save_data_to_file<T: FileData, P: AsRef<Path>>(
     data: &T,
     memo: &str,
@@ -121,7 +144,22 @@ fn decode_from_std_read<D: Decode, R: Read>(reader: &mut R, err_msg: &str) -> Re
         .map_err(|e| format!("{}: {}", err_msg, e))
 }
 
-/// Load data from standard reader.
+/// Loads data from a standard reader.
+///
+/// This function deserializes the data from the `reader`.
+/// This is useful if you want to load the data from a custom reader like `Vec<u8>`, but if you want
+/// to load the data from a file, use [`load_data_from_file`] instead.
+///
+/// # Arguments
+///
+/// - `reader`: The reader to read the data from.
+/// - `max_memory_usage`: The maximum memory usage allowed for the data (in bytes). If `None`, no
+///   limit is set. If the estimated memory usage exceeds this value, `Err` is returned.
+///
+/// # Returns
+///
+/// A tuple of the deserialized data (either a [`PostFlopGame`] or a [`BunchingData`]) and the memo
+/// string.
 pub fn load_data_from_std_read<T: FileData, R: Read>(
     reader: &mut R,
     max_memory_usage: Option<u64>,
@@ -174,7 +212,20 @@ pub fn load_data_from_std_read<T: FileData, R: Read>(
     Ok((data, memo))
 }
 
-/// Load data from file.
+/// Loads data from a file.
+///
+/// This function deserializes the data from a file specified by `path`.
+///
+/// # Arguments
+///
+/// - `path`: The path to the file to load.
+/// - `max_memory_usage`: The maximum memory usage allowed for the data (in bytes). If `None`, no
+///   limit is set. If the estimated memory usage exceeds this value, `Err` is returned.
+///
+/// # Returns
+///
+/// A tuple of the deserialized data (either a [`PostFlopGame`] or a [`BunchingData`]) and the memo
+/// string.
 pub fn load_data_from_file<T: FileData, P: AsRef<Path>>(
     path: P,
     max_memory_usage: Option<u64>,
@@ -263,7 +314,7 @@ mod tests {
         let mut game: PostFlopGame = load_data_from_file("tmpfile.flop", None).unwrap().0;
 
         // remove tmpfile
-        // std::fs::remove_file("tmpfile.flop").unwrap();
+        std::fs::remove_file("tmpfile.flop").unwrap();
 
         game.cache_normalized_weights();
         let weights_oop = game.normalized_weights(0);

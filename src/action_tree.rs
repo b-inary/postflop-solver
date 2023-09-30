@@ -1,4 +1,5 @@
 use crate::bet_size::*;
+use crate::card::*;
 use crate::mutex_like::*;
 
 #[cfg(feature = "bincode")]
@@ -38,8 +39,8 @@ pub enum Action {
     /// All-in action with a specified amount.
     AllIn(i32),
 
-    /// Chance action with a card ID (of range [`0`, `52`)).
-    Chance(u8),
+    /// Chance action with a card ID, i.e., the dealing of a turn or river card.
+    Chance(Card),
 }
 
 /// An enum representing the board state.
@@ -59,8 +60,8 @@ pub enum BoardState {
 /// ```
 /// use postflop_solver::*;
 ///
-/// let bet_sizes = BetSizeCandidates::try_from(("60%, e, a", "2.5x")).unwrap();
-/// let donk_sizes = DonkSizeCandidates::try_from("50%").unwrap();
+/// let bet_sizes = BetSizeOptions::try_from(("60%, e, a", "2.5x")).unwrap();
+/// let donk_sizes = DonkSizeOptions::try_from("50%").unwrap();
 ///
 /// let tree_config = TreeConfig {
 ///     initial_state: BoardState::Turn,
@@ -96,20 +97,20 @@ pub struct TreeConfig {
     /// Rake cap. Must be non-negative.
     pub rake_cap: f64,
 
-    /// Bet size candidates of each player for the flop.
-    pub flop_bet_sizes: [BetSizeCandidates; 2],
+    /// Bet size options of each player for the flop.
+    pub flop_bet_sizes: [BetSizeOptions; 2],
 
-    /// Bet size candidates of each player for the turn.
-    pub turn_bet_sizes: [BetSizeCandidates; 2],
+    /// Bet size options of each player for the turn.
+    pub turn_bet_sizes: [BetSizeOptions; 2],
 
-    /// Bet size candidates of each player for the river.
-    pub river_bet_sizes: [BetSizeCandidates; 2],
+    /// Bet size options of each player for the river.
+    pub river_bet_sizes: [BetSizeOptions; 2],
 
-    /// Donk size candidates for the turn (set `None` to use default sizes).
-    pub turn_donk_sizes: Option<DonkSizeCandidates>,
+    /// Donk size options for the turn (set `None` to use default sizes).
+    pub turn_donk_sizes: Option<DonkSizeOptions>,
 
-    /// Donk size candidates for the river (set `None` to use default sizes).
-    pub river_donk_sizes: Option<DonkSizeCandidates>,
+    /// Donk size options for the river (set `None` to use default sizes).
+    pub river_donk_sizes: Option<DonkSizeOptions>,
 
     /// Add all-in action if the ratio of maximum bet size to the pot is below or equal to this
     /// value (set `0.0` to disable).
@@ -133,6 +134,9 @@ pub struct TreeConfig {
 }
 
 /// A struct representing an abstract game tree.
+///
+/// An [`ActionTree`] does not distinguish between possible chance events (i.e., the dealing of turn
+/// and river cards) and treats them as the same action.
 #[derive(Default)]
 pub struct ActionTree {
     config: TreeConfig,
@@ -538,7 +542,7 @@ impl ActionTree {
             (pot as f64 * ratio.min(max_ratio)).round() as i32
         };
 
-        let (candidates, donk_candidates, num_remaining_streets) = match node.board_state {
+        let (bet_options, donk_options, num_remaining_streets) = match node.board_state {
             BoardState::Flop => (&self.config.flop_bet_sizes, &None, 3),
             BoardState::Turn => (&self.config.turn_bet_sizes, &self.config.turn_donk_sizes, 2),
             BoardState::River => (
@@ -550,7 +554,7 @@ impl ActionTree {
 
         let mut actions = Vec::new();
 
-        if donk_candidates.is_some()
+        if donk_options.is_some()
             && matches!(info.prev_action, Action::Chance(_))
             && info.oop_call_flag
         {
@@ -558,7 +562,7 @@ impl ActionTree {
             actions.push(Action::Check);
 
             // donk bet
-            for &donk_size in &donk_candidates.as_ref().unwrap().donk {
+            for &donk_size in &donk_options.as_ref().unwrap().donk {
                 match donk_size {
                     BetSize::PotRelative(ratio) => {
                         let amount = (pot as f64 * ratio).round() as i32;
@@ -590,7 +594,7 @@ impl ActionTree {
             actions.push(Action::Check);
 
             // bet
-            for &bet_size in &candidates[player as usize].bet {
+            for &bet_size in &bet_options[player as usize].bet {
                 match bet_size {
                     BetSize::PotRelative(ratio) => {
                         let amount = (pot as f64 * ratio).round() as i32;
@@ -623,7 +627,7 @@ impl ActionTree {
 
             if !info.allin_flag {
                 // raise
-                for &bet_size in &candidates[player as usize].raise {
+                for &bet_size in &bet_options[player as usize].raise {
                     match bet_size {
                         BetSize::PotRelative(ratio) => {
                             let amount = prev_amount + (pot as f64 * ratio).round() as i32;

@@ -45,17 +45,27 @@ pub struct PostFlopGame {
     // computed from configurations
     num_combinations: f64,
     initial_weights: [Vec<f32>; 2],
-    private_cards: [Vec<(u8, u8)>; 2],
+    private_cards: [Vec<(Card, Card)>; 2],
     same_hand_index: [Vec<u16>; 2],
+
+    // indices in `private_cards` that do not conflict with the specified board cards
     valid_indices_flop: [Vec<u16>; 2],
     valid_indices_turn: Vec<[Vec<u16>; 2]>,
     valid_indices_river: Vec<[Vec<u16>; 2]>,
+
+    // hand strength information: indices are stored in ascending strength order
     hand_strength: Vec<[Vec<StrengthItem>; 2]>,
+
+    // isomorphism information
+    // - `isomorphism_ref_*`: indices to which the eliminated events should refer
+    // - `isomorphism_card_*`: list of cards eliminated by the isomorphism
+    // - `isomorphism_swap_*`: list of hand index pairs that should be swapped when applying the
+    //                         isomorphism with the specified suit
     isomorphism_ref_turn: Vec<u8>,
-    isomorphism_card_turn: Vec<u8>,
+    isomorphism_card_turn: Vec<Card>,
     isomorphism_swap_turn: [SwapList; 4],
     isomorphism_ref_river: Vec<Vec<u8>>,
-    isomorphism_card_river: [Vec<u8>; 4],
+    isomorphism_card_river: [Vec<Card>; 4],
     isomorphism_swap_river: [[SwapList; 4]; 4],
 
     // bunching effect
@@ -80,6 +90,8 @@ pub struct PostFlopGame {
     misc_memory_usage: u64,
 
     // global storage
+    // `storage*` are used as a global storage and are referenced by `PostFlopNode::storage*`.
+    // Methods like `PostFlopNode::strategy` define how the storage is used.
     node_arena: Vec<MutexLike<PostFlopNode>>,
     storage1: Vec<u8>,
     storage2: Vec<u8>,
@@ -91,8 +103,8 @@ pub struct PostFlopGame {
     action_history: Vec<usize>,
     node_history: Vec<usize>,
     is_normalized_weight_cached: bool,
-    turn: u8,
-    river: u8,
+    turn: Card,
+    river: Card,
     turn_swapped_suit: Option<(u8, u8)>,
     turn_swap: Option<u8>,
     river_swap: Option<(u8, u8)>,
@@ -110,8 +122,8 @@ pub struct PostFlopGame {
 pub struct PostFlopNode {
     prev_action: Action,
     player: u8,
-    turn: u8,
-    river: u8,
+    turn: Card,
+    river: Card,
     is_locked: bool,
     amount: i32,
     children_offset: u32,

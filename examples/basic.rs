@@ -2,6 +2,7 @@ use postflop_solver::*;
 
 fn main() {
     // ranges of OOP and IP in string format
+    // see the documentation of `Range` for more details about the format
     let oop_range = "66+,A8s+,A5s-A4s,AJo+,K9s+,KQo,QTs+,JTs,96s+,85s+,75s+,65s,54s";
     let ip_range = "QQ-22,AQs-A2s,ATo+,K5s+,KJo+,Q8s+,J8s+,T7s+,96s+,86s+,75s+,64s+,53s+";
 
@@ -14,11 +15,11 @@ fn main() {
 
     // bet sizes -> 60% of the pot, geometric size, and all-in
     // raise sizes -> 2.5x of the previous bet
-    // see the documentation of `BetSizeCandidates` for more details
-    let bet_sizes = BetSizeCandidates::try_from(("60%, e, a", "2.5x")).unwrap();
+    // see the documentation of `BetSizeOptions` for more details
+    let bet_sizes = BetSizeOptions::try_from(("60%, e, a", "2.5x")).unwrap();
 
     let tree_config = TreeConfig {
-        initial_state: BoardState::Turn,
+        initial_state: BoardState::Turn, // must match `card_config`
         starting_pot: 200,
         effective_stack: 900,
         rake_rate: 0.0,
@@ -27,13 +28,14 @@ fn main() {
         turn_bet_sizes: [bet_sizes.clone(), bet_sizes.clone()],
         river_bet_sizes: [bet_sizes.clone(), bet_sizes],
         turn_donk_sizes: None, // use default bet sizes
-        river_donk_sizes: Some(DonkSizeCandidates::try_from("50%").unwrap()),
+        river_donk_sizes: Some(DonkSizeOptions::try_from("50%").unwrap()),
         add_allin_threshold: 1.5, // add all-in if (maximum bet size) <= 1.5x pot
         force_allin_threshold: 0.15, // force all-in if (SPR after the opponent's call) <= 0.15
         merging_threshold: 0.1,
     };
 
     // build the game tree
+    // `ActionTree` can be edited manually after construction
     let action_tree = ActionTree::new(tree_config).unwrap();
     let mut game = PostFlopGame::with_config(card_config, action_tree).unwrap();
 
@@ -48,18 +50,18 @@ fn main() {
     // check memory usage
     let (mem_usage, mem_usage_compressed) = game.memory_usage();
     println!(
-        "Memory usage without compression: {:.2}GB",
+        "Memory usage without compression (32-bit float): {:.2}GB",
         mem_usage as f64 / (1024.0 * 1024.0 * 1024.0)
     );
     println!(
-        "Memory usage with compression: {:.2}GB",
+        "Memory usage with compression (16-bit integer): {:.2}GB",
         mem_usage_compressed as f64 / (1024.0 * 1024.0 * 1024.0)
     );
 
-    // allocate memory without compression
+    // allocate memory without compression (use 32-bit float)
     game.allocate_memory(false);
 
-    // allocate memory with compression
+    // allocate memory with compression (use 16-bit integer)
     // game.allocate_memory(true);
 
     // solve the game

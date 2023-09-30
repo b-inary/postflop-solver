@@ -17,13 +17,13 @@ struct DiscountParams {
 impl DiscountParams {
     pub fn new(current_iteration: u32) -> Self {
         // 0, 1, 4, 16, 64, 256, ...
-        let msb_even = match current_iteration {
+        let nearest_lower_power_of_4 = match current_iteration {
             0 => 0,
             x => 1 << ((x.leading_zeros() ^ 31) & !1),
         };
 
         let t_alpha = (current_iteration as i32 - 1).max(0) as f64;
-        let t_gamma = (current_iteration - msb_even) as f64;
+        let t_gamma = (current_iteration - nearest_lower_power_of_4) as f64;
 
         let pow_alpha = t_alpha * t_alpha.sqrt();
         let pow_gamma = (t_gamma / (t_gamma + 1.0)).powi(3);
@@ -47,11 +47,11 @@ pub fn solve<T: Game>(
     print_progress: bool,
 ) -> f32 {
     if game.is_solved() {
-        panic!("the game is already solved");
+        panic!("Game is already solved");
     }
 
     if !game.is_ready() {
-        panic!("the game is not ready");
+        panic!("Game is not ready");
     }
 
     let mut root = game.root();
@@ -108,11 +108,11 @@ pub fn solve<T: Game>(
 #[inline]
 pub fn solve_step<T: Game>(game: &T, current_iteration: u32) {
     if game.is_solved() {
-        panic!("the game is already solved");
+        panic!("Game is already solved");
     }
 
     if !game.is_ready() {
-        panic!("the game is not ready");
+        panic!("Game is not ready");
     }
 
     let mut root = game.root();

@@ -13,6 +13,10 @@ use bincode::{
 
 impl PostFlopGame {
     /// Returns the storage mode of this instance.
+    ///
+    /// The storage mode represents the deepest accessible node in the game tree.
+    /// For example, if the storage mode is `BoardState::Turn`, then the game tree
+    /// contains no information after the river deal.
     #[inline]
     pub fn storage_mode(&self) -> BoardState {
         self.storage_mode
@@ -39,7 +43,7 @@ impl PostFlopGame {
         Ok(())
     }
 
-    /// Returns the memory usage when the target storage mode is used.
+    /// Returns the memory usage when the target storage mode is used for serialization.
     #[inline]
     pub fn target_memory_usage(&self) -> u64 {
         match self.target_storage_mode {

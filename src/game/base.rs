@@ -117,7 +117,14 @@ impl Game for PostFlopGame {
 }
 
 impl PostFlopGame {
-    /// Creates a new empty [`PostFlopGame`] (needs `update_config()` before solving).
+    /// Creates a new empty [`PostFlopGame`].
+    ///
+    /// Use of this method is strongly discouraged because an instance created by this method is
+    /// invalid until [`update_config`] is called.
+    /// Please use [`with_config`] instead whenever possible.
+    ///
+    /// [`update_config`]: #method.update_config
+    /// [`with_config`]: #method.with_config
     #[inline]
     pub fn new() -> Self {
         Self::default()
@@ -166,7 +173,10 @@ impl PostFlopGame {
 
     /// Sets the bunching effect configuration.
     ///
-    /// **Warning**: Enabling bunching effect will dramatically slow down the solving process.
+    /// **Warning**: Enabling the bunching effect will significantly slow down the solving process.
+    /// Specifically, the computational complexity of the terminal evaluation will increase from
+    /// *O*(#(OOP private hands) + #(IP private hands)) to *O*(#(OOP private hands) * #(IP private
+    /// hands)).
     #[inline]
     pub fn set_bunching_effect(&mut self, bunching_data: &BunchingData) -> Result<(), String> {
         if self.state <= State::Uninitialized {
@@ -229,8 +239,14 @@ impl PostFlopGame {
     }
 
     /// Returns the card list of private hands of the given player.
+    ///
+    /// The returned list contains only card pairs with positive weight, i.e., card pairs with zero
+    /// weight are excluded. The returned list is sorted as follows:
+    ///
+    /// - Each card pair has IDs in `(low_id, high_id)` order.
+    /// - Card pairs are sorted in the lexicographic order.
     #[inline]
-    pub fn private_cards(&self, player: usize) -> &[(u8, u8)] {
+    pub fn private_cards(&self, player: usize) -> &[(Card, Card)] {
         if self.state <= State::Uninitialized {
             panic!("Game is not successfully initialized");
         }
@@ -863,7 +879,7 @@ impl PostFlopGame {
                         let bit_turn: u64 = 1 << turn;
                         if bit_turn & (flop_mask | skip_turn_mask) != 0
                             || (self.card_config.turn != NOT_DEALT
-                                && self.card_config.turn != turn as u8)
+                                && self.card_config.turn != turn as Card)
                         {
                             return Vec::new();
                         }
@@ -907,7 +923,7 @@ impl PostFlopGame {
             }
         }
 
-        let is_board_possible = |turn: u8, river: u8| {
+        let is_board_possible = |turn: Card, river: Card| {
             let bit_turn: u64 = 1 << turn;
             let bit_river: u64 = 1 << river;
             let iso_card = &self.isomorphism_card_river[turn as usize & 3];
@@ -988,7 +1004,7 @@ impl PostFlopGame {
                     let bit_turn: u64 = 1 << turn;
                     if bit_turn & (flop_mask | skip_turn_mask) != 0
                         || (self.card_config.turn != NOT_DEALT
-                            && self.card_config.turn != turn as u8)
+                            && self.card_config.turn != turn as Card)
                     {
                         return Vec::new();
                     }
@@ -1031,7 +1047,7 @@ impl PostFlopGame {
                             tmp
                         });
 
-                        let pair_index = card_pair_to_index(turn as u8, river_ref);
+                        let pair_index = card_pair_to_index(turn as Card, river_ref);
                         let arena_indices = &self.bunching_num_river[player][pair_index];
                         let player_strength = &self.bunching_strength[pair_index][player];
                         let opponent_strength = &self.bunching_strength[pair_index][player ^ 1];
@@ -1108,7 +1124,7 @@ impl PostFlopGame {
                 }
 
                 let iso_card = &self.isomorphism_card_turn;
-                let pos = iso_card.iter().position(|&c| c == turn as u8);
+                let pos = iso_card.iter().position(|&c| c == turn as Card);
 
                 let (turn_ref, swap_option) = if let Some(pos) = pos {
                     let child_index = self.isomorphism_ref_turn[pos] as usize;
@@ -1207,7 +1223,7 @@ impl PostFlopGame {
                     let bit_turn: u64 = 1 << turn;
                     if bit_turn & (flop_mask | skip_turn_mask) != 0
                         || (self.card_config.turn != NOT_DEALT
-                            && self.card_config.turn != turn as u8)
+                            && self.card_config.turn != turn as Card)
                     {
                         continue;
                     }
@@ -1224,7 +1240,7 @@ impl PostFlopGame {
             }
         }
 
-        let is_board_possible = |turn: u8, river: u8| {
+        let is_board_possible = |turn: Card, river: Card| {
             let bit_turn: u64 = 1 << turn;
             let bit_river: u64 = 1 << river;
             let iso_card = &self.isomorphism_card_river[turn as usize & 3];

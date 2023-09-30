@@ -9,6 +9,16 @@ use bincode::{Decode, Encode};
 
 /// A struct representing a player's range.
 ///
+/// The [`Range`] struct implements the [`FromStr`] trait, so you can construct a range from a string
+/// using `parse::<Range>()`. The string must be in the following format (similar to PioSOLVER):
+///
+/// - Each group is separated by a comma. (e.g., "AA,AKs")
+/// - Each group can have an optional weight separated by a colon. (e.g., "AA:0.5")
+/// - Each group must be one of the following:
+///   - Singleton (e.g., "AA", "AKs", "AKo", "AsAh")
+///   - Plus range (e.g., "TT+", "ATs+", "T9o+")
+///   - Dash range (e.g., "QQ-88", "A9s-A6s", "98o-65o")
+///
 /// # Examples
 /// ```
 /// use postflop_solver::Range;
@@ -181,8 +191,6 @@ fn suit_to_char(suit: u8) -> Result<char, String> {
 
 /// Attempts to convert a card into a string.
 ///
-/// Card ID: `"2c"` => `0`, `"2d"` => `1`, `"2h"` => `2`, ..., `"As"` => `51`.
-///
 /// # Examples
 /// ```
 /// use postflop_solver::card_to_string;
@@ -194,7 +202,7 @@ fn suit_to_char(suit: u8) -> Result<char, String> {
 /// assert!(card_to_string(52).is_err());
 /// ```
 #[inline]
-pub fn card_to_string(card: u8) -> Result<String, String> {
+pub fn card_to_string(card: Card) -> Result<String, String> {
     check_card(card)?;
     let rank = card >> 2;
     let suit = card & 3;
@@ -203,18 +211,22 @@ pub fn card_to_string(card: u8) -> Result<String, String> {
 
 /// Attempts to convert hole cards into a string.
 ///
+/// See [`Card`] for encoding of cards.
+/// The card order in the input does not matter, but the output string is sorted in descending order
+/// of card IDs.
+///
 /// # Examples
 /// ```
 /// use postflop_solver::hole_to_string;
 ///
-/// assert_eq!(hole_to_string((5, 0)), Ok("3d2c".to_string()));
-/// assert_eq!(hole_to_string((51, 10)), Ok("As4h".to_string()));
-/// assert!(hole_to_string((53, 52)).is_err());
+/// assert_eq!(hole_to_string((0, 5)), Ok("3d2c".to_string()));
+/// assert_eq!(hole_to_string((10, 51)), Ok("As4h".to_string()));
+/// assert!(hole_to_string((52, 53)).is_err());
 /// ```
 #[inline]
-pub fn hole_to_string(hole: (u8, u8)) -> Result<String, String> {
-    let max_card = u8::max(hole.0, hole.1);
-    let min_card = u8::min(hole.0, hole.1);
+pub fn hole_to_string(hole: (Card, Card)) -> Result<String, String> {
+    let max_card = Card::max(hole.0, hole.1);
+    let min_card = Card::min(hole.0, hole.1);
     Ok(format!(
         "{}{}",
         card_to_string(max_card)?,
@@ -222,26 +234,28 @@ pub fn hole_to_string(hole: (u8, u8)) -> Result<String, String> {
     ))
 }
 
-/// Attempts to convert a list of hole cards into a list of string.
+/// Attempts to convert a list of hole cards into a list of strings.
+///
+/// See [`Card`] for encoding of cards.
+/// The card order of each pair in the input does not matter, but the output string of each pair is
+/// sorted in descending order of card IDs.
 ///
 /// # Examples
 /// ```
 /// use postflop_solver::holes_to_strings;
 ///
 /// assert_eq!(
-///     holes_to_strings(&[(5, 0), (51, 10)]),
+///     holes_to_strings(&[(0, 5), (10, 51)]),
 ///     Ok(vec!["3d2c".to_string(), "As4h".to_string()])
 /// );
-/// assert!(holes_to_strings(&[(53, 52)]).is_err());
+/// assert!(holes_to_strings(&[(52, 53)]).is_err());
 /// ```
 #[inline]
-pub fn holes_to_strings(holes: &[(u8, u8)]) -> Result<Vec<String>, String> {
+pub fn holes_to_strings(holes: &[(Card, Card)]) -> Result<Vec<String>, String> {
     holes.iter().map(|&hole| hole_to_string(hole)).collect()
 }
 
 /// Attempts to read the next card from a char iterator.
-///
-/// Card ID: `"2c"` => `0`, `"2d"` => `1`, `"2h"` => `2`, ..., `"As"` => `51`.
 ///
 /// # Examples
 /// ```
@@ -255,7 +269,7 @@ pub fn holes_to_strings(holes: &[(u8, u8)]) -> Result<Vec<String>, String> {
 /// assert!(card_from_chars(&mut chars).is_err());
 /// ```
 #[inline]
-pub fn card_from_chars<T: Iterator<Item = char>>(chars: &mut T) -> Result<u8, String> {
+pub fn card_from_chars<T: Iterator<Item = char>>(chars: &mut T) -> Result<Card, String> {
     let rank_char = chars.next().ok_or_else(|| "Unexpected end".to_string())?;
     let suit_char = chars.next().ok_or_else(|| "Unexpected end".to_string())?;
 
@@ -267,8 +281,6 @@ pub fn card_from_chars<T: Iterator<Item = char>>(chars: &mut T) -> Result<u8, St
 
 /// Attempts to convert a string into a card.
 ///
-/// Card ID: `"2c"` => `0`, `"2d"` => `1`, `"2h"` => `2`, ..., `"As"` => `51`.
-///
 /// # Examples
 /// ```
 /// use postflop_solver::card_from_str;
@@ -279,7 +291,7 @@ pub fn card_from_chars<T: Iterator<Item = char>>(chars: &mut T) -> Result<u8, St
 /// assert_eq!(card_from_str("As"), Ok(51));
 /// ```
 #[inline]
-pub fn card_from_str(s: &str) -> Result<u8, String> {
+pub fn card_from_str(s: &str) -> Result<Card, String> {
     let mut chars = s.chars();
     let result = card_from_chars(&mut chars)?;
 
@@ -292,8 +304,6 @@ pub fn card_from_str(s: &str) -> Result<u8, String> {
 
 /// Attempts to convert an optionally space-separated string into a sorted flop array.
 ///
-/// Card ID: `"2c"` => `0`, `"2d"` => `1`, `"2h"` => `2`, ..., `"As"` => `51`.
-///
 /// # Examples
 /// ```
 /// use postflop_solver::flop_from_str;
@@ -303,7 +313,7 @@ pub fn card_from_str(s: &str) -> Result<u8, String> {
 /// assert!(flop_from_str("2c3d4h5s").is_err());
 /// ```
 #[inline]
-pub fn flop_from_str(s: &str) -> Result<[u8; 3], String> {
+pub fn flop_from_str(s: &str) -> Result<[Card; 3], String> {
     let mut result = [0; 3];
     let mut chars = s.chars();
 
@@ -373,7 +383,7 @@ fn parse_compound_singleton(combo: &str) -> Result<(u8, u8, Suitedness), String>
 }
 
 #[inline]
-fn check_card(card: u8) -> Result<(), String> {
+fn check_card(card: Card) -> Result<(), String> {
     if card < 52 {
         Ok(())
     } else {
@@ -438,7 +448,7 @@ impl Range {
 
     /// Attempts to create a range from a list of hands with their weights.
     #[inline]
-    pub fn from_hands_weights(hands: &[(u8, u8)], weights: &[f32]) -> Result<Self, String> {
+    pub fn from_hands_weights(hands: &[(Card, Card)], weights: &[f32]) -> Result<Self, String> {
         let mut range = Self::default();
         for (&(card1, card2), &weight) in hands.iter().zip(weights.iter()) {
             check_card(card1)?;
@@ -455,7 +465,8 @@ impl Range {
     /// Returns a list of all hands in this range and their associated weights.
     ///
     /// If there are no dead cards, pass `0` to `dead_cards_mask`.
-    pub fn get_hands_weights(&self, dead_cards_mask: u64) -> (Vec<(u8, u8)>, Vec<f32>) {
+    /// The returned hands are sorted in lexicographical order.
+    pub fn get_hands_weights(&self, dead_cards_mask: u64) -> (Vec<(Card, Card)>, Vec<f32>) {
         let mut hands = Vec::with_capacity(128);
         let mut weights = Vec::with_capacity(128);
 
@@ -542,10 +553,8 @@ impl Range {
     /// Undefined behavior if:
     ///   - `card1` or `card2` is not less than `52`
     ///   - `card1` is equal to `card2`
-    ///
-    /// Card ID: `"2c"` => `0`, `"2d"` => `1`, `"2h"` => `2`, ..., `"As"` => `51`.
     #[inline]
-    pub fn get_weight_by_cards(&self, card1: u8, card2: u8) -> f32 {
+    pub fn get_weight_by_cards(&self, card1: Card, card2: Card) -> f32 {
         self.data[card_pair_to_index(card1, card2)]
     }
 
@@ -583,10 +592,8 @@ impl Range {
     ///   - `card1` or `card2` is not less than `52`
     ///   - `card1` is equal to `card2`
     ///   - `weight` is not in the range `[0.0, 1.0]`
-    ///
-    /// Card ID: `"2c"` => `0`, `"2d"` => `1`, `"2h"` => `2`, ..., `"As"` => `51`.
     #[inline]
-    pub fn set_weight_by_cards(&mut self, card1: u8, card2: u8, weight: f32) {
+    pub fn set_weight_by_cards(&mut self, card1: Card, card2: Card, weight: f32) {
         self.data[card_pair_to_index(card1, card2)] = weight;
     }
 

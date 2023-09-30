@@ -15,6 +15,9 @@ use bincode::{
 ///   1. [`Send`], [`Sync`] and the interior mutability is needed,
 ///   2. it is (manually) guaranteed that data races will not occur, and
 ///   3. the performance is critical.
+///
+/// **Note**: This wrapper completely bypasses the "shared XOR mutable" rule of Rust.
+/// Therefore, using this wrapper is **extremely unsafe** and should be avoided whenever possible.
 #[derive(Debug)]
 #[repr(transparent)]
 pub struct MutexLike<T: ?Sized> {

@@ -117,13 +117,11 @@ impl PostFlopGame {
         }
     }
 
-    /// If the current node is a chance node, returns a list of cards that may be dealt.
+    /// If the current node is a chance node, returns a list of cards that can be dealt.
     ///
     /// The returned value is a 64-bit integer.
-    /// The `i`-th bit is set to 1 if the card of ID `i` may be dealt.
-    /// If the current node is not a chance node, returns `0`.
-    ///
-    /// Card ID: `"2c"` => `0`, `"2d"` => `1`, `"2h"` => `2`, ..., `"As"` => `51`.
+    /// The `i`-th bit is set to 1 if the card of ID `i` can be dealt (see [`Card`] for encoding).
+    /// If the current node is not a chance node, `0` is returned.
     pub fn possible_cards(&self) -> u64 {
         if self.state <= State::Uninitialized {
             panic!("Game is not successfully initialized");
@@ -262,9 +260,9 @@ impl PostFlopGame {
     /// Plays the given action. Playing an action from a terminal node is not allowed.
     ///
     /// - `action`
-    ///   - If the current node is a chance node, the `action` corresponds to the card ID of the
-    ///     dealt card. The `action` can be `usize::MAX`, in which case the actual card is chosen
-    ///     from possible cards.
+    ///   - If the current node is a chance node, the `action` corresponds to the dealt card (see
+    ///     [`Card`] for encoding). If `usize::MAX` is passed, the card is selected as the possible
+    ///     card with the lowest index.
     ///   - If the current node is not a chance node, plays the `action`-th action of
     ///     [`available_actions`].
     ///
@@ -292,9 +290,9 @@ impl PostFlopGame {
             }
 
             let actual_card = if action == usize::MAX {
-                self.possible_cards().trailing_zeros() as u8
+                self.possible_cards().trailing_zeros() as Card
             } else {
-                action as u8
+                action as Card
             };
 
             // swap the suit if swapping was performed in turn
@@ -865,9 +863,17 @@ impl PostFlopGame {
     /// - If the `i * #(private hands) + j`-th element of the `strategy` is not positive for all
     ///   `i`, the `j`-th private hand will not be locked. That is, the solver can adjust the
     ///   strategy of the `j`-th private hand.
+    ///
+    /// This method must be called after allocating memory and before solving the game.
+    /// Panics if the memory is not yet allocated or the game is already solved.
+    /// Also, panics if the current node is a terminal node or a chance node.
     pub fn lock_current_strategy(&mut self, strategy: &[f32]) {
         if self.state < State::MemoryAllocated {
             panic!("Memory is not allocated");
+        }
+
+        if self.state == State::Solved {
+            panic!("Game is already solved");
         }
 
         if self.is_terminal_node() {
@@ -919,10 +925,18 @@ impl PostFlopGame {
     }
 
     /// Unlocks the strategy of the current node.
+    ///
+    /// This method must be called after allocating memory and before solving the game.
+    /// Panics if the memory is not yet allocated or the game is already solved.
+    /// Also, panics if the current node is a terminal node or a chance node.
     #[inline]
     pub fn unlock_current_strategy(&mut self) {
         if self.state < State::MemoryAllocated {
             panic!("Memory is not allocated");
+        }
+
+        if self.state == State::Solved {
+            panic!("Game is already solved");
         }
 
         if self.is_terminal_node() {
@@ -1092,7 +1106,14 @@ impl PostFlopGame {
     }
 
     /// Internal method for calculating the equity.
-    fn equity_internal(&self, result: &mut [f64], player: usize, turn: u8, river: u8, amount: f64) {
+    fn equity_internal(
+        &self,
+        result: &mut [f64],
+        player: usize,
+        turn: Card,
+        river: Card,
+        amount: f64,
+    ) {
         let pair_index = card_pair_to_index(turn, river);
         let hand_strength = &self.hand_strength[pair_index];
         let player_strength = &hand_strength[player];

@@ -1,5 +1,9 @@
 # List of breaking changes
 
+## 2023-10-01
+
+- `BetSizeCandidates` and `DonkSizeCandidates` are renamed to `BetSizeOptions` and `DonkSizeOptions`, respectively.
+
 ## 2023-02-23
 
 - `available_actions()` method of `PostFlopGame` now returns `Vec<Action>` instead of `&[Action]`.

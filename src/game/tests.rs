@@ -704,23 +704,23 @@ fn no_assignment() {
 
 #[test]
 fn remove_lines() {
-    use crate::bet_size::BetSizeCandidates;
+    use crate::bet_size::BetSizeOptions;
     let card_config = CardConfig {
         range: ["TT+,AKo,AQs+".parse().unwrap(), "AA".parse().unwrap()],
         flop: flop_from_str("2c6dTh").unwrap(),
         ..Default::default()
     };
 
-    // Simple tree: force checks on flop, and only use 1/2 pot bets on turn and river
+    // simple tree: force checks on flop, and only use 1/2 pot bets on turn and river
     let tree_config = TreeConfig {
         starting_pot: 60,
         effective_stack: 970,
         turn_bet_sizes: [
-            BetSizeCandidates::try_from(("50%", "")).unwrap(),
+            BetSizeOptions::try_from(("50%", "")).unwrap(),
             Default::default(),
         ],
         river_bet_sizes: [
-            BetSizeCandidates::try_from(("50%", "")).unwrap(),
+            BetSizeOptions::try_from(("50%", "")).unwrap(),
             Default::default(),
         ],
         ..Default::default()
@@ -752,22 +752,22 @@ fn remove_lines() {
 
     game.allocate_memory(false);
 
-    // Check that the turn line is removed
+    // check that the turn line is removed
     game.apply_history(&[0, 0, 2]);
     assert_eq!(game.available_actions(), vec![Action::Bet(30)]);
 
-    // Check that other turn lines are correct
+    // check that other turn lines are correct
     game.apply_history(&[0, 0, 3]);
     assert_eq!(
         game.available_actions(),
         vec![Action::Check, Action::Bet(30)]
     );
 
-    // Check that the river line is removed
+    // check that the river line is removed
     game.apply_history(&[0, 0, 2, 0, 1, 3]);
     assert_eq!(game.available_actions(), vec![Action::Check]);
 
-    // Check that other river lines are correct
+    // check that other river lines are correct
     game.apply_history(&[0, 0, 2, 0, 1, 4]);
     assert_eq!(
         game.available_actions(),
@@ -780,7 +780,8 @@ fn remove_lines() {
         vec![Action::Check, Action::Bet(60)]
     );
 
-    solve(&mut game, 10, 0.05, false);
+    // check that `solve()` does not crash
+    solve(&mut game, 10, 0.01, false);
 }
 
 #[test]

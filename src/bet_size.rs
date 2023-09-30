@@ -1,29 +1,29 @@
 #[cfg(feature = "bincode")]
 use bincode::{Decode, Encode};
 
-/// Bet size candidates for the first bets and raises.
+/// Bet size options for the first bets and raises.
 ///
 /// In the `try_from()` method, multiple bet sizes can be specified using a comma-separated string.
 /// Each element must be a string ending in one of the following characters: %, x, c, r, e, a.
 ///
-/// - %: Percentage of the pot. Example: "70%"
-/// - x: Multiple of the previous bet. Valid for only raises. Example: "2.5x"
-/// - c: Constant value. Must be an integer. Example: "100c"
+/// - %: Percentage of the pot. (e.g., "70%")
+/// - x: Multiple of the previous bet. Valid for only raises. (e.g., "2.5x")
+/// - c: Constant value. Must be an integer. (e.g., "100c")
 /// - c + r: Constant value with raise cap (for FLHE). Both values must be integers.
-///          Valid only for raises. Example: "20c3r"
+///          Valid only for raises. (e.g., "20c3r")
 /// - e: Geometric size.
 ///   - e: Same as "3e" for the flop, "2e" for the turn, and "1e" (equivalent to "a") for the river.
-///   - Xe: The geometric size with X streets remaining. X must be a positive integer. Example: "2e"
-///   - XeY%: Same as Xe, but the maximum size is Y% of the pot. Example: "3e200%".
+///   - Xe: The geometric size with X streets remaining. X must be a positive integer. (e.g., "2e")
+///   - XeY%: Same as Xe, but the maximum size is Y% of the pot. (e.g., "3e200%")
 ///   - If specified for raises, the number of previous raises is subtracted from X.
-/// - a: All-in. Example: "a"
+/// - a: All-in. (e.g., "a")
 ///
 /// # Examples
 /// ```
 /// use postflop_solver::BetSize::*;
-/// use postflop_solver::BetSizeCandidates;
+/// use postflop_solver::BetSizeOptions;
 ///
-/// let bet_size = BetSizeCandidates::try_from(("50%, 100c, 2e, a", "2.5x")).unwrap();
+/// let bet_size = BetSizeOptions::try_from(("50%, 100c, 2e, a", "2.5x")).unwrap();
 ///
 /// assert_eq!(
 ///     bet_size.bet,
@@ -39,20 +39,20 @@ use bincode::{Decode, Encode};
 /// ```
 #[derive(Debug, Clone, Default, PartialEq)]
 #[cfg_attr(feature = "bincode", derive(Decode, Encode))]
-pub struct BetSizeCandidates {
-    /// Bet size candidates for first bet.
+pub struct BetSizeOptions {
+    /// Bet size options for first bet.
     pub bet: Vec<BetSize>,
 
-    /// Bet size candidates for raise.
+    /// Bet size options for raise.
     pub raise: Vec<BetSize>,
 }
 
-/// Bet size candidates for the donk bets.
+/// Bet size options for the donk bets.
 ///
-/// See the [`BetSizeCandidates`] struct for the description and examples.
+/// See the [`BetSizeOptions`] struct for the description and examples.
 #[derive(Debug, Clone, Default, PartialEq)]
 #[cfg_attr(feature = "bincode", derive(Decode, Encode))]
-pub struct DonkSizeCandidates {
+pub struct DonkSizeOptions {
     pub donk: Vec<BetSize>,
 }
 
@@ -80,12 +80,12 @@ pub enum BetSize {
     AllIn,
 }
 
-impl TryFrom<(&str, &str)> for BetSizeCandidates {
+impl TryFrom<(&str, &str)> for BetSizeOptions {
     type Error = String;
 
     /// Attempts to convert comma-separated strings into bet sizes.
     ///
-    /// See the [`BetSizeCandidates`] struct for the description and examples.
+    /// See the [`BetSizeOptions`] struct for the description and examples.
     fn try_from((bet_str, raise_str): (&str, &str)) -> Result<Self, Self::Error> {
         let mut bet_sizes = bet_str.split(',').map(str::trim).collect::<Vec<_>>();
         let mut raise_sizes = raise_str.split(',').map(str::trim).collect::<Vec<_>>();
@@ -112,16 +112,16 @@ impl TryFrom<(&str, &str)> for BetSizeCandidates {
         bet.sort_unstable_by(|l, r| l.partial_cmp(r).unwrap());
         raise.sort_unstable_by(|l, r| l.partial_cmp(r).unwrap());
 
-        Ok(BetSizeCandidates { bet, raise })
+        Ok(BetSizeOptions { bet, raise })
     }
 }
 
-impl TryFrom<&str> for DonkSizeCandidates {
+impl TryFrom<&str> for DonkSizeOptions {
     type Error = String;
 
     /// Attempts to convert comma-separated strings into bet sizes.
     ///
-    /// See the [`BetSizeCandidates`] struct for the description and examples.
+    /// See the [`BetSizeOptions`] struct for the description and examples.
     fn try_from(donk_str: &str) -> Result<Self, Self::Error> {
         let mut donk_sizes = donk_str.split(',').map(str::trim).collect::<Vec<_>>();
 
@@ -137,7 +137,7 @@ impl TryFrom<&str> for DonkSizeCandidates {
 
         donk.sort_unstable_by(|l, r| l.partial_cmp(r).unwrap());
 
-        Ok(DonkSizeCandidates { donk })
+        Ok(DonkSizeOptions { donk })
     }
 }
 
@@ -297,7 +297,7 @@ mod tests {
             (
                 "40%, 70%",
                 "",
-                BetSizeCandidates {
+                BetSizeOptions {
                     bet: vec![PotRelative(0.4), PotRelative(0.7)],
                     raise: Vec::new(),
                 },
@@ -305,7 +305,7 @@ mod tests {
             (
                 "50c, e, a,",
                 "25%, 2.5x, e200%",
-                BetSizeCandidates {
+                BetSizeOptions {
                     bet: vec![Additive(50, 0), Geometric(0, f64::INFINITY), AllIn],
                     raise: vec![PotRelative(0.25), PrevBetRelative(2.5), Geometric(0, 2.0)],
                 },
@@ -319,7 +319,7 @@ mod tests {
         let error_tests = [("2.5x", ""), (",", "")];
 
         for (bet, raise) in error_tests {
-            assert!(BetSizeCandidates::try_from((bet, raise)).is_err());
+            assert!(BetSizeOptions::try_from((bet, raise)).is_err());
         }
     }
 
@@ -328,13 +328,13 @@ mod tests {
         let tests = [
             (
                 "40%, 70%",
-                DonkSizeCandidates {
+                DonkSizeOptions {
                     donk: vec![PotRelative(0.4), PotRelative(0.7)],
                 },
             ),
             (
                 "50c, e, a,",
-                DonkSizeCandidates {
+                DonkSizeOptions {
                     donk: vec![Additive(50, 0), Geometric(0, f64::INFINITY), AllIn],
                 },
             ),
@@ -347,7 +347,7 @@ mod tests {
         let error_tests = ["2.5x", ","];
 
         for donk in error_tests {
-            assert!(DonkSizeCandidates::try_from(donk).is_err());
+            assert!(DonkSizeOptions::try_from(donk).is_err());
         }
     }
 }
