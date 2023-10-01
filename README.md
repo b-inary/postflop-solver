@@ -1,5 +1,12 @@
 # postflop-solver
 
+> [!IMPORTANT]
+> **As of October 2023, I have started developing a poker solver as a business and have decided to suspend development of this open-source project. See [this issue] for more information.**
+
+[this issue]: https://github.com/b-inary/postflop-solver/issues/46
+
+---
+
 An open-source postflop solver library written in Rust
 
 Documentation: https://b-inary.github.io/postflop_solver/postflop_solver/
