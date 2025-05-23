@@ -351,6 +351,11 @@ impl PostFlopGame {
 
         self.storage_mode = BoardState::River;
         self.target_storage_mode = BoardState::River;
+
+        // clean cache
+        self.eval_cache = Arc::new(RwLock::new(HashMap::with_capacity(
+            if self.tree_config.initial_state == BoardState::Flop { 10000 } else { 1000 }
+        )));
     }
 
     /// Checks the card configuration.

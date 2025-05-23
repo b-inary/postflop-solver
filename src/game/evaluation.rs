@@ -19,6 +19,16 @@ impl PostFlopGame {
         player: usize,
         cfreach: &[f32],
     ) {
+        // check cache
+        let cache_key = (player, node.turn, node.river);
+        if let Some(cached) = self.eval_cache.read().unwrap().get(&cache_key) {
+            if cfreach == self.weights[player ^ 1] { // cache validation
+                result.iter_mut().zip(cached).for_each(|(r, &c)| {
+                    r.write(c);
+                });
+                return;
+            }
+        }
         let pot = (self.tree_config.starting_pot + 2 * node.amount) as f64;
         let half_pot = 0.5 * pot;
         let rake = min(pot * self.tree_config.rake_rate, self.tree_config.rake_cap);
@@ -249,6 +259,13 @@ impl PostFlopGame {
                     *result.get_unchecked_mut(index as usize) = cfvalue as f32;
                 }
             }
+        }
+        // store to cache
+        if node.turn == NOT_DEALT && cfreach == self.weights[player ^ 1] {
+            let result_vec: Vec<f32> = unsafe {
+                std::slice::from_raw_parts(result.as_ptr() as *const f32, result.len()).to_vec()
+            };
+            self.eval_cache.write().unwrap().insert(cache_key, result_vec);
         }
     }
 

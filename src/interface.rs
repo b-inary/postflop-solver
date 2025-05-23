@@ -75,7 +75,7 @@ pub trait Game: Send + Sync {
     /// Returns whether the compression is enabled.
     #[doc(hidden)]
     fn is_compression_enabled(&self) -> bool {
-        false
+        true
     }
 }
 
@@ -290,6 +290,6 @@ pub trait GameNode: Send + Sync {
     /// Hint for parallelization. By default, it is set to `false`.
     #[doc(hidden)]
     fn enable_parallelization(&self) -> bool {
-        false
+        true
     }
 }

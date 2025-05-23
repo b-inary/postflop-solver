@@ -13,6 +13,8 @@ use crate::action_tree::*;
 use crate::card::*;
 use crate::mutex_like::*;
 use std::collections::BTreeMap;
+use std::sync::{Arc, RwLock};
+use std::collections::HashMap;
 
 #[cfg(feature = "bincode")]
 use bincode::{Decode, Encode};
@@ -112,6 +114,9 @@ pub struct PostFlopGame {
     weights: [Vec<f32>; 2],
     normalized_weights: [Vec<f32>; 2],
     cfvalues_cache: [Vec<f32>; 2],
+
+    // add cache
+    eval_cache: Arc<RwLock<HashMap<(usize, u8, u8), Vec<f32>>>>,
 }
 
 /// A struct representing a node in a postflop game tree.

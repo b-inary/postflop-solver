@@ -159,9 +159,9 @@ fn solve_recursive<T: Game>(
 
     // allocate memory for storing the counterfactual values
     #[cfg(feature = "custom-alloc")]
-    let cfv_actions = MutexLike::new(Vec::with_capacity_in(num_actions * num_hands, StackAlloc));
+    let mut cfv_actions = MutexLike::new(Vec::with_capacity_in(num_actions * num_hands, StackAlloc));
     #[cfg(not(feature = "custom-alloc"))]
-    let cfv_actions = MutexLike::new(Vec::with_capacity(num_actions * num_hands));
+    let mut cfv_actions = MutexLike::new(Vec::with_capacity(num_actions * num_hands));
 
     // if the `node` is chance
     if node.is_chance() {
@@ -177,17 +177,45 @@ fn solve_recursive<T: Game>(
         );
         unsafe { cfreach_updated.set_len(cfreach.len()) };
 
-        // compute the counterfactual values of each action
-        for_each_child(node, |action| {
-            solve_recursive(
-                row_mut(cfv_actions.lock().spare_capacity_mut(), action, num_hands),
-                game,
-                &mut node.play(action),
-                player,
-                &cfreach_updated,
-                params,
-            );
-        });
+        #[cfg(feature = "rayon")]
+        if num_actions > 4 && node.enable_parallelization() {
+            use rayon::prelude::*;
+            
+            let cfv_actions_par = std::sync::Mutex::new(cfv_actions);
+            
+            (0..num_actions).into_par_iter().for_each(|action| {
+                let mut local_result = vec![MaybeUninit::<f32>::uninit(); num_hands];
+                solve_recursive(
+                    &mut local_result,
+                    game,
+                    &mut node.play(action),
+                    player,
+                    &cfreach_updated,
+                    params,
+                );
+                
+                // write to shared memory
+                let cfv_locked = cfv_actions_par.lock().unwrap();
+                let start = action * num_hands;
+                for (i, val) in local_result.iter().enumerate() {
+                    cfv_locked.lock().spare_capacity_mut()[start + i] = *val;
+                }
+            });
+            
+            cfv_actions = cfv_actions_par.into_inner().unwrap();
+        } else {
+            // compute the counterfactual values of each action
+            for_each_child(node, |action| {
+                solve_recursive(
+                    row_mut(cfv_actions.lock().spare_capacity_mut(), action, num_hands),
+                    game,
+                    &mut node.play(action),
+                    player,
+                    &cfreach_updated,
+                    params,
+                );
+            });
+        }
 
         // use 64-bit floating point values
         #[cfg(feature = "custom-alloc")]
