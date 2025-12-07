@@ -174,8 +174,8 @@ impl Encode for PostFlopGame {
     }
 }
 
-impl Decode for PostFlopGame {
-    fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
+impl Decode<()> for PostFlopGame {
+    fn decode<D: Decoder<Context = ()>>(decoder: &mut D) -> Result<Self, DecodeError> {
         // version check
         let version = String::decode(decoder)?;
         if version != VERSION_STR {
@@ -292,7 +292,7 @@ impl Encode for PostFlopNode {
     }
 }
 
-impl Decode for PostFlopNode {
+impl Decode<()> for PostFlopNode {
     fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
         // node instance
         let mut node = Self {

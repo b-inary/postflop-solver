@@ -27,7 +27,7 @@ pub enum DataType {
 }
 
 /// A trait for data that can be saved into a file.
-pub trait FileData: Decode + Encode {
+pub trait FileData: Decode<()> + Encode  {
     #[doc(hidden)]
     fn data_type() -> DataType;
     #[doc(hidden)]
@@ -139,7 +139,7 @@ pub fn save_data_to_file<T: FileData, P: AsRef<Path>>(
     save_data_into_std_write(data, memo, &mut writer, compression_level)
 }
 
-fn decode_from_std_read<D: Decode, R: Read>(reader: &mut R, err_msg: &str) -> Result<D, String> {
+fn decode_from_std_read< D: Decode<()>, R: Read>(reader: &mut R, err_msg: &str) -> Result<D, String> {
     bincode::decode_from_std_read(reader, bincode::config::standard())
         .map_err(|e| format!("{}: {}", err_msg, e))
 }

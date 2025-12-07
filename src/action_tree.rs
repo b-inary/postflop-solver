@@ -390,10 +390,12 @@ impl ActionTree {
             let mut node = &*self.root.lock() as *const ActionTreeNode;
             for action in &self.history {
                 while (*node).is_chance() {
-                    node = &*(*node).children[0].lock();
+                    let node_ref = &*node;
+                    node = &*node_ref.children[0].lock();
                 }
                 let index = (*node).actions.iter().position(|x| x == action).unwrap();
-                node = &*(*node).children[index].lock();
+                let node_ref = &*node;
+                node = &*node_ref.children[index].lock();
             }
             &*node
         }
@@ -405,7 +407,8 @@ impl ActionTree {
         unsafe {
             let mut node = self.current_node() as *const ActionTreeNode;
             while (*node).is_chance() {
-                node = &*(*node).children[0].lock();
+                let node_ref = &*node;
+                node = &*node_ref.children[0].lock();
             }
             &*node
         }
