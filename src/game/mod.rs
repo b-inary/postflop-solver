@@ -11,6 +11,7 @@ mod tests;
 
 use crate::action_tree::*;
 use crate::card::*;
+use crate::hand::HandClassification;
 use crate::mutex_like::*;
 use std::collections::BTreeMap;
 
@@ -98,6 +99,21 @@ pub struct PostFlopGame {
     storage_ip: Vec<u8>,
     storage_chance: Vec<u8>,
     locking_strategy: BTreeMap<usize, Vec<f32>>,
+
+    // 深度限制求解：全下权益矩阵
+    // 维度: [hero_hand_index * num_villain_hands + villain_hand_index]
+    // hero = OOP (player 0)，值 = hero hand vs villain hand 的全下期望收益
+    equity_matrix: Vec<f32>,
+    // DL Turn 截断时使用：按转牌索引的 52 个 equity matrix
+    equity_matrix_turn: Vec<Vec<f32>>,
+
+    // 深度限制求解：手牌分类
+    // hand_categories[player][hand_index]: 翻牌截断或转牌已知时的分类
+    hand_categories: [Vec<HandClassification>; 2],
+    // hand_categories_turn[player][turn_card][hand_index]: 转牌变化时的分类
+    hand_categories_turn: [Vec<Vec<HandClassification>>; 2],
+    // air_ratio[player]: 玩家范围内在当前翻牌面纯空气牌的比例
+    air_ratio: [f64; 2],
 
     // result interpreter
     action_history: Vec<usize>,

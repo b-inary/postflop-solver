@@ -229,6 +229,12 @@ impl Default for PostFlopNode {
 }
 
 impl PostFlopNode {
+    /// 是否为深度限制终端节点（截断的 street 转换点）
+    #[inline]
+    pub(super) fn is_depth_limit_terminal(&self) -> bool {
+        self.player & PLAYER_DEPTH_LIMIT_FLAG != 0
+    }
+
     #[inline]
     pub(super) fn children(&self) -> &[MutexLike<Self>] {
         // This is safe because `MutexLike<T>` is a `repr(transparent)` wrapper around `T`.

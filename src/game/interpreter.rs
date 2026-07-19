@@ -1,4 +1,5 @@
 use super::*;
+use crate::hand::{classify_hand, detect_board_texture, BoardCorrectionContext, HandBucket};
 use crate::interface::*;
 use crate::sliceop::*;
 use crate::utility::*;
@@ -688,6 +689,63 @@ impl PostFlopGame {
         }
 
         ret
+    }
+
+    /// 返回经过手牌桶修正后的期望值。
+    ///
+    /// 如果 `TreeConfig::bucket_correction` 为 `None`，返回原始 EV（无修正）。
+    /// 否则，对每手牌 EV 应用 `α_dynamic = 1 + (α_static - 1) × β(SPR)` 修正。
+    ///
+    /// 此方法仅在根节点且 DL 模式下有意义。
+    pub fn expected_values_with_bucket_correction(&self, player: usize) -> Vec<f32> {
+        let mut evs = self.expected_values(player);
+
+        let correction = match &self.tree_config.bucket_correction {
+            Some(c) => c,
+            None => return evs,
+        };
+
+        let spr = self.tree_config.effective_stack as f64 / self.tree_config.starting_pot as f64;
+        let flop = self.card_config.flop;
+        let cards = self.private_cards(player);
+        let turn = self.card_config.turn;
+
+        for (i, &(c1, c2)) in cards.iter().enumerate() {
+            let (cat, draw) = classify_hand((c1, c2), flop, turn);
+            let bucket = HandBucket::classify(cat, draw, (c1, c2), flop);
+            let alpha = correction.get(player, bucket, spr);
+            evs[i] *= alpha as f32;
+        }
+
+        evs
+    }
+
+    /// 返回经过牌面纹理修正后的期望值（v2 方案）。
+    ///
+    /// 自动检测牌面纹理类型，根据 SPR、位置、手牌桶等信息，
+    /// 对每手牌 DL EV 应用对应的修正函数。
+    pub fn expected_values_with_board_correction(&self, player: usize) -> Vec<f32> {
+        let mut evs = self.expected_values(player);
+
+        let flop = self.card_config.flop;
+        let texture = detect_board_texture(flop);
+        let is_turn_mode = self.tree_config.depth_limit.map_or(true, |dl| dl == BoardState::Turn);
+        let ctx = if is_turn_mode {
+            BoardCorrectionContext::new_turn(texture)
+        } else {
+            BoardCorrectionContext::new(texture)
+        };
+
+        let cards = self.private_cards(player);
+        let turn = self.card_config.turn;
+
+        for (i, &(c1, c2)) in cards.iter().enumerate() {
+            let (cat, draw) = classify_hand((c1, c2), flop, turn);
+            let bucket = HandBucket::classify(cat, draw, (c1, c2), flop);
+            evs[i] = ctx.apply(evs[i], player, bucket, draw, (c1, c2));
+        }
+
+        evs
     }
 
     /// Returns the expected values of each action of each private hand of the given player.

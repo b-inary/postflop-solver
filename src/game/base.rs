@@ -1,5 +1,7 @@
 use super::*;
 use crate::bunching::*;
+use crate::card::NOT_DEALT;
+use crate::hand::{classify_hand, HandBucket};
 use crate::interface::*;
 use crate::utility::*;
 use std::mem::{self, MaybeUninit};
@@ -43,7 +45,9 @@ impl Game for PostFlopGame {
         player: usize,
         cfreach: &[f32],
     ) {
-        if self.bunching_num_dead_cards == 0 {
+        if node.is_depth_limit_terminal() {
+            self.evaluate_depth_limited(result, node, player, cfreach);
+        } else if self.bunching_num_dead_cards == 0 {
             self.evaluate_internal(result, node, player, cfreach);
         } else {
             self.evaluate_internal_bunching(result, node, player, cfreach);
@@ -73,7 +77,8 @@ impl Game for PostFlopGame {
 
     #[inline]
     fn is_ready(&self) -> bool {
-        self.state == State::MemoryAllocated && self.storage_mode == BoardState::River
+        let expected_mode = self.tree_config.depth_limit.unwrap_or(BoardState::River);
+        self.state == State::MemoryAllocated && self.storage_mode == expected_mode
     }
 
     #[inline]
@@ -314,13 +319,53 @@ impl PostFlopGame {
     }
 
     /// Allocates the memory.
+    /// 用自定义权重替换初始手牌权重。
+    ///
+    /// 用于跨街范围传递：翻牌圈 DL 求解后，将 `normalized_weights`
+    /// 传入转牌圈或河牌圈子博弈。
+    ///
+    /// `weights[player]` 的长度必须与 `private_cards[player]` 一致。
+    pub fn set_custom_initial_weights(&mut self, weights: [Vec<f32>; 2]) {
+        if self.state <= State::Uninitialized {
+            panic!("Game is not successfully initialized");
+        }
+        for player in 0..2 {
+            assert_eq!(
+                weights[player].len(),
+                self.initial_weights[player].len(),
+                "Weight vector length mismatch for player {}",
+                player
+            );
+            self.initial_weights[player] = weights[player].clone();
+        }
+        // 重新计算 num_combinations
+        self.num_combinations = 0.0;
+        for (&(c1, c2), &w1) in self.private_cards[0]
+            .iter()
+            .zip(self.initial_weights[0].iter())
+        {
+            let oop_mask: u64 = (1 << c1) | (1 << c2);
+            for (&(c3, c4), &w2) in self.private_cards[1]
+                .iter()
+                .zip(self.initial_weights[1].iter())
+            {
+                let ip_mask: u64 = (1 << c3) | (1 << c4);
+                if oop_mask & ip_mask == 0 {
+                    self.num_combinations += w1 as f64 * w2 as f64;
+                }
+            }
+        }
+    }
+
     pub fn allocate_memory(&mut self, enable_compression: bool) {
         if self.state <= State::Uninitialized {
             panic!("Game is not successfully initialized");
         }
 
+        let effective_mode = self.tree_config.depth_limit.unwrap_or(BoardState::River);
+
         if self.state == State::MemoryAllocated
-            && self.storage_mode == BoardState::River
+            && self.storage_mode == effective_mode
             && self.is_compression_enabled == enable_compression
         {
             return;
@@ -349,8 +394,30 @@ impl PostFlopGame {
 
         self.allocate_memory_nodes();
 
-        self.storage_mode = BoardState::River;
-        self.target_storage_mode = BoardState::River;
+        self.storage_mode = effective_mode;
+        self.target_storage_mode = effective_mode;
+
+        // 深度限制求解：预计算全下权益矩阵和手牌分类
+        if self.tree_config.depth_limit.is_some() {
+            self.compute_equity_matrix();
+            self.compute_hand_categories();
+
+            // 计算对手范围中纯空气比例（用于 fold equity 估计）
+            for player in 0..2 {
+                let flop = self.card_config.flop;
+                let hands = &self.private_cards[player];
+                let weights = &self.initial_weights[player];
+                let total_w: f64 = weights.iter().map(|&w| w as f64).sum();
+                let mut air_w: f64 = 0.0;
+                for (i, &(c1, c2)) in hands.iter().enumerate() {
+                    let (cat, draw) = classify_hand((c1, c2), flop, NOT_DEALT);
+                    if HandBucket::classify(cat, draw, (c1, c2), flop) == HandBucket::Trash {
+                        air_w += weights[i] as f64;
+                    }
+                }
+                self.air_ratio[player] = if total_w > 0.0 { air_w / total_w } else { 0.0 };
+            }
+        }
     }
 
     /// Checks the card configuration.
@@ -501,6 +568,8 @@ impl PostFlopGame {
             }
         }
 
+        // valid_indices 和 hand_strength 始终需要计算
+        // all-in 路径不受 depth_limit 限制，展开到 showdown 时需要这些数据
         (
             self.valid_indices_flop,
             self.valid_indices_turn,
@@ -587,25 +656,48 @@ impl PostFlopGame {
     /// Counts the number of nodes in the game tree.
     #[inline]
     fn count_num_nodes(&self) -> [u64; 3] {
+        let depth_limit = self.tree_config.depth_limit;
+
+        // 检查是否有 all-in 路径绕过深度限制
+        let has_allin_bypass = depth_limit.map_or(false, |dl| {
+            has_allin_beyond_depth_limit(&self.action_root.lock(), dl, false)
+        });
+
         let (turn_coef, river_coef) = match (self.card_config.turn, self.card_config.river) {
             (NOT_DEALT, _) => {
-                let mut river_coef = 0;
-                let flop = self.card_config.flop;
-                let skip_cards = &self.isomorphism_card_turn;
-                let flop_mask: u64 = (1 << flop[0]) | (1 << flop[1]) | (1 << flop[2]);
-                let skip_mask: u64 = skip_cards.iter().map(|&card| 1 << card).sum();
-                for turn in 0..52 {
-                    if (1 << turn) & (flop_mask | skip_mask) == 0 {
-                        river_coef += 48 - self.isomorphism_card_river[turn & 3].len();
+                if depth_limit == Some(BoardState::Flop) && !has_allin_bypass {
+                    (0, 0)
+                } else {
+                    let mut river_coef = 0;
+                    let flop = self.card_config.flop;
+                    let skip_cards = &self.isomorphism_card_turn;
+                    let flop_mask: u64 = (1 << flop[0]) | (1 << flop[1]) | (1 << flop[2]);
+                    let skip_mask: u64 = skip_cards.iter().map(|&card| 1 << card).sum();
+                    for turn in 0..52 {
+                        if (1 << turn) & (flop_mask | skip_mask) == 0 {
+                            river_coef += 48 - self.isomorphism_card_river[turn & 3].len();
+                        }
                     }
+                    let river_coef = if depth_limit == Some(BoardState::Turn) && !has_allin_bypass {
+                        0
+                    } else {
+                        river_coef
+                    };
+                    (49 - self.isomorphism_card_turn.len(), river_coef)
                 }
-                (49 - self.isomorphism_card_turn.len(), river_coef)
             }
-            (turn, NOT_DEALT) => (1, 48 - self.isomorphism_card_river[turn as usize & 3].len()),
+            (turn, NOT_DEALT) => {
+                if depth_limit == Some(BoardState::Turn) && !has_allin_bypass {
+                    (1, 0)
+                } else {
+                    (1, 48 - self.isomorphism_card_river[turn as usize & 3].len())
+                }
+            }
             _ => (0, 1),
         };
 
-        let num_action_nodes = count_num_action_nodes(&self.action_root.lock());
+        let num_action_nodes =
+            count_num_action_nodes(&self.action_root.lock(), self.tree_config.initial_state);
 
         [
             num_action_nodes[0],

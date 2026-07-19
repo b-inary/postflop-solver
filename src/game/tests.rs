@@ -1,4 +1,5 @@
 use super::*;
+use crate::hand::{classify_hand, DrawType, HandCategory};
 use crate::range::*;
 use crate::solver::*;
 use crate::utility::*;
@@ -1247,4 +1248,305 @@ fn solve_pio_preset_raked() {
     // verified by PioSOLVER Free (but not theoretically guaranteed to be the same)
     assert!((root_ev_oop - 95.57).abs() < 0.2);
     assert!((root_ev_ip - 66.98).abs() < 0.2);
+}
+
+#[test]
+fn depth_limit_flop_all_check() {
+    // 测试深度限制求解：depth_limit = Flop
+    // 使用较小的 range 以加速权益矩阵计算
+    let range_str = "TT+,AK";
+    let card_config = CardConfig {
+        range: [range_str.parse().unwrap(), range_str.parse().unwrap()],
+        flop: flop_from_str("Td9d6h").unwrap(),
+        ..Default::default()
+    };
+
+    let tree_config = TreeConfig {
+        starting_pot: 60,
+        effective_stack: 970,
+        depth_limit: Some(BoardState::Flop),
+        ..Default::default()
+    };
+
+    let action_tree = ActionTree::new(tree_config).unwrap();
+    let mut game = PostFlopGame::with_config(card_config, action_tree).unwrap();
+
+    game.allocate_memory(false);
+
+    // 深度限制树应该非常小
+    let (uncompressed, _) = game.memory_usage();
+    assert!(
+        uncompressed < 1024 * 1024,
+        "Depth-limited tree should be small, got {} bytes",
+        uncompressed
+    );
+
+    // 求解并验证收敛
+    finalize(&mut game);
+
+    game.cache_normalized_weights();
+    let weights_oop = game.normalized_weights(0);
+    let weights_ip = game.normalized_weights(1);
+    let ev_oop = compute_average(&game.expected_values(0), weights_oop);
+    let ev_ip = compute_average(&game.expected_values(1), weights_ip);
+
+    // 对称 range + 无 rake，EV 应接近 half-pot = 30
+    // TT+ 在 Td9d6h 上有 equity 差异，容忍较大误差
+    assert!(
+        (ev_oop - ev_ip).abs() < 10.0,
+        "OOP and IP EV should be similar: OOP={}, IP={}",
+        ev_oop,
+        ev_ip
+    );
+}
+
+#[test]
+fn depth_limit_turn() {
+    // 测试 depth_limit = Turn
+    let range_str = "TT+,AK";
+    let card_config = CardConfig {
+        range: [range_str.parse().unwrap(), range_str.parse().unwrap()],
+        flop: flop_from_str("Td9d6h").unwrap(),
+        turn: card_from_str("Qc").unwrap(),
+        ..Default::default()
+    };
+
+    let tree_config = TreeConfig {
+        initial_state: BoardState::Turn,
+        starting_pot: 60,
+        effective_stack: 970,
+        depth_limit: Some(BoardState::Turn),
+        ..Default::default()
+    };
+
+    let action_tree = ActionTree::new(tree_config).unwrap();
+    let mut game = PostFlopGame::with_config(card_config, action_tree).unwrap();
+
+    game.allocate_memory(false);
+
+    finalize(&mut game);
+
+    game.cache_normalized_weights();
+    let weights_oop = game.normalized_weights(0);
+    let weights_ip = game.normalized_weights(1);
+    let ev_oop = compute_average(&game.expected_values(0), weights_oop);
+    let ev_ip = compute_average(&game.expected_values(1), weights_ip);
+
+    // 对称 range + 无 rake
+    assert!(
+        (ev_oop - ev_ip).abs() < 10.0,
+        "OOP and IP EV should be similar: OOP={}, IP={}",
+        ev_oop,
+        ev_ip
+    );
+}
+
+#[test]
+fn classify_monster() {
+    let flop = flop_from_str("Td9d6h").unwrap();
+
+    // 暗三条: 66 on Td9d6h → trips → Monster
+    let cards = (card_from_str("6c").unwrap(), card_from_str("6s").unwrap());
+    let (cat, _) = classify_hand(cards, flop, NOT_DEALT);
+    assert_eq!(cat, HandCategory::Monster);
+
+    // 两对: T9 on Td9d6h → two pair → Monster
+    let cards2 = (card_from_str("Tc").unwrap(), card_from_str("9c").unwrap());
+    let (cat2, _) = classify_hand(cards2, flop, NOT_DEALT);
+    assert_eq!(cat2, HandCategory::Monster);
+
+    // 同花: 5 diamonds → flush → Monster
+    let flop_d = flop_from_str("2d3d4d").unwrap();
+    let cards_d = (card_from_str("Td").unwrap(), card_from_str("Ad").unwrap());
+    let (cat3, _) = classify_hand(cards_d, flop_d, NOT_DEALT);
+    assert_eq!(cat3, HandCategory::Monster);
+}
+
+#[test]
+fn classify_overpair() {
+    let flop = flop_from_str("8d7h3c").unwrap();
+    // AA → overpair (rank 12 > max board rank 6)
+    let cards = (card_from_str("Ac").unwrap(), card_from_str("As").unwrap());
+    let (cat, draw) = classify_hand(cards, flop, NOT_DEALT);
+    assert_eq!(cat, HandCategory::Overpair);
+    assert_eq!(draw, DrawType::None);
+}
+
+#[test]
+fn classify_top_pair() {
+    let flop = flop_from_str("Kh9d4c").unwrap(); // ranks: 11, 7, 2
+
+    // KQ → top pair K, kicker Q (rank 10) >= median (7) → TPTK
+    let cards = (card_from_str("Kc").unwrap(), card_from_str("Qd").unwrap());
+    let (cat, _) = classify_hand(cards, flop, NOT_DEALT);
+    assert_eq!(cat, HandCategory::TopPairGoodKicker);
+
+    // K5 → top pair K, kicker 5 (rank 3) < median (7) → TPWK
+    let cards2 = (card_from_str("Kc").unwrap(), card_from_str("5d").unwrap());
+    let (cat2, _) = classify_hand(cards2, flop, NOT_DEALT);
+    assert_eq!(cat2, HandCategory::TopPairBadKicker);
+}
+
+#[test]
+fn classify_draws() {
+    // 同花听牌: AhJh on Kh9h4c → 4 hearts
+    let flop = flop_from_str("Kh9h4c").unwrap();
+    let cards = (card_from_str("Ah").unwrap(), card_from_str("Jh").unwrap());
+    let (cat, draw) = classify_hand(cards, flop, NOT_DEALT);
+    // Ah=rank12, Jh=rank9. max_board=K(rank11). 12>11 but 9<11 → not TwoOvercards → Air
+    assert_eq!(cat, HandCategory::Air);
+    assert_eq!(draw, DrawType::FlushDraw);
+
+    // OESD: JT on 9d8h3c → ranks {1,6,7,8,9}
+    // window [5..9]={5,6,7,8,9}: has 6,7,8,9=4, missing 5 (endpoint) → OESD
+    let flop2 = flop_from_str("9d8h3c").unwrap();
+    let cards2 = (card_from_str("Jc").unwrap(), card_from_str("Tc").unwrap());
+    let (cat2, draw2) = classify_hand(cards2, flop2, NOT_DEALT);
+    // J=rank9, T=rank8. max_board=9d(rank7). 9>7 and 8>7 → TwoOvercards
+    // Actually: 9d=rank7, 8h=rank6, 3c=rank1. max_board=7. J=9>7, T=8>7 → TwoOvercards
+    assert_eq!(cat2, HandCategory::TwoOvercards);
+    assert_eq!(draw2, DrawType::OESD);
+}
+
+#[test]
+fn classify_gutshot() {
+    // Gutshot: QT on 5c3d2h → ranks: Q(10),T(8),5(3),3(1),2(0) = {0,1,3,8,10}
+    // window [8..12]={8,9,10,11,12}: has 8,10 = 2. No.
+    // window [7..11]={7,8,9,10,11}: has 8,10 = 2. No.
+    // Hmm. Let me try QT on 5c4d2h: ranks {0,2,3,8,10}
+    // window [8..12]={8,9,10,11,12}: 8,10=2.
+    // Actually need 4 in a 5-window. Try AQ on Jc5d3h:
+    // A(12),Q(10),J(9),5(3),3(1) = {1,3,9,10,12}
+    // window [8..12]={8,9,10,11,12}: 9,10,12=3. No.
+    // Try KQ on Jc5d3h: K(11),Q(10),J(9),5(3),3(1) = {1,3,9,10,11}
+    // window [8..12]={8,9,10,11,12}: 9,10,11=3.
+    // window [7..11]={7,8,9,10,11}: 9,10,11=3.
+    // Still 3. Need exactly 4 in a window.
+    // KJ on QT5: K(11),J(9),Q(10),T(8),5(3) = {3,8,9,10,11}
+    // window [7..11]={7,8,9,10,11}: 8,9,10,11=4! missing 7 (endpoint) → OESD
+    // That's OESD, not gutshot.
+    // For gutshot: need internal gap. AT on KJ2:
+    // A(12),T(8),K(11),J(9),2(0) = {0,8,9,11,12}
+    // window [8..12]={8,9,10,11,12}: 8,9,11,12=4! missing 10 (internal) → Gutshot!
+    let flop = flop_from_str("KdJh2c").unwrap();
+    let cards = (card_from_str("Ac").unwrap(), card_from_str("Tc").unwrap());
+    let (cat, draw) = classify_hand(cards, flop, NOT_DEALT);
+    // A=12, T=8. max_board=K(11). 12>11 but 8<11 → not TwoOvercards → Air
+    assert_eq!(cat, HandCategory::Air);
+    assert_eq!(draw, DrawType::Gutshot);
+}
+
+#[test]
+fn classify_combo_draw() {
+    // 超对: TcTh on 9h8h3c → pocket TT, pair_rank=8 > max_board=7 → Overpair, no draw
+    let flop = flop_from_str("9h8h3c").unwrap();
+    let cards = (card_from_str("Tc").unwrap(), card_from_str("Th").unwrap());
+    let (cat, draw) = classify_hand(cards, flop, NOT_DEALT);
+    assert_eq!(cat, HandCategory::Overpair);
+    assert_eq!(draw, DrawType::None);
+
+    // 顶对弱踢脚 + 同花听: Kc9c on Kd8c3c → pairs K, 4 clubs → TPWK + FlushDraw
+    // K(11)=max_board. Kicker=9(rank7). Board ranks: K(11),8(6),3(1). median=6. 7>=6 → TPTK actually
+    // Let me recalculate: sorted_board_ranks = [1,6,11], median = sorted[3/2] = sorted[1] = 6
+    // kicker=7 >= 6 → TPTK. Hmm.
+    // Use Kc6c on Kd8c3c: kicker=6(rank4). median=6(rank of 8). 4<6 → TPWK
+    let flop2 = flop_from_str("Kd8c3c").unwrap();
+    let cards2 = (card_from_str("Kc").unwrap(), card_from_str("6c").unwrap());
+    let (cat2, draw2) = classify_hand(cards2, flop2, NOT_DEALT);
+    // Clubs: Kc, 6c, 8c, 3c = 4 clubs → FlushDraw
+    assert_eq!(cat2, HandCategory::TopPairBadKicker);
+    assert_eq!(draw2, DrawType::FlushDraw);
+}
+
+#[test]
+fn classify_two_overcards() {
+    let flop = flop_from_str("8d7h3c").unwrap(); // max board rank = 6 (8)
+                                                 // AK → both ranks (12, 11) > max board rank (6) → TwoOvercards
+    let cards = (card_from_str("Ac").unwrap(), card_from_str("Kc").unwrap());
+    let (cat, draw) = classify_hand(cards, flop, NOT_DEALT);
+    assert_eq!(cat, HandCategory::TwoOvercards);
+    assert_eq!(draw, DrawType::None);
+}
+
+#[test]
+fn classify_medium_bottom_pair() {
+    let flop = flop_from_str("Kh9d4c").unwrap(); // ranks: 11, 7, 2
+
+    // 99 on K94 → pocket 9s, one 9 also on board → num_pairs=2 (9 and board has no other pair)
+    // Wait: hero has 9c,9s. Board has 9d. rank_count[7]=3 → num_trips=1 → Monster!
+    // That's correct: hero + board = three 9s = trips.
+    let cards = (card_from_str("9c").unwrap(), card_from_str("9s").unwrap());
+    let (cat, _) = classify_hand(cards, flop, NOT_DEALT);
+    assert_eq!(cat, HandCategory::Monster); // trips (99 + board 9)
+
+    // Use a different board without matching hero ranks
+    let flop2 = flop_from_str("Kh7d3c").unwrap(); // ranks: 11, 5, 1
+                                                  // 99 → pocket pair, no board match → pair_rank=7, 7>1 and 7<11 → MediumPair
+    let cards2 = (card_from_str("9c").unwrap(), card_from_str("9s").unwrap());
+    let (cat2, _) = classify_hand(cards2, flop2, NOT_DEALT);
+    assert_eq!(cat2, HandCategory::MediumPair);
+
+    // 44 → pocket pair, pair_rank=2, 2>1(min) and 2<11(max) → MediumPair
+    let cards3 = (card_from_str("4s").unwrap(), card_from_str("4h").unwrap());
+    let (cat3, _) = classify_hand(cards3, flop2, NOT_DEALT);
+    assert_eq!(cat3, HandCategory::MediumPair);
+
+    // For BottomPair: use a board where hero pairs the lowest card
+    let flop3 = flop_from_str("Kh9d4c").unwrap(); // ranks: 11, 7, 2
+                                                  // 55 → pair_rank=3, 3>2(min) and 3<11(max) → MediumPair
+    let cards4 = (card_from_str("5c").unwrap(), card_from_str("5h").unwrap());
+    let (cat4, _) = classify_hand(cards4, flop3, NOT_DEALT);
+    assert_eq!(cat4, HandCategory::MediumPair);
+
+    // 22 → pair_rank=0, 0<2(min_board) → Overpair? No, 0 < 2 → BottomPair
+    // Actually: 0 < min_board(2). In classify_pair: pair_rank(0) < min_board_rank(2) → BottomPair
+    // Wait, pair_rank(0) > min_board_rank(2) is false. pair_rank(0) == min_board_rank(2) is false.
+    // pair_rank(0) > max_board_rank(11) → no. pair_rank == max → no. pair_rank > min → 0>2? no.
+    // So falls to else → BottomPair. But 22 is actually BELOW the bottom pair of the board.
+    // This is correct classification: 22 on K94 is a bottom pair (below everything).
+    let cards5 = (card_from_str("2s").unwrap(), card_from_str("2h").unwrap());
+    let (cat5, _) = classify_hand(cards5, flop3, NOT_DEALT);
+    assert_eq!(cat5, HandCategory::BottomPair);
+}
+
+#[test]
+fn depth_limit_with_category_correction() {
+    let range_str = "TT+,AK";
+    let card_config = CardConfig {
+        range: [range_str.parse().unwrap(), range_str.parse().unwrap()],
+        flop: flop_from_str("Td9d6h").unwrap(),
+        ..Default::default()
+    };
+
+    let mut flop_coefs = CategoryCoefficients::default();
+    flop_coefs.monster = 1.15;
+    flop_coefs.air = 0.75;
+
+    let tree_config = TreeConfig {
+        starting_pot: 60,
+        effective_stack: 970,
+        depth_limit: Some(BoardState::Flop),
+        flop_category_correction: flop_coefs,
+        ..Default::default()
+    };
+
+    let action_tree = ActionTree::new(tree_config).unwrap();
+    let mut game = PostFlopGame::with_config(card_config, action_tree).unwrap();
+    game.allocate_memory(false);
+
+    assert!(!game.hand_categories[0].is_empty());
+    assert!(!game.hand_categories[1].is_empty());
+
+    finalize(&mut game);
+
+    game.cache_normalized_weights();
+    let ev_oop = compute_average(&game.expected_values(0), game.normalized_weights(0));
+    let ev_ip = compute_average(&game.expected_values(1), game.normalized_weights(1));
+
+    assert!(
+        (ev_oop - ev_ip).abs() < 15.0,
+        "OOP and IP EV should be similar: OOP={}, IP={}",
+        ev_oop,
+        ev_ip
+    );
 }

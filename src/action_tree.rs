@@ -1,5 +1,6 @@
 use crate::bet_size::*;
 use crate::card::*;
+use crate::hand::{DrawType, HandBucket, HandCategory};
 use crate::mutex_like::*;
 
 #[cfg(feature = "bincode")]
@@ -12,6 +13,7 @@ pub(crate) const PLAYER_MASK: u8 = 3;
 pub(crate) const PLAYER_CHANCE_FLAG: u8 = 4; // chance_player = PLAYER_CHANCE_FLAG | prev_player
 pub(crate) const PLAYER_TERMINAL_FLAG: u8 = 8;
 pub(crate) const PLAYER_FOLD_FLAG: u8 = 24;
+pub(crate) const PLAYER_DEPTH_LIMIT_FLAG: u8 = 32; // 深度限制终端节点
 
 /// Available actions of the postflop game.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
@@ -54,6 +56,156 @@ pub enum BoardState {
     River = 2,
 }
 
+/// 手牌分类实现率系数，用于深度限制求解的 EV 修正。
+///
+/// 采用叠加乘法模型：`final_coef = cat_coef × draw_bonus × combo_bonus`
+/// - 成牌轴（`monster` ~ `air`）：按当前成牌强度分类
+/// - 听牌轴（`draw_bonus` / `draw_fd_oesd_bonus`）：听牌类型加成
+/// - 组合加成（`combo_bonus`）：一对 + 听牌时生效
+///
+/// 区分翻牌截断和转牌截断，各有一套系数。
+/// 默认值全 1.0（不修正）。
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "bincode", derive(Decode, Encode))]
+pub struct CategoryCoefficients {
+    // 成牌轴
+    pub monster: f64,
+    pub overpair: f64,
+    pub top_pair_good_kicker: f64,
+    pub top_pair_bad_kicker: f64,
+    pub medium_pair: f64,
+    pub bottom_pair: f64,
+    pub two_overcards: f64,
+    pub air: f64,
+    // 听牌轴
+    /// 有任意听牌时的基础加成（默认 1.0）
+    pub draw_bonus: f64,
+    /// 花顺双抽（FD+SD）时的额外加成（默认 1.15）
+    pub draw_fd_oesd_bonus: f64,
+    // 组合加成
+    /// 成牌为一对且有听牌时的组合加成（默认 1.10）
+    pub combo_bonus: f64,
+}
+
+impl Default for CategoryCoefficients {
+    fn default() -> Self {
+        Self {
+            monster: 1.0,
+            overpair: 1.0,
+            top_pair_good_kicker: 1.0,
+            top_pair_bad_kicker: 1.0,
+            medium_pair: 1.0,
+            bottom_pair: 1.0,
+            two_overcards: 1.0,
+            air: 1.0,
+            draw_bonus: 1.0,
+            draw_fd_oesd_bonus: 1.0,
+            combo_bonus: 1.0,
+        }
+    }
+}
+
+impl CategoryCoefficients {
+    /// 计算给定手牌分类的最终实现率系数。
+    #[inline]
+    pub fn compute(&self, category: HandCategory, draw: DrawType) -> f64 {
+        let cat_coef = match category {
+            HandCategory::Monster => self.monster,
+            HandCategory::Overpair => self.overpair,
+            HandCategory::TopPairGoodKicker => self.top_pair_good_kicker,
+            HandCategory::TopPairBadKicker => self.top_pair_bad_kicker,
+            HandCategory::MediumPair => self.medium_pair,
+            HandCategory::BottomPair => self.bottom_pair,
+            HandCategory::TwoOvercards => self.two_overcards,
+            HandCategory::Air => self.air,
+        };
+
+        let draw_coef = match draw {
+            DrawType::None => 1.0,
+            DrawType::FDPlusSD => self.draw_bonus * self.draw_fd_oesd_bonus,
+            _ => self.draw_bonus,
+        };
+
+        // combo_bonus：成牌为一对（Overpair/TPTK/TPWK/MediumPair/BottomPair）且有听牌
+        let is_one_pair = matches!(
+            category,
+            HandCategory::Overpair
+                | HandCategory::TopPairGoodKicker
+                | HandCategory::TopPairBadKicker
+                | HandCategory::MediumPair
+                | HandCategory::BottomPair
+        );
+        let combo = if is_one_pair && draw != DrawType::None {
+            self.combo_bonus
+        } else {
+            1.0
+        };
+
+        cat_coef * draw_coef * combo
+    }
+}
+
+/// 求解后手牌桶修正系数（α 矩阵）。
+///
+/// 二维查找表：`[位置(OOP/IP)][桶(1-7)]` → α 值。
+/// 求解完成后对每手牌 EV 乘以对应的 `α_dynamic = 1 + (α - 1) × β(SPR)`。
+///
+/// 默认系数来自 `doc/修正方案1.md` 的回归数据。
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "bincode", derive(Decode, Encode))]
+pub struct BucketCorrection {
+    /// OOP 系数 [桶1..桶7]
+    pub oop: [f64; 7],
+    /// IP 系数 [桶1..桶7]
+    pub ip: [f64; 7],
+}
+
+impl Default for BucketCorrection {
+    /// 默认系数（来自 doc/修正方案1.md 的回归数据）。
+    fn default() -> Self {
+        Self {
+            oop: [1.17, 0.81, 0.84, 1.21, 1.21, 0.90, 0.51],
+            ip: [1.18, 0.88, 0.83, 1.23, 1.37, 1.08, 0.68],
+        }
+    }
+}
+
+impl BucketCorrection {
+    /// 查询指定位置和桶的动态 α 系数。
+    ///
+    /// `α_dynamic = 1.0 + (α_static - 1.0) × β(SPR)`
+    #[inline]
+    pub fn get(&self, position: usize, bucket: HandBucket, spr: f64) -> f64 {
+        let alpha_static = match position {
+            0 => self.oop[bucket as usize],
+            1 => self.ip[bucket as usize],
+            _ => panic!("Invalid position: {}", position),
+        };
+        let beta = spr_dampening(spr);
+        1.0 + (alpha_static - 1.0) * beta
+    }
+}
+
+/// SPR 动态缩放阻尼系数 β。
+///
+/// 短筹码时 DL 近似更精准，α 向 1.0 收拢：
+/// - SPR > 10: β = 1.2（深筹码放大修正）
+/// - 4 ≤ SPR ≤ 10: β = 1.0（标准）
+/// - 1.5 ≤ SPR < 4: β = 0.5（短筹码收拢）
+/// - SPR < 1.5: β = 0.0（全下节奏，α ≡ 1.0）
+#[inline]
+pub fn spr_dampening(spr: f64) -> f64 {
+    if spr > 10.0 {
+        1.2
+    } else if spr >= 4.0 {
+        1.0
+    } else if spr >= 1.5 {
+        0.5
+    } else {
+        0.0
+    }
+}
+
 /// A struct containing the game tree configuration.
 ///
 /// # Examples
@@ -77,6 +229,8 @@ pub enum BoardState {
 ///     add_allin_threshold: 1.5,
 ///     force_allin_threshold: 0.15,
 ///     merging_threshold: 0.1,
+///     depth_limit: None,
+///     ..Default::default()
 /// };
 /// ```
 #[derive(Debug, Clone, Default)]
@@ -131,6 +285,45 @@ pub struct TreeConfig {
     ///
     /// Personal recommendation: around `0.1`
     pub merging_threshold: f64,
+
+    /// Depth limit for solving. When set, the tree is truncated at the specified street boundary.
+    ///
+    /// - `None`: Full solve to showdown (default, backward compatible).
+    /// - `Some(BoardState::Flop)`: Solve flop only; turn chance nodes use equity evaluation.
+    /// - `Some(BoardState::Turn)`: Solve flop+turn; river chance nodes use equity evaluation.
+    ///
+    /// All-in scenarios always expand to showdown regardless of this setting.
+    pub depth_limit: Option<BoardState>,
+
+    /// Multiplicative position correction coefficient (δ) for depth-limited evaluation.
+    ///
+    /// Compensates for the in-position player's higher equity realization efficiency.
+    /// Applied as a multiplier on the base chip EV:
+    /// - IP:  `EV = EQ × half_pot × (1 + δ)`
+    /// - OOP: `EV = EQ × half_pot × (1 - δ)`
+    ///
+    /// The correction is symmetric between players (zero-sum preserving).
+    ///
+    /// Set `0.0` to disable (default). Suggested range: 0.03-0.08.
+    pub equity_pos_correction: f64,
+
+    /// 翻牌截断时的手牌分类实现率系数。
+    ///
+    /// 当 `depth_limit = Some(BoardState::Flop)` 时使用此系数。
+    /// 默认值全 1.0（不修正）。
+    pub flop_category_correction: CategoryCoefficients,
+
+    /// 转牌截断时的手牌分类实现率系数。
+    ///
+    /// 当 `depth_limit = Some(BoardState::Turn)` 时使用此系数。
+    /// 默认值全 1.0（不修正）。
+    pub turn_category_correction: CategoryCoefficients,
+
+    /// 求解后手牌桶修正系数（α 矩阵）。
+    ///
+    /// 当设置后，求解完成后对每手牌 EV 应用 `α_dynamic = 1 + (α - 1) × β(SPR)` 修正。
+    /// 默认 `None`（不修正）。
+    pub bucket_correction: Option<BucketCorrection>,
 }
 
 /// A struct representing an abstract game tree.
@@ -390,10 +583,10 @@ impl ActionTree {
             let mut node = &*self.root.lock() as *const ActionTreeNode;
             for action in &self.history {
                 while (*node).is_chance() {
-                    node = &*(*node).children[0].lock();
+                    node = &*(&(*node).children)[0].lock();
                 }
                 let index = (*node).actions.iter().position(|x| x == action).unwrap();
-                node = &*(*node).children[index].lock();
+                node = &*(&(*node).children)[index].lock();
             }
             &*node
         }
@@ -405,7 +598,7 @@ impl ActionTree {
         unsafe {
             let mut node = self.current_node() as *const ActionTreeNode;
             while (*node).is_chance() {
-                node = &*(*node).children[0].lock();
+                node = &*(&(*node).children)[0].lock();
             }
             &*node
         }
@@ -487,6 +680,12 @@ impl ActionTree {
         if node.is_terminal() {
             // do nothing
         } else if node.is_chance() {
+            // 深度限制截断：当前街 == depth_limit 且非全下时，不展开到下一街
+            if self.config.depth_limit == Some(node.board_state) && !info.allin_flag {
+                node.player = PLAYER_TERMINAL_FLAG | PLAYER_DEPTH_LIMIT_FLAG;
+                return;
+            }
+
             let next_state = match node.board_state {
                 BoardState::Flop => BoardState::Turn,
                 BoardState::Turn => BoardState::River,
@@ -1039,14 +1238,53 @@ impl BuildTreeInfo {
     }
 }
 
+/// Checks whether the action tree has all-in paths that bypass the depth limit.
+/// When `depth_limit = Some(street)`, non-allin paths are truncated at `street`,
+/// but all-in paths always expand to showdown (creating deeper street nodes).
+pub(crate) fn has_allin_beyond_depth_limit(
+    node: &ActionTreeNode,
+    depth_limit: BoardState,
+    allin_active: bool,
+) -> bool {
+    if node.is_terminal() {
+        return false;
+    }
+    if node.is_chance() {
+        // 如果到达 depth_limit 的 chance 节点且有 all-in，说明有超越深度限制的子树
+        if node.board_state == depth_limit && allin_active {
+            return true;
+        }
+        return has_allin_beyond_depth_limit(&node.children[0].lock(), depth_limit, allin_active);
+    }
+    for (action, child) in node.actions.iter().zip(node.children.iter()) {
+        let is_allin = matches!(action, Action::AllIn(_));
+        if has_allin_beyond_depth_limit(&child.lock(), depth_limit, allin_active || is_allin) {
+            return true;
+        }
+    }
+    false
+}
+
 /// Returns the number of action nodes of [flop, turn, river].
-pub(crate) fn count_num_action_nodes(node: &ActionTreeNode) -> [u64; 3] {
+pub(crate) fn count_num_action_nodes(node: &ActionTreeNode, initial_state: BoardState) -> [u64; 3] {
     let mut ret = [0, 0, 0];
     count_num_action_nodes_recursive(node, 0, &mut ret);
+    // 根据 initial_state 进行重映射：
+    // - River 起始：street 0 = River
+    // - Turn 起始：street 0 = Turn, street 1 = River
+    // - Flop 起始：street 0 = Flop, street 1 = Turn, street 2 = River
     if ret[1] == 0 {
-        ret = [0, 0, ret[0]];
+        match initial_state {
+            BoardState::River => ret = [0, 0, ret[0]],
+            BoardState::Turn => ret = [0, ret[0], 0],
+            BoardState::Flop => ret = [ret[0], 0, 0],
+        }
     } else if ret[2] == 0 {
-        ret = [0, ret[0], ret[1]];
+        match initial_state {
+            BoardState::River => unreachable!(),
+            BoardState::Turn => ret = [0, ret[0], ret[1]],
+            BoardState::Flop => ret = [ret[0], ret[1], 0],
+        }
     }
     ret
 }

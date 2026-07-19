@@ -82,6 +82,10 @@ pub use bet_size::*;
 pub use bunching::*;
 pub use card::*;
 pub use game::*;
+pub use hand::{
+    classify_hand, detect_board_texture, BoardCorrectionContext, BoardTexture, DrawType,
+    HandBucket, HandCategory, HandClassification,
+};
 pub use interface::*;
 pub use mutex_like::*;
 pub use range::*;
