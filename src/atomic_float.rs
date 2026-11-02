@@ -38,7 +38,7 @@ impl AtomicF64 {
     }
 
     pub(crate) fn add(&self, v: f64) {
-        let _ = self.0.fetch_update(Relaxed, Relaxed, |u| {
+        let _ = self.0.try_update(Relaxed, Relaxed, |u| {
             Some((f64::from_bits(u) + v).to_bits())
         });
     }

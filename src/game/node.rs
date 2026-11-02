@@ -35,7 +35,7 @@ impl GameNode for PostFlopNode {
     }
 
     #[inline]
-    fn play(&self, action: usize) -> MutexGuardLike<Self> {
+    fn play(&self, action: usize) -> MutexGuardLike<'_, Self> {
         self.children()[action].lock()
     }
 

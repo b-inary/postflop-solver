@@ -41,7 +41,7 @@ impl Game for KuhnGame {
     type Node = KuhnNode;
 
     #[inline]
-    fn root(&self) -> MutexGuardLike<Self::Node> {
+    fn root(&self) -> MutexGuardLike<'_, Self::Node> {
         self.root.lock()
     }
 
@@ -206,7 +206,7 @@ impl GameNode for KuhnNode {
     }
 
     #[inline]
-    fn play(&self, action: usize) -> MutexGuardLike<Self> {
+    fn play(&self, action: usize) -> MutexGuardLike<'_, Self> {
         self.children[action].1.lock()
     }
 

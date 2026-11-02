@@ -3,6 +3,7 @@ name = "postflop-solver"
 version = "0.1.0"
 authors = ["Wataru Inariba"]
 edition = "2021"
+rust-version = "1.95"
 description = "An open-source postflop solver for Texas hold'em poker"
 documentation = "https://b-inary.github.io/postflop_solver/postflop_solver/"
 repository = "https://github.com/b-inary/postflop-solver"
@@ -10,6 +11,7 @@ license = "AGPL-3.0-or-later"
 
 [dependencies]
 bincode = { version = "2.0.0-rc.3", optional = true }
+bincode_derive = "=2.0.0-rc.3"
 once_cell = "1.18.0"
 rayon = { version = "1.8.0", optional = true }
 regex = "1.9.6"

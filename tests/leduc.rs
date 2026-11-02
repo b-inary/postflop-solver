@@ -53,7 +53,7 @@ impl Game for LeducGame {
     type Node = LeducNode;
 
     #[inline]
-    fn root(&self) -> MutexGuardLike<Self::Node> {
+    fn root(&self) -> MutexGuardLike<'_, Self::Node> {
         self.root.lock()
     }
 
@@ -335,7 +335,7 @@ impl GameNode for LeducNode {
     }
 
     #[inline]
-    fn play(&self, action: usize) -> MutexGuardLike<Self> {
+    fn play(&self, action: usize) -> MutexGuardLike<'_, Self> {
         self.children[action].1.lock()
     }
 

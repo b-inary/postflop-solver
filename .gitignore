@@ -1,2 +1,4 @@
 /target
 Cargo.lock
+/solves
+/tools/solve-runner/target
