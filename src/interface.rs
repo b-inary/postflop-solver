@@ -169,61 +169,61 @@ pub trait GameNode: Send + Sync {
 
     /// Returns the compressed strategy.
     #[doc(hidden)]
-    fn strategy_compressed(&self) -> &[u16] {
+    fn strategy_compressed(&self) -> &[u8] {
         unreachable!()
     }
 
     /// Returns the mutable reference to the compressed strategy.
     #[doc(hidden)]
-    fn strategy_compressed_mut(&mut self) -> &mut [u16] {
+    fn strategy_compressed_mut(&mut self) -> &mut [u8] {
         unreachable!()
     }
 
     /// Returns the compressed cumulative regrets.
     #[doc(hidden)]
-    fn regrets_compressed(&self) -> &[i16] {
+    fn regrets_compressed(&self) -> &[i8] {
         unreachable!()
     }
 
     /// Returns the mutable reference to the compressed cumulative regrets.
     #[doc(hidden)]
-    fn regrets_compressed_mut(&mut self) -> &mut [i16] {
+    fn regrets_compressed_mut(&mut self) -> &mut [i8] {
         unreachable!()
     }
 
     /// Returns the compressed counterfactual values.
     #[doc(hidden)]
-    fn cfvalues_compressed(&self) -> &[i16] {
+    fn cfvalues_compressed(&self) -> &[i8] {
         unreachable!()
     }
 
     /// Returns the mutable reference to the compressed counterfactual values.
     #[doc(hidden)]
-    fn cfvalues_compressed_mut(&mut self) -> &mut [i16] {
+    fn cfvalues_compressed_mut(&mut self) -> &mut [i8] {
         unreachable!()
     }
 
     /// Returns IP's compressed counterfactual values.
     #[doc(hidden)]
-    fn cfvalues_ip_compressed(&self) -> &[i16] {
+    fn cfvalues_ip_compressed(&self) -> &[i8] {
         unreachable!()
     }
 
     /// Returns the mutable reference to IP's compressed counterfactual values.
     #[doc(hidden)]
-    fn cfvalues_ip_compressed_mut(&mut self) -> &mut [i16] {
+    fn cfvalues_ip_compressed_mut(&mut self) -> &mut [i8] {
         unreachable!()
     }
 
     /// Returns the compressed buffer for counterfactual values.
     #[doc(hidden)]
-    fn cfvalues_chance_compressed(&self) -> &[i16] {
+    fn cfvalues_chance_compressed(&self) -> &[i8] {
         unreachable!()
     }
 
     /// Returns the mutable reference to the compressed buffer for counterfactual values.
     #[doc(hidden)]
-    fn cfvalues_chance_compressed_mut(&mut self) -> &mut [i16] {
+    fn cfvalues_chance_compressed_mut(&mut self) -> &mut [i8] {
         unreachable!()
     }
 

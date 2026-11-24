@@ -370,38 +370,38 @@ impl GameNode for LeducNode {
     }
 
     #[inline]
-    fn strategy_compressed(&self) -> &[u16] {
-        let ptr = self.strategy.as_ptr() as *const u16;
+    fn strategy_compressed(&self) -> &[u8] {
+        let ptr = self.strategy.as_ptr() as *const u8;
         unsafe { slice::from_raw_parts(ptr, self.strategy.len()) }
     }
 
     #[inline]
-    fn strategy_compressed_mut(&mut self) -> &mut [u16] {
-        let ptr = self.strategy.as_mut_ptr() as *mut u16;
+    fn strategy_compressed_mut(&mut self) -> &mut [u8] {
+        let ptr = self.strategy.as_mut_ptr() as *mut u8;
         unsafe { slice::from_raw_parts_mut(ptr, self.strategy.len()) }
     }
 
     #[inline]
-    fn regrets_compressed(&self) -> &[i16] {
-        let ptr = self.storage.as_ptr() as *const i16;
+    fn regrets_compressed(&self) -> &[i8] {
+        let ptr = self.storage.as_ptr() as *const i8;
         unsafe { slice::from_raw_parts(ptr, self.storage.len()) }
     }
 
     #[inline]
-    fn regrets_compressed_mut(&mut self) -> &mut [i16] {
-        let ptr = self.storage.as_mut_ptr() as *mut i16;
+    fn regrets_compressed_mut(&mut self) -> &mut [i8] {
+        let ptr = self.storage.as_mut_ptr() as *mut i8;
         unsafe { slice::from_raw_parts_mut(ptr, self.storage.len()) }
     }
 
     #[inline]
-    fn cfvalues_compressed(&self) -> &[i16] {
-        let ptr = self.storage.as_ptr() as *const i16;
+    fn cfvalues_compressed(&self) -> &[i8] {
+        let ptr = self.storage.as_ptr() as *const i8;
         unsafe { slice::from_raw_parts(ptr, self.storage.len()) }
     }
 
     #[inline]
-    fn cfvalues_compressed_mut(&mut self) -> &mut [i16] {
-        let ptr = self.storage.as_mut_ptr() as *mut i16;
+    fn cfvalues_compressed_mut(&mut self) -> &mut [i8] {
+        let ptr = self.storage.as_mut_ptr() as *mut i8;
         unsafe { slice::from_raw_parts_mut(ptr, self.storage.len()) }
     }
 
@@ -479,7 +479,7 @@ fn leduc_compressed() {
         strategy[j] = raw_strategy[j] as f32 / sum;
     }
 
-    let ev_decoder = root.cfvalue_scale() / i16::MAX as f32;
+    let ev_decoder = root.cfvalue_scale() / i8::MAX as f32;
     let root_ev = root
         .cfvalues_compressed()
         .iter()

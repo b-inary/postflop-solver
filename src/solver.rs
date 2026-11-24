@@ -255,7 +255,7 @@ fn solve_recursive<T: Game>(
         if game.is_compression_enabled() {
             // update the cumulative strategy
             let scale = node.strategy_scale();
-            let decoder = params.gamma_t * scale / u16::MAX as f32;
+            let decoder = params.gamma_t * scale / u8::MAX as f32;
             let cum_strategy = node.strategy_compressed_mut();
 
             strategy.iter_mut().zip(&*cum_strategy).for_each(|(x, y)| {
@@ -275,8 +275,8 @@ fn solve_recursive<T: Game>(
 
             // update the cumulative regret
             let scale = node.regret_scale();
-            let alpha_decoder = params.alpha_t * scale / i16::MAX as f32;
-            let beta_decoder = params.beta_t * scale / i16::MAX as f32;
+            let alpha_decoder = params.alpha_t * scale / i8::MAX as f32;
+            let beta_decoder = params.beta_t * scale / i8::MAX as f32;
             let cum_regret = node.regrets_compressed_mut();
 
             cfv_actions.iter_mut().zip(&*cum_regret).for_each(|(x, y)| {
@@ -406,7 +406,7 @@ fn regret_matching(regret: &[f32], num_actions: usize) -> Vec<f32> {
 /// Computes the strategy by regret-matching algorithm.
 #[cfg(feature = "custom-alloc")]
 #[inline]
-fn regret_matching_compressed(regret: &[i16], num_actions: usize) -> Vec<f32, StackAlloc> {
+fn regret_matching_compressed(regret: &[i8], num_actions: usize) -> Vec<f32, StackAlloc> {
     let mut strategy = Vec::with_capacity_in(regret.len(), StackAlloc);
     strategy.extend(regret.iter().map(|&r| r.max(0) as f32));
 
@@ -426,7 +426,7 @@ fn regret_matching_compressed(regret: &[i16], num_actions: usize) -> Vec<f32, St
 /// Computes the strategy by regret-matching algorithm.
 #[cfg(not(feature = "custom-alloc"))]
 #[inline]
-fn regret_matching_compressed(regret: &[i16], num_actions: usize) -> Vec<f32> {
+fn regret_matching_compressed(regret: &[i8], num_actions: usize) -> Vec<f32> {
     let mut strategy = Vec::with_capacity(regret.len());
     strategy.extend(regret.iter().map(|&r| r.max(0) as f32));
 

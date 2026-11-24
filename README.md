@@ -57,7 +57,7 @@ $ cargo run --release --example basic
   For example, if the flop is monotone, the three non-dealt suits are isomorphic, allowing us to skip the calculation for two of the three suits.
 - **Precision**: 32-bit floating-point numbers are used in most places.
   When calculating summations, temporary values use 64-bit floating-point numbers.
-  There is also a compression option where each game node stores the values by 16-bit integers with a single 32-bit floating-point scaling factor.
+  There is also a compression option where each game node stores the values by 8-bit integers with a single 32-bit floating-point scaling factor.
 - **Bunching effect**: At the time of writing, this is the only implementation that can handle the bunching effect.
   It supports up to four folded players (6-max game).
   The implementation correctly counts the number of card combinations and does not rely on heuristics such as manipulating the probability distribution of the deck.

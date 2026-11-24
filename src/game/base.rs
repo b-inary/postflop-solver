@@ -263,7 +263,7 @@ impl PostFlopGame {
 
         let num_elements = 2 * self.num_storage + self.num_storage_ip + self.num_storage_chance;
         let uncompressed = 4 * num_elements + self.misc_memory_usage;
-        let compressed = 2 * num_elements + self.misc_memory_usage;
+        let compressed = num_elements + self.misc_memory_usage;
 
         (uncompressed, compressed)
     }
@@ -326,7 +326,7 @@ impl PostFlopGame {
             return;
         }
 
-        let num_bytes = if enable_compression { 2 } else { 4 };
+        let num_bytes = if enable_compression { 1 } else { 4 };
         if num_bytes * self.num_storage > isize::MAX as u64
             || num_bytes * self.num_storage_chance > isize::MAX as u64
         {
@@ -1418,7 +1418,7 @@ impl PostFlopGame {
 
     /// Allocates memory recursively.
     fn allocate_memory_nodes(&mut self) {
-        let num_bytes = if self.is_compression_enabled { 2 } else { 4 };
+        let num_bytes = if self.is_compression_enabled { 1 } else { 4 };
         let mut action_counter = 0;
         let mut ip_counter = 0;
         let mut chance_counter = 0;

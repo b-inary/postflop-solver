@@ -3,10 +3,10 @@ use crate::interface::*;
 use crate::sliceop::*;
 use crate::utility::*;
 
-/// Decodes the encoded `i16` slice to the `f32` slice.
+/// Decodes the encoded `i8` slice to the `f32` slice.
 #[inline]
-fn decode_signed_slice(slice: &[i16], scale: f32) -> Vec<f32> {
-    let decoder = scale / i16::MAX as f32;
+fn decode_signed_slice(slice: &[i8], scale: f32) -> Vec<f32> {
+    let decoder = scale / i8::MAX as f32;
     slice.iter().map(|&x| x as f32 * decoder).collect()
 }
 

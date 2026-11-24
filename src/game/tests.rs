@@ -231,8 +231,8 @@ fn one_raise_all_range_compressed() {
     let ev_ip = compute_average(&game.expected_values(1), weights_ip);
     assert!((equity_oop - 0.5).abs() < 1e-4);
     assert!((equity_ip - 0.5).abs() < 1e-4);
-    assert!((ev_oop - 37.5).abs() < 1e-2);
-    assert!((ev_ip - 22.5).abs() < 1e-2);
+    assert!((ev_oop - 37.5).abs() < 5e-2);
+    assert!((ev_ip - 22.5).abs() < 5e-2);
 
     game.play(0);
     game.cache_normalized_weights();
@@ -244,8 +244,8 @@ fn one_raise_all_range_compressed() {
     let ev_ip = compute_average(&game.expected_values(1), weights_ip);
     assert!((equity_oop - 0.5).abs() < 1e-4);
     assert!((equity_ip - 0.5).abs() < 1e-4);
-    assert!((ev_oop - 37.5).abs() < 1e-2);
-    assert!((ev_ip - 22.5).abs() < 1e-2);
+    assert!((ev_oop - 37.5).abs() < 5e-2);
+    assert!((ev_ip - 22.5).abs() < 5e-2);
 
     game.play(0);
     assert!(game.is_chance_node());
@@ -258,8 +258,8 @@ fn one_raise_all_range_compressed() {
     let ev_ip = compute_average(&game.expected_values(1), weights_ip);
     assert!((equity_oop - 0.5).abs() < 1e-4);
     assert!((equity_ip - 0.5).abs() < 1e-4);
-    assert!((ev_oop - 37.5).abs() < 1e-2);
-    assert!((ev_ip - 22.5).abs() < 1e-2);
+    assert!((ev_oop - 37.5).abs() < 5e-2);
+    assert!((ev_ip - 22.5).abs() < 5e-2);
 
     game.play(usize::MAX);
     game.cache_normalized_weights();
@@ -271,8 +271,8 @@ fn one_raise_all_range_compressed() {
     let ev_ip = compute_average(&game.expected_values(1), weights_ip);
     assert!((equity_oop - 0.5).abs() < 1e-4);
     assert!((equity_ip - 0.5).abs() < 1e-4);
-    assert!((ev_oop - 37.5).abs() < 1e-2);
-    assert!((ev_ip - 22.5).abs() < 1e-2);
+    assert!((ev_oop - 37.5).abs() < 5e-2);
+    assert!((ev_ip - 22.5).abs() < 5e-2);
 
     game.play(0);
     game.play(0);
@@ -288,8 +288,8 @@ fn one_raise_all_range_compressed() {
     let ev_ip = compute_average(&game.expected_values(1), weights_ip);
     assert!((equity_oop - 0.5).abs() < 1e-4);
     assert!((equity_ip - 0.5).abs() < 1e-4);
-    assert!((ev_oop - 75.0).abs() < 1e-2);
-    assert!((ev_ip - 15.0).abs() < 1e-2);
+    assert!((ev_oop - 75.0).abs() < 5e-2);
+    assert!((ev_ip - 15.0).abs() < 5e-2);
 
     game.play(1);
     assert!(game.is_terminal_node());
@@ -302,8 +302,8 @@ fn one_raise_all_range_compressed() {
     let ev_ip = compute_average(&game.expected_values(1), weights_ip);
     assert!((equity_oop - 0.5).abs() < 1e-4);
     assert!((equity_ip - 0.5).abs() < 1e-4);
-    assert!((ev_oop - 60.0).abs() < 1e-2);
-    assert!((ev_ip - 60.0).abs() < 1e-2);
+    assert!((ev_oop - 60.0).abs() < 5e-2);
+    assert!((ev_ip - 60.0).abs() < 5e-2);
 }
 
 #[test]

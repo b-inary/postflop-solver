@@ -202,27 +202,27 @@ fn slice_nonnegative_max(slice: &[f32]) -> f32 {
     }
 }
 
-/// Encodes the `f32` slice to the `i16` slice, and returns the scale.
+/// Encodes the `f32` slice to the `i8` slice, and returns the scale.
 #[inline]
-pub(crate) fn encode_signed_slice(dst: &mut [i16], slice: &[f32]) -> f32 {
+pub(crate) fn encode_signed_slice(dst: &mut [i8], slice: &[f32]) -> f32 {
     let scale = slice_absolute_max(slice);
     let scale_nonzero = if scale == 0.0 { 1.0 } else { scale };
-    let encoder = i16::MAX as f32 / scale_nonzero;
+    let encoder = i8::MAX as f32 / scale_nonzero;
     dst.iter_mut()
         .zip(slice)
-        .for_each(|(d, s)| *d = unsafe { (s * encoder).round().to_int_unchecked::<i32>() as i16 });
+        .for_each(|(d, s)| *d = unsafe { (s * encoder).round().to_int_unchecked::<i32>() as i8 });
     scale
 }
 
-/// Encodes the `f32` slice to the `u16` slice, and returns the scale.
+/// Encodes the `f32` slice to the `u8` slice, and returns the scale.
 #[inline]
-pub(crate) fn encode_unsigned_slice(dst: &mut [u16], slice: &[f32]) -> f32 {
+pub(crate) fn encode_unsigned_slice(dst: &mut [u8], slice: &[f32]) -> f32 {
     let scale = slice_nonnegative_max(slice);
     let scale_nonzero = if scale == 0.0 { 1.0 } else { scale };
-    let encoder = u16::MAX as f32 / scale_nonzero;
+    let encoder = u8::MAX as f32 / scale_nonzero;
     // note: 0.49999997 + 0.49999997 = 0.99999994 < 1.0 | 0.5 + 0.49999997 = 1.0
     dst.iter_mut().zip(slice).for_each(|(d, s)| {
-        *d = unsafe { (s * encoder + 0.49999997).to_int_unchecked::<i32>() as u16 }
+        *d = unsafe { (s * encoder + 0.49999997).to_int_unchecked::<i32>() as u8 }
     });
     scale
 }
@@ -770,7 +770,7 @@ pub(crate) fn normalized_strategy(strategy: &[f32], num_actions: usize) -> Vec<f
 #[cfg(feature = "custom-alloc")]
 #[inline]
 pub(crate) fn normalized_strategy_compressed_custom_alloc(
-    strategy: &[u16],
+    strategy: &[u8],
     num_actions: usize,
 ) -> Vec<f32, StackAlloc> {
     let mut normalized = Vec::with_capacity_in(strategy.len(), StackAlloc);
@@ -795,7 +795,7 @@ pub(crate) fn normalized_strategy_compressed_custom_alloc(
 }
 
 #[inline]
-pub(crate) fn normalized_strategy_compressed(strategy: &[u16], num_actions: usize) -> Vec<f32> {
+pub(crate) fn normalized_strategy_compressed(strategy: &[u8], num_actions: usize) -> Vec<f32> {
     let mut normalized = Vec::with_capacity(strategy.len());
     let uninit = normalized.spare_capacity_mut();
 

@@ -64,7 +64,7 @@ impl PostFlopGame {
             return [0; 4];
         }
 
-        let num_bytes = if self.is_compression_enabled { 2 } else { 4 };
+        let num_bytes = if self.is_compression_enabled { 1 } else { 4 };
         if self.target_storage_mode == BoardState::River {
             // omit storing the counterfactual values
             return [num_bytes * self.num_storage as usize, 0, 0, 0];
@@ -100,7 +100,7 @@ impl PostFlopGame {
     }
 }
 
-static VERSION_STR: &str = "2023-03-19";
+static VERSION_STR: &str = "2023-03-19-8bit";
 
 thread_local! {
     static PTR_BASE: Cell<[*const u8; 2]> = Cell::new([ptr::null(); 2]);
@@ -209,7 +209,7 @@ impl Decode<()> for PostFlopGame {
 
         game.target_storage_mode = game.storage_mode;
         if game.storage_mode == BoardState::River && game.state >= State::MemoryAllocated {
-            let num_bytes = if game.is_compression_enabled { 2 } else { 4 };
+            let num_bytes = if game.is_compression_enabled { 1 } else { 4 };
             game.storage2 = vec![0; (num_bytes * game.num_storage) as usize];
             game.storage_ip = vec![0; (num_bytes * game.num_storage_ip) as usize];
             game.storage_chance = vec![0; (num_bytes * game.num_storage_chance) as usize];

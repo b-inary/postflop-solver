@@ -54,14 +54,14 @@ fn main() {
         mem_usage as f64 / (1024.0 * 1024.0 * 1024.0)
     );
     println!(
-        "Memory usage with compression (16-bit integer): {:.2}GB",
+        "Memory usage with compression (8-bit integer): {:.2}GB",
         mem_usage_compressed as f64 / (1024.0 * 1024.0 * 1024.0)
     );
 
     // allocate memory without compression (use 32-bit float)
     game.allocate_memory(false);
 
-    // allocate memory with compression (use 16-bit integer)
+    // allocate memory with compression (use 8-bit integer)
     // game.allocate_memory(true);
 
     // solve the game

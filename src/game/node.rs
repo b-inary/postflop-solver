@@ -97,55 +97,53 @@ impl GameNode for PostFlopNode {
     }
 
     #[inline]
-    fn strategy_compressed(&self) -> &[u16] {
-        unsafe { slice::from_raw_parts(self.storage1 as *const u16, self.num_elements as usize) }
+    fn strategy_compressed(&self) -> &[u8] {
+        unsafe { slice::from_raw_parts(self.storage1 as *const u8, self.num_elements as usize) }
     }
 
     #[inline]
-    fn strategy_compressed_mut(&mut self) -> &mut [u16] {
-        unsafe { slice::from_raw_parts_mut(self.storage1 as *mut u16, self.num_elements as usize) }
+    fn strategy_compressed_mut(&mut self) -> &mut [u8] {
+        unsafe { slice::from_raw_parts_mut(self.storage1 as *mut u8, self.num_elements as usize) }
     }
 
     #[inline]
-    fn regrets_compressed(&self) -> &[i16] {
-        unsafe { slice::from_raw_parts(self.storage2 as *const i16, self.num_elements as usize) }
+    fn regrets_compressed(&self) -> &[i8] {
+        unsafe { slice::from_raw_parts(self.storage2 as *const i8, self.num_elements as usize) }
     }
 
     #[inline]
-    fn regrets_compressed_mut(&mut self) -> &mut [i16] {
-        unsafe { slice::from_raw_parts_mut(self.storage2 as *mut i16, self.num_elements as usize) }
+    fn regrets_compressed_mut(&mut self) -> &mut [i8] {
+        unsafe { slice::from_raw_parts_mut(self.storage2 as *mut i8, self.num_elements as usize) }
     }
 
     #[inline]
-    fn cfvalues_compressed(&self) -> &[i16] {
-        unsafe { slice::from_raw_parts(self.storage2 as *const i16, self.num_elements as usize) }
+    fn cfvalues_compressed(&self) -> &[i8] {
+        unsafe { slice::from_raw_parts(self.storage2 as *const i8, self.num_elements as usize) }
     }
 
     #[inline]
-    fn cfvalues_compressed_mut(&mut self) -> &mut [i16] {
-        unsafe { slice::from_raw_parts_mut(self.storage2 as *mut i16, self.num_elements as usize) }
+    fn cfvalues_compressed_mut(&mut self) -> &mut [i8] {
+        unsafe { slice::from_raw_parts_mut(self.storage2 as *mut i8, self.num_elements as usize) }
     }
 
     #[inline]
-    fn cfvalues_ip_compressed(&self) -> &[i16] {
-        unsafe { slice::from_raw_parts(self.storage3 as *const i16, self.num_elements_ip as usize) }
+    fn cfvalues_ip_compressed(&self) -> &[i8] {
+        unsafe { slice::from_raw_parts(self.storage3 as *const i8, self.num_elements_ip as usize) }
     }
 
     #[inline]
-    fn cfvalues_ip_compressed_mut(&mut self) -> &mut [i16] {
-        unsafe {
-            slice::from_raw_parts_mut(self.storage3 as *mut i16, self.num_elements_ip as usize)
-        }
+    fn cfvalues_ip_compressed_mut(&mut self) -> &mut [i8] {
+        unsafe { slice::from_raw_parts_mut(self.storage3 as *mut i8, self.num_elements_ip as usize) }
     }
 
     #[inline]
-    fn cfvalues_chance_compressed(&self) -> &[i16] {
-        unsafe { slice::from_raw_parts(self.storage1 as *const i16, self.num_elements as usize) }
+    fn cfvalues_chance_compressed(&self) -> &[i8] {
+        unsafe { slice::from_raw_parts(self.storage1 as *const i8, self.num_elements as usize) }
     }
 
     #[inline]
-    fn cfvalues_chance_compressed_mut(&mut self) -> &mut [i16] {
-        unsafe { slice::from_raw_parts_mut(self.storage1 as *mut i16, self.num_elements as usize) }
+    fn cfvalues_chance_compressed_mut(&mut self) -> &mut [i8] {
+        unsafe { slice::from_raw_parts_mut(self.storage1 as *mut i8, self.num_elements as usize) }
     }
 
     #[inline]
