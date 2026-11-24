@@ -67,7 +67,7 @@ $ cargo run --release --example basic
 
 ## Crate features
 
-- `bincode`: Uses [bincode] crate (2.0.0-rc.3) to serialize and deserialize the `PostFlopGame` struct.
+- `bincode`: Uses [bincode] crate (2.0.1) to serialize and deserialize the `PostFlopGame` struct.
   This feature is required to save and load the game tree.
   Enabled by default.
 - `custom-alloc`: Uses custom memory allocator in solving process (only available in nightly Rust).
